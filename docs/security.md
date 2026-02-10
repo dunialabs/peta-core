@@ -6,7 +6,7 @@ Peta Core is designed for environments where secret material and control must st
 
 ### Key derivation (PBKDF2)
 
-- Encryption keys are derived from an operator-managed secret using PBKDF2 (HMAC-SHA-256) with a per-record random salt.
+- Encryption keys are derived from a secret value (for example, a Peta access token) using PBKDF2 (HMAC-SHA-256) with a per-record random salt.
 - The salt is at least 128 bits of randomness and is stored alongside the ciphertext.
 - A high iteration count (on the order of 100k+ iterations) is used to make brute-force attempts significantly more expensive.
 - The result is a 256-bit key suitable for AES-256-GCM.
@@ -26,7 +26,23 @@ For each encrypted secret, the database only stores:
 - `ciphertext`
 - `authTag`
 
-The operator secret and the derived AES keys never leave process memory and are not written to disk. In production, the operator secret should be provisioned from your existing secret manager or KMS (see `../.env.example` for configuration details).
+The input secret and the derived AES keys never leave process memory and are not written to disk. In production, treat any secrets that can decrypt stored configuration blobs as high-value keys: provision them securely, avoid source control, and rotate them according to your organization’s security policies.
+
+---
+
+## OAuth & Token Brokerage
+
+Peta Core handles two distinct OAuth-related concerns:
+
+- **Gateway OAuth 2.0 access tokens (JWT).** Used by MCP clients to authenticate to the `/mcp` gateway. These are issued by Peta Core and can be revoked server-side.
+- **Downstream connector OAuth credentials (third-party providers).** Used by downstream MCP servers to call external APIs. Peta Core stores the full OAuth configuration encrypted at rest (including refresh tokens where applicable), refreshes access tokens server-side, and injects only access tokens into the downstream runtime.
+
+The Admin API (`/admin`) and Socket.IO (`/socket.io`) currently authenticate using Peta access tokens (opaque bearer tokens) validated against the user database.
+
+**Security properties**:
+
+- Refresh tokens and client secrets for downstream providers are never forwarded to upstream MCP clients.
+- Long-lived credentials remain inside Peta Core; downstream runtimes receive only short-lived access tokens.
 
 ---
 

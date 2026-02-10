@@ -11,7 +11,7 @@ Peta Console uses a single `/admin` endpoint to perform administrative operation
 ```bash
 curl -X POST http://localhost:3002/admin \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN" \
   -d '{
     "action": 1010,
     "data": {
@@ -58,20 +58,23 @@ See `api/SOCKET_USAGE.md` for the full event list and payload schemas.
 
 ### OAuth 2.0
 
-Peta Core exposes an OAuth 2.0 service for obtaining access tokens that can be used with MCP clients and the Admin API.
+Peta Core exposes an OAuth 2.0 service for obtaining access tokens that can be used with MCP clients.
 
-**Client Credentials Grant (server-to-server)**
+These OAuth endpoints issue access tokens for authenticating to Peta Core. They are separate from downstream connector OAuth credentials (for example Google/Notion/Figma) which are stored encrypted and refreshed internally by Peta Core.
+
+**Dynamic Client Registration (optional)**
 
 ```bash
-curl -X POST http://localhost:3002/oauth/token \
+curl -X POST http://localhost:3002/register \
   -H "Content-Type: application/json" \
   -d '{
-    "grant_type": "client_credentials",
-    "client_id": "YOUR_CLIENT_ID",
-    "client_secret": "YOUR_CLIENT_SECRET",
-    "scope": "default"
+    "client_name": "my-client",
+    "redirect_uris": ["http://localhost:3000/callback"],
+    "token_endpoint_auth_method": "none"
   }'
 ```
+
+If you provide `grant_types` in client metadata, Peta Core accepts `authorization_code`, `refresh_token`, and `client_credentials` (for compatibility). The `/token` endpoint currently supports `authorization_code` and `refresh_token` grants only.
 
 **Authorization Code + PKCE (user-interactive)**
 
@@ -81,10 +84,10 @@ CODE_VERIFIER=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-43)
 CODE_CHALLENGE=$(echo -n "$CODE_VERIFIER" | openssl dgst -sha256 -binary | base64 | tr -d "=+/" | cut -c1-43)
 
 # 2. Open the authorization URL in a browser
-echo "http://localhost:3002/oauth/authorize?client_id=YOUR_CLIENT_ID&redirect_uri=YOUR_CALLBACK&response_type=code&code_challenge=$CODE_CHALLENGE&code_challenge_method=S256"
+echo "http://localhost:3002/authorize?client_id=YOUR_CLIENT_ID&redirect_uri=YOUR_CALLBACK&response_type=code&code_challenge=$CODE_CHALLENGE&code_challenge_method=S256"
 
 # 3. After the user authorizes, exchange the code for a token
-curl -X POST http://localhost:3002/oauth/token \
+curl -X POST http://localhost:3002/token \
   -H "Content-Type: application/json" \
   -d '{
     "grant_type": "authorization_code",
@@ -96,6 +99,14 @@ curl -X POST http://localhost:3002/oauth/token \
 
 See `api/API.md` for full OAuth 2.0 details.
 
+**Token Introspection**
+
+```bash
+curl -X POST http://localhost:3002/introspect \
+  -H "Content-Type: application/json" \
+  -d '{ "token": "YOUR_OAUTH_ACCESS_TOKEN", "token_type_hint": "access_token" }'
+```
+
 ---
 
 ## API & Documentation
@@ -106,17 +117,19 @@ Peta Core exposes different APIs for different roles:
 
 - **MCP protocol interface** (`/mcp`)
   Standard MCP endpoints for MCP-compatible clients such as Claude Desktop, ChatGPT MCP, or Cursor.
-  Authentication: bearer token (OAuth access token or Peta service token).
+  Authentication: bearer token (OAuth access token (JWT) or Peta access token (opaque)).
   Transport: HTTP/SSE depending on your MCP host.
 
 - **Admin API** (`/admin`)
   Used by Peta Console and automation scripts to manage users, servers, permissions, and quotas.
+  Authentication: bearer token (Peta access token (opaque)).
 
 - **Socket.IO channel** (`/socket.io`)
   Used by Peta Desk for real-time notifications, capability configuration, and approval workflows.
+  Authentication: bearer token (Peta access token (opaque)).
 
-- **OAuth 2.0 endpoints** (`/oauth/*`)
-  Used by clients to obtain access tokens (client credentials, authorization code with PKCE, and related flows).
+- **OAuth 2.0 endpoints** (`/.well-known/*`, `/register`, `/authorize`, `/token`, `/introspect`, `/revoke`)
+  Used by clients to obtain access tokens (dynamic client registration, authorization code with PKCE, refresh tokens) and check token validity.
 
 ### Reference Docs
 
@@ -229,4 +242,3 @@ Additional test contributions are especially useful for:
 - Socket.IO connection and notification scenarios.
 
 See `../CONTRIBUTING.md` for details.
-

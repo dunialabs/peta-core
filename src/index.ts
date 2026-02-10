@@ -390,6 +390,7 @@ export async function startApplication() {
             register: '/register',
             authorize: '/authorize',
             token: '/token',
+            introspect: '/introspect',
             revoke: '/revoke',
             admin: '/oauth/admin/clients'
           }

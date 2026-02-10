@@ -9,6 +9,7 @@ import { OAuthService } from '../services/OAuthService.js';
 import { OAuthClientService } from '../services/OAuthClientService.js';
 import { OAUTH_CONFIG } from '../types/oauth.types.js';
 import { TokenValidator } from '../../security/TokenValidator.js';
+import { OAuthTokenValidator } from '../../security/OAuthTokenValidator.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -22,6 +23,7 @@ export class OAuthController {
   private oauthService: OAuthService;
   private clientService: OAuthClientService;
   private tokenValidator: TokenValidator;
+  private oauthTokenValidator: OAuthTokenValidator;
   
   // Logger for OAuthController
   private logger = createLogger('OAuthController');
@@ -30,6 +32,7 @@ export class OAuthController {
     this.oauthService = new OAuthService();
     this.clientService = new OAuthClientService();
     this.tokenValidator = new TokenValidator();
+    this.oauthTokenValidator = new OAuthTokenValidator();
   }
 
   /**
@@ -384,6 +387,130 @@ export class OAuthController {
       });
     } catch (error) {
       this.logger.error({ error }, 'Token endpoint error');
+      this.addCorsHeaders(res);
+      res.status(500).json({
+        error: 'server_error',
+        error_description: 'Internal server error'
+      });
+    }
+  };
+
+  /**
+   * POST /introspect - Token introspection endpoint (RFC 7662)
+   */
+  introspect = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const contentType = req.headers['content-type'];
+      let body: any;
+
+      // Support form-urlencoded and JSON
+      if (contentType?.includes('application/x-www-form-urlencoded')) {
+        body = req.body; // Express has already parsed it
+      } else {
+        body = req.body;
+      }
+
+      const { token, token_type_hint, client_id, client_secret } = body || {};
+
+      if (!token || typeof token !== 'string') {
+        this.addCorsHeaders(res);
+        res.status(400).json({
+          error: 'invalid_request',
+          error_description: 'token is required'
+        });
+        return;
+      }
+
+      // Client authentication is optional, but if provided needs to be verified
+      let clientId = client_id;
+      let clientSecret = client_secret;
+
+      const authHeader = req.headers['authorization'];
+      const basicAuth = authHeader ? this.oauthService.parseBasicAuth(authHeader as string) : null;
+      if (basicAuth) {
+        clientId = basicAuth.clientId;
+        clientSecret = basicAuth.clientSecret;
+      }
+
+      if (clientId) {
+        const client = await this.clientService.getClient(clientId);
+        if (!client) {
+          this.addCorsHeaders(res);
+          res.status(401).json({
+            error: 'invalid_client',
+            error_description: 'Client not found'
+          });
+          return;
+        }
+
+        if (client.token_endpoint_auth_method !== 'none') {
+          if (!clientSecret) {
+            this.addCorsHeaders(res);
+            res.status(401).json({
+              error: 'invalid_client',
+              error_description: 'client_secret is required for confidential clients'
+            });
+            return;
+          }
+
+          const validClient = await this.clientService.verifyClientCredentials(clientId, clientSecret);
+          if (!validClient) {
+            this.addCorsHeaders(res);
+            res.status(401).json({
+              error: 'invalid_client',
+              error_description: 'Invalid client credentials'
+            });
+            return;
+          }
+        }
+      }
+
+      // Only access tokens are supported (Peta Core issues JWT access tokens)
+      if (token_type_hint && token_type_hint !== 'access_token') {
+        this.addCorsHeaders(res);
+        res.json({ active: false });
+        return;
+      }
+
+      const validation = await this.oauthTokenValidator.validateToken(token);
+      if (!validation.valid) {
+        this.addCorsHeaders(res);
+        res.json({ active: false });
+        return;
+      }
+
+      // If a client_id was provided, ensure the token belongs to that client
+      if (clientId && validation.authContext?.oauthClientId !== clientId) {
+        this.addCorsHeaders(res);
+        res.json({ active: false });
+        return;
+      }
+
+      const verified = this.oauthService.verifyAccessToken(token);
+      if (!verified.valid || !verified.payload) {
+        this.addCorsHeaders(res);
+        res.json({ active: false });
+        return;
+      }
+
+      const payload = verified.payload as any;
+      const response: any = {
+        active: true,
+        client_id: payload.client_id,
+        sub: payload.user_id,
+        scope: Array.isArray(payload.scopes) ? payload.scopes.join(' ') : undefined,
+        exp: payload.exp,
+        iat: payload.iat
+      };
+
+      if (payload.aud) {
+        response.aud = payload.aud;
+      }
+
+      this.addCorsHeaders(res);
+      res.json(response);
+    } catch (error) {
+      this.logger.error({ error }, 'Token introspection error');
       this.addCorsHeaders(res);
       res.status(500).json({
         error: 'server_error',

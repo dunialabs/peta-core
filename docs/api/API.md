@@ -17,21 +17,29 @@ This document provides an overview and navigation for all APIs in Peta Core.
 
 ## Authentication
 
-All endpoints requiring authentication support the following two methods:
+Peta Core uses two kinds of bearer tokens:
 
-### Method 1: Bearer Token (Recommended)
+- **OAuth 2.0 access tokens (JWT)** issued by Peta Core: accepted by `/mcp`.
+- **Peta access tokens (opaque)** associated with a user: used by `/admin` and `/socket.io`, and also accepted by `/mcp`.
+
+### MCP Initialization
+
+For the initial `initialize` call to `POST /mcp`, provide a token via:
 
 ```http
-Authorization: Bearer <access_token>
+Authorization: Bearer <token>
 ```
 
-### Method 2: Query Parameter
+Or (for `POST /mcp` only):
 
 ```http
-GET /mcp?token=<access_token>
+POST /mcp?token=<token>
+POST /mcp?api_key=<token>
 ```
 
-**Get Token**: Obtain an access token through OAuth 2.0 endpoints. See [OAuth 2.0 Authentication](#2-oauth-20-authentication) for details.
+After initialization, Peta Core returns `Mcp-Session-Id`; include it for subsequent `/mcp` requests and SSE stream connections.
+
+**Get an OAuth token**: Obtain an OAuth 2.0 access token through the OAuth endpoints. See [OAuth 2.0 Authentication](#2-oauth-20-authentication) for details.
 
 ---
 
@@ -86,41 +94,37 @@ For complete MCP protocol specifications and examples, please refer to:
 
 ### 2. OAuth 2.0 Authentication
 
-Complete OAuth 2.0 authorization server implementation.
+Peta Core exposes an OAuth 2.0 authorization server for obtaining access tokens used to authenticate to the `/mcp` gateway.
+
+These endpoints are separate from downstream connector OAuth tokens used by downstream MCP servers to access third-party APIs. Those credentials are brokered internally by Peta Core and are not exposed here.
 
 #### Endpoint List
 
 | Endpoint | Description |
 |------|------|
-| `POST /oauth/token` | Get or refresh access token |
-| `GET /oauth/authorize` | User authorization page for authorization code flow |
-| `POST /oauth/introspect` | Check token validity |
-| `POST /oauth/revoke` | Revoke token |
+| `POST /register` | Dynamic client registration |
+| `POST /token` | Get or refresh access token |
+| `GET /authorize` | User authorization page for authorization code flow |
+| `POST /introspect` | Check token validity |
+| `POST /revoke` | Revoke token |
 
-#### Supported Grant Types
-
-##### 1. Client Credentials Grant (Server-to-Server)
+#### Dynamic Client Registration
 
 ```bash
-curl -X POST http://localhost:3002/oauth/token \
+curl -X POST http://localhost:3002/register \
   -H "Content-Type: application/json" \
   -d '{
-    "grant_type": "client_credentials",
-    "client_id": "your_client_id",
-    "client_secret": "your_client_secret"
+    "client_name": "my-client",
+    "redirect_uris": ["http://localhost:3000/callback"],
+    "token_endpoint_auth_method": "none"
   }'
 ```
 
-**Response**:
-```json
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "token_type": "Bearer",
-  "expires_in": 3600
-}
-```
+If you provide `grant_types` in client metadata, Peta Core accepts `authorization_code`, `refresh_token`, and `client_credentials` (for compatibility). The `/token` endpoint currently supports `authorization_code` and `refresh_token` grants only.
 
-##### 2. Authorization Code Grant with PKCE (Web/Mobile Apps)
+#### Supported Grant Types
+
+##### 1. Authorization Code Grant with PKCE (Web/Mobile Apps)
 
 **Step 1**: Generate PKCE parameters
 
@@ -132,7 +136,7 @@ CODE_CHALLENGE=$(echo -n $CODE_VERIFIER | openssl dgst -sha256 -binary | base64 
 **Step 2**: Get authorization code (open in browser)
 
 ```
-http://localhost:3002/oauth/authorize?
+http://localhost:3002/authorize?
   client_id=your_client_id&
   response_type=code&
   redirect_uri=http://localhost:3000/callback&
@@ -143,7 +147,7 @@ http://localhost:3002/oauth/authorize?
 **Step 3**: Exchange authorization code for token
 
 ```bash
-curl -X POST http://localhost:3002/oauth/token \
+curl -X POST http://localhost:3002/token \
   -H "Content-Type: application/json" \
   -d '{
     "grant_type": "authorization_code",
@@ -154,16 +158,27 @@ curl -X POST http://localhost:3002/oauth/token \
   }'
 ```
 
-##### 3. Refresh Token
+##### 2. Refresh Token
 
 ```bash
-curl -X POST http://localhost:3002/oauth/token \
+curl -X POST http://localhost:3002/token \
   -H "Content-Type: application/json" \
   -d '{
     "grant_type": "refresh_token",
     "refresh_token": "your_refresh_token",
     "client_id": "your_client_id",
     "client_secret": "your_client_secret"
+  }'
+```
+
+#### Token Introspection
+
+```bash
+curl -X POST http://localhost:3002/introspect \
+  -H "Content-Type: application/json" \
+  -d '{
+    "token": "YOUR_OAUTH_ACCESS_TOKEN",
+    "token_type_hint": "access_token"
   }'
 ```
 
@@ -203,7 +218,7 @@ interface AdminRequest<T = any> {
 ```bash
 curl -X POST http://localhost:3002/admin \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Authorization: Bearer YOUR_PETA_ACCESS_TOKEN" \
   -d '{
     "action": 1011,
     "data": { "proxyId": 0 }
@@ -251,7 +266,7 @@ import { io } from 'socket.io-client';
 
 const socket = io('http://localhost:3002', {
   auth: {
-    token: 'YOUR_ACCESS_TOKEN'
+    token: 'YOUR_PETA_ACCESS_TOKEN'
   }
 });
 
@@ -375,14 +390,10 @@ See [ADMIN_API.md - Error Code Reference](./ADMIN_API.md#appendix-error-code-ref
 ```bash
 #!/bin/bash
 
-# 1. Get access token
-TOKEN=$(curl -s -X POST http://localhost:3002/oauth/token \
-  -H "Content-Type: application/json" \
-  -d '{
-    "grant_type": "client_credentials",
-    "client_id": "my_client",
-    "client_secret": "my_secret"
-  }' | jq -r '.access_token')
+# 1. Obtain an access token
+# - OAuth (authorization_code + PKCE): see the OAuth section above
+# - Or use a Peta access token (opaque bearer token)
+TOKEN="YOUR_OAUTH_ACCESS_TOKEN_OR_PETA_ACCESS_TOKEN"
 
 echo "Token: $TOKEN"
 

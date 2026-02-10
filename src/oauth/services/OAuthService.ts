@@ -226,7 +226,6 @@ export class OAuthService {
       token_endpoint: `${issuerUrl}/token`,
       registration_endpoint: `${issuerUrl}/register`,
       revocation_endpoint: `${issuerUrl}/revoke`,
-      // New: Token introspection endpoint (RFC 7662)
       introspection_endpoint: `${issuerUrl}/introspect`,
       scopes_supported: ['mcp:tools', 'mcp:resources', 'mcp:prompts'],
       response_types_supported: ['code'],

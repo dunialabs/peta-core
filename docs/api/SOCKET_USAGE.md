@@ -1121,7 +1121,7 @@ interface OnlineSessionData {
 ```typescript
 const socket = io('http://localhost:3002', {
   auth: {
-    token: 'your-token-here'
+    token: 'your-access-token-here'
   }
 });
 ```
@@ -1131,7 +1131,7 @@ const socket = io('http://localhost:3002', {
 ```typescript
 const socket = io('http://localhost:3002', {
   extraHeaders: {
-    Authorization: 'Bearer your-token-here'
+    Authorization: 'Bearer your-access-token-here'
   }
 });
 ```

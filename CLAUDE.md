@@ -89,7 +89,7 @@ Resources, tools, and prompts are namespaced by server ID to prevent conflicts:
 
 Full OAuth 2.0 authorization server supporting:
 - Authorization Code Grant with PKCE
-- Client Credentials Grant
+- Refresh Token grant
 - Token introspection and revocation
 - RFC 8707 Resource Indicators
 - Dynamic client registration
