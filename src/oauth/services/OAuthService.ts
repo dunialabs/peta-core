@@ -11,7 +11,14 @@ export class OAuthService {
   private jwtSecret: string;
 
   constructor() {
-    this.jwtSecret = process.env.JWT_SECRET || 'oauth-jwt-secret';
+    this.jwtSecret = process.env.JWT_SECRET || '';
+  }
+
+  private getJwtSecret(): string {
+    if (!this.jwtSecret) {
+      throw new Error('JWT_SECRET environment variable is required');
+    }
+    return this.jwtSecret;
   }
 
   /**
@@ -37,7 +44,7 @@ export class OAuthService {
       payload.aud = resource;
     }
 
-    return jwt.sign(payload, this.jwtSecret);
+    return jwt.sign(payload, this.getJwtSecret());
   }
 
   /**
@@ -167,7 +174,7 @@ export class OAuthService {
     error?: string;
   } {
     try {
-      const payload = jwt.verify(token, this.jwtSecret);
+      const payload = jwt.verify(token, this.getJwtSecret());
       return { valid: true, payload };
     } catch (error) {
       if (error instanceof jwt.JsonWebTokenError) {

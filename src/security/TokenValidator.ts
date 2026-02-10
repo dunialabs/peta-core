@@ -77,7 +77,7 @@ export class TokenValidator {
       userPreferences: userPreferences,
       launchConfigs: user.launchConfigs,
       authenticatedAt: new Date(),
-      expiresAt: user.expiresAt && user.expiresAt > 0 ? Math.floor(user.expiresAt / 1000) : null,
+      expiresAt: user.expiresAt && user.expiresAt > 0 ? user.expiresAt : null,
       rateLimit: user.ratelimit
     };
   }
