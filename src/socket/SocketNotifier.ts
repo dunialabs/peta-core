@@ -199,9 +199,14 @@ export class SocketNotifier {
   }
 
   async notifyPermissionChangedByUser(userId: string): Promise<boolean> {
-    // Get capabilities from UserRequestHandler (transport-agnostic business logic)
-    const capabilities = await UserRequestHandler.instance.handleGetCapabilities(userId);
-    return this.notifyPermissionChanged(userId, capabilities);
+    try {
+      // Get capabilities from UserRequestHandler (transport-agnostic business logic)
+      const capabilities = await UserRequestHandler.instance.handleGetCapabilities(userId);
+      return this.notifyPermissionChanged(userId, capabilities);
+    } catch (error: any) {
+      this.logger.error({ error: error?.message ?? String(error), userId }, 'Failed to notify permission changed');
+      return false;
+    }
   }
 
   /**
