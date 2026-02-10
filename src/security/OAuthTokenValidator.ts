@@ -74,8 +74,8 @@ export class OAuthTokenValidator {
       }
 
       // Build authentication context
-      const parsedPermissions = JSON.parse(user.permissions) 
-      const userPreferences = JSON.parse(user.userPreferences);
+      const parsedPermissions = JSON.parse(user.permissions);
+      const userPreferences = JSON.parse(user.userPreferences || '{}');
 
       const authContext: AuthContext = {
         userId: user.userId,

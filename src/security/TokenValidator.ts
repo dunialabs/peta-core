@@ -65,7 +65,7 @@ export class TokenValidator {
       );
     }
     const permissions = permissionsRaw as Permissions;
-    const userPreferences = JSON.parse(user.userPreferences) as Permissions;
+    const userPreferences = JSON.parse(user.userPreferences || '{}') as Permissions;
 
     // 9. Construct authentication context
     return {

@@ -364,7 +364,7 @@ export class AuthMiddleware {
     
     // Ensure permissions object structure is correct
     const permissions = parsedPermissions as Permissions;
-    const userPreferences = JSON.parse(user.userPreferences) as Permissions;
+    const userPreferences = JSON.parse(user.userPreferences || '{}') as Permissions;
 
     const tokenMask = session.token.substring(0, 8) + '...' + session.token.substring(session.token.length - 8);
 
