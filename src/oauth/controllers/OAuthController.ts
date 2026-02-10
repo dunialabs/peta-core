@@ -26,6 +26,18 @@ export class OAuthController {
   // Logger for OAuthController
   private logger = createLogger('OAuthController');
 
+  /**
+   * Escape string for safe inclusion in HTML content
+   */
+  private escapeHtml(str: string): string {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   constructor() {
     this.oauthService = new OAuthService();
     this.clientService = new OAuthClientService();
@@ -195,20 +207,26 @@ export class OAuthController {
       };
 
       const scopeListHtml = requestedScopes
-        .map(s => `<li><span class="scope-icon">✓</span>${scopeDescriptions[s] || s}</li>`)
+        .map(s => `<li><span class="scope-icon">✓</span>${this.escapeHtml(scopeDescriptions[s] || s)}</li>`)
         .join('');
 
+      const jsEscape = (val: string): string => JSON.stringify(val)
+        .slice(1, -1)
+        .replace(/</g, '\\u003C')
+        .replace(/>/g, '\\u003E')
+        .replace(/&/g, '\\u0026');
+
       html = html
-        .replace('{{CLIENT_NAME}}', client.client_name || 'Unknown Application')
+        .replace('__CLIENT_NAME__', this.escapeHtml(client.client_name || 'Unknown Application'))
         .replace('{{SCOPE_LIST}}', scopeListHtml)
-        .replace('{{CLIENT_ID}}', client_id as string)
-        .replace('{{REDIRECT_URI}}', redirect_uri as string)
-        .replace('{{SCOPE}}', scope as string || '')
-        .replace('{{STATE}}', state as string || '')
-        .replace('{{CODE_CHALLENGE}}', code_challenge as string || '')
-        .replace('{{CODE_CHALLENGE_METHOD}}', code_challenge_method as string || '')
-        .replace('{{RESOURCE}}', resource as string || '')
-        .replace('{{PROXY_KEY}}', proxyKey);
+        .replace('{{CLIENT_ID}}', jsEscape(client_id as string))
+        .replace('{{REDIRECT_URI}}', jsEscape(redirect_uri as string))
+        .replace('{{SCOPE}}', jsEscape(scope as string || ''))
+        .replace('{{STATE}}', jsEscape(state as string || ''))
+        .replace('{{CODE_CHALLENGE}}', jsEscape(code_challenge as string || ''))
+        .replace('{{CODE_CHALLENGE_METHOD}}', jsEscape(code_challenge_method as string || ''))
+        .replace('{{RESOURCE}}', jsEscape(resource as string || ''))
+        .replace('{{PROXY_KEY}}', jsEscape(proxyKey));
 
       res.setHeader('Content-Type', 'text/html');
       res.send(html);
