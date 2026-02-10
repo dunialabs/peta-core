@@ -113,6 +113,8 @@ export class ServerManager {
       this.logger.info({ count: servers.length }, 'All enabled servers initialized in sleeping state (lazy start enabled)');
 
       this.startIdleCheck();
+    }).catch((error) => {
+      this.logger.error({ error }, 'Failed to initialize enabled servers in sleeping state');
     });
   }
 
@@ -607,7 +609,7 @@ export class ServerManager {
     context?.clearTimeout();
 
     // Recreate connection with new API key
-    let serverContext;
+    let serverContext: ServerContext;
     if (context) {
       serverContext = context;
       serverContext.serverEntity = serverEntity;
@@ -635,7 +637,7 @@ export class ServerManager {
     context?.clearError();
     context?.clearTimeout();
 
-    let serverContext;
+    let serverContext: ServerContext;
     if (context) {
       serverContext = context;
       serverContext.serverEntity = serverEntity;
@@ -769,9 +771,13 @@ export class ServerManager {
         serverContext.recordError(`Transport closed by server`);
 
         if (serverEntity.allowUserInput) {
-          this.closeTemporaryServer(serverEntity.serverId, serverContext.userId!);
+          void this.closeTemporaryServer(serverEntity.serverId, serverContext.userId!).catch((error) => {
+            this.logger.error({ error, serverName: serverEntity.serverName, userId: serverContext.userId }, 'Error closing temporary server after transport close');
+          });
         } else {
-          this.removeServer(serverEntity.serverId);
+          void this.removeServer(serverEntity.serverId).catch((error) => {
+            this.logger.error({ error, serverName: serverEntity.serverName }, 'Error removing server after transport close');
+          });
         }
 
         this.notifyUsersOfServerChange(serverEntity.serverId, affectedSessions, 'server_error', {
@@ -795,7 +801,7 @@ export class ServerManager {
       this.logger.info({ serverName: serverEntity.serverName }, 'Connection established');
       if (serverEntity.category === ServerCategory.CustomRemote) {
         const serverInfo = client.getServerVersion();
-        if (serverInfo?.name != serverEntity.serverName && serverInfo?.name ) {
+        if (serverInfo?.name && serverInfo.name !== serverEntity.serverName) {
           let name = serverInfo.name.trim();
           if (serverEntity.allowUserInput) {
             name += ' Personal';
@@ -1845,9 +1851,21 @@ export class ServerManager {
       }
     });
 
-    await Promise.all(closePromises);
+    const closeTemporaryPromises = Array.from(this.temporaryServers.values()).map(async (context) => {
+      try {
+        context.stopTokenRefresh();
+        await context.closeConnection(ServerStatus.Offline);
+      } catch (error) {
+        this.logger.error({ error, serverName: context.serverEntity.serverName, userId: context.userId }, 'Error closing temporary server connection');
+      }
+    });
+
+    await Promise.all([...closePromises, ...closeTemporaryPromises]);
     this.serverContexts.clear();
+    this.temporaryServers.clear();
+    this.temporaryServerLoggers.clear();
     this.resourceSubscriptions.clear(); // Clean up subscription state
+    this.serverWaitQueues.clear();
     this.logger.info('All server connections closed');
   }
 

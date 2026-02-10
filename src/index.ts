@@ -537,7 +537,12 @@ export async function startApplication() {
     }
     
     // Graceful shutdown handling
+    let sigtermHandler: (() => void) | null = null;
+    let sigintHandler: (() => void) | null = null;
+
     const shutdown = async (signal: string) => {
+      const exitCode = (signal === 'UNCAUGHT_EXCEPTION' || signal === 'UNHANDLED_REJECTION') ? 1 : 0;
+
       // Prevent duplicate shutdown process execution
       if (isShuttingDown) {
         // Use debug level to reduce console noise in production
@@ -548,10 +553,17 @@ export async function startApplication() {
 
       isShuttingDown = true;
       // Prevent subsequent SIGINT/SIGTERM from interrupting child processes (e.g., docker stop)
-      process.off('SIGINT', shutdown);
-      process.off('SIGTERM', shutdown);
+      if (sigintHandler) {
+        process.off('SIGINT', sigintHandler);
+      }
+      if (sigtermHandler) {
+        process.off('SIGTERM', sigtermHandler);
+      }
       process.on('SIGINT', () => {
         console.log('SIGINT received during shutdown, ignored');
+      });
+      process.on('SIGTERM', () => {
+        console.log('SIGTERM received during shutdown, ignored');
       });
       console.log(`Received ${signal}, shutting down gracefully...`);
 
@@ -704,15 +716,21 @@ export async function startApplication() {
       } finally {
         console.log('✅ Shutdown complete');
         // Ensure exit regardless of circumstances
-        process.exit(0);
+        process.exit(exitCode);
       }
     };
 
     // Save shutdown function to global reference for ProxyHandler use
     shutdownFunction = shutdown;
 
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
+    sigtermHandler = () => {
+      shutdown('SIGTERM');
+    };
+    sigintHandler = () => {
+      shutdown('SIGINT');
+    };
+    process.on('SIGTERM', sigtermHandler);
+    process.on('SIGINT', sigintHandler);
     
     // Unhandled exception capture
     process.on('uncaughtException', (error) => {
