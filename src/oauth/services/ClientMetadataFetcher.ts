@@ -117,10 +117,19 @@ export class ClientMetadataFetcher {
           'Accept': 'application/json',
           'User-Agent': 'peta-core/1.0'
         },
-        signal: controller.signal
+        signal: controller.signal,
+        redirect: 'manual'
       });
 
       clearTimeout(timeoutId);
+
+      if (response.status >= 300 && response.status < 400) {
+        return {
+          valid: false,
+          error: 'invalid_client_metadata',
+          errorDescription: 'Client metadata URL must not redirect'
+        };
+      }
 
       if (!response.ok) {
         this.logger.warn({
