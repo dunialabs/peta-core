@@ -245,7 +245,10 @@ export class UserRequestHandler {
 
         const oauthConfig = template.oAuthConfig;
         if (oauthConfig && oauthConfig.deskClientId) {
-          const key = process.env.JWT_SECRET ?? 'oauth-jwt-secret';
+          const key = process.env.JWT_SECRET;
+          if (!key) {
+            throw new UserError('JWT_SECRET environment variable is not configured', UserErrorCode.INTERNAL_ERROR);
+          }
           const decryptedLaunchConfig = await CryptoService.decryptDataFromString(server.launchConfig, key);
           const decryptedLaunchConfigValue = JSON.parse(decryptedLaunchConfig);
           const oauth = decryptedLaunchConfigValue.oauth;
