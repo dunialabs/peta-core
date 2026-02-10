@@ -145,7 +145,7 @@ export class SessionStore {
     if (isUserDisconnect) {
       await this.removeAllUserSessions(session.userId, reason);
     } else {
-      await this.removeSingleSession(sessionId);
+      await this.removeSingleSession(sessionId, reason);
     }
   }
 
@@ -164,7 +164,7 @@ export class SessionStore {
         return;
       }
 
-      await this.removeSingleSession(sessionId);
+      await this.removeSingleSession(sessionId, reason);
       
       this.logger.info({ sessionId }, 'Session terminated successfully');
       
@@ -173,7 +173,7 @@ export class SessionStore {
       
       // Even if error occurs, try to cleanup resources
       try {
-        await this.removeSingleSession(sessionId);
+        await this.removeSingleSession(sessionId, reason);
       } catch (cleanupError) {
         this.logger.error({ error: cleanupError, sessionId }, 'Failed to cleanup session after termination error');
       }
@@ -185,27 +185,40 @@ export class SessionStore {
   /**
    * Remove single session
    */
-  private async removeSingleSession(sessionId: string): Promise<void> {
+  private async removeSingleSession(
+    sessionId: string,
+    reason: DisconnectReason = DisconnectReason.CLIENT_DISCONNECT
+  ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
+    const proxySession = this.proxySessions.get(sessionId);
 
     try {
-      // 1. Remove ProxySession from storage (no additional cleanup needed)
+      // 1. Cleanup ProxySession resources
+      if (proxySession) {
+        try {
+          await proxySession.cleanup();
+        } catch (error) {
+          this.logger.error({ error, sessionId }, 'Failed to cleanup ProxySession during session removal');
+        }
+      }
+
+      // 2. Remove ProxySession from storage
       this.proxySessions.delete(sessionId);
 
-      // 2. Remove ClientSession from storage
+      // 3. Remove ClientSession from storage
       this.sessions.delete(sessionId);
 
-      // 3. Remove EventStore from storage
+      // 4. Remove EventStore from storage
       this.eventStores.delete(sessionId);
 
-      // 4. Remove SessionLogger from storage
+      // 5. Remove SessionLogger from storage
       this.sessionLoggers.delete(sessionId);
 
-      // 5. Remove from GlobalRequestRouter
+      // 6. Remove from GlobalRequestRouter
       GlobalRequestRouter.getInstance().cleanupSessionNotifications(sessionId);
 
-      // 6. Remove from user session mapping
+      // 7. Remove from user session mapping
       const userId = session.userId;
       const userSessionSet = this.userSessions.get(userId);
       if (userSessionSet) {
@@ -223,7 +236,7 @@ export class SessionStore {
         }
       }
 
-      await session.close(DisconnectReason.CLIENT_DISCONNECT);
+      await session.close(reason);
       this.logger.debug({ sessionId }, 'Session removed from store');
 
     } catch (error) {
@@ -247,12 +260,21 @@ export class SessionStore {
     const closePromises = sessionIds.map(async (sessionId) => {
       const session = this.sessions.get(sessionId);
       if (session) {
+        const proxySession = this.proxySessions.get(sessionId);
+
+        if (proxySession) {
+          try {
+            await proxySession.cleanup();
+          } catch (error) {
+            this.logger.error({ error, sessionId }, 'Failed to cleanup ProxySession during user session removal');
+          }
+        }
         
         // Remove from mapping
         this.sessions.delete(sessionId);
         this.proxySessions.delete(sessionId);
         // Close session
-        await session.close(DisconnectReason.ADMIN_REQUEST);
+        await session.close(reason);
         this.eventStores.delete(sessionId); // Remove EventStore
         this.sessionLoggers.delete(sessionId); // Remove SessionLogger
         GlobalRequestRouter.getInstance().cleanupSessionNotifications(sessionId);
@@ -279,7 +301,15 @@ export class SessionStore {
    * Remove all sessions
    */
   async removeAllSessions(): Promise<void> {
-    const closePromises = Array.from(this.sessions.values()).map(async (session) => {
+    const closePromises = Array.from(this.sessions.entries()).map(async ([sessionId, session]) => {
+      const proxySession = this.proxySessions.get(sessionId);
+      if (proxySession) {
+        try {
+          await proxySession.cleanup();
+        } catch (error) {
+          this.logger.error({ error, sessionId }, 'Failed to cleanup ProxySession during all-session removal');
+        }
+      }
       await session.close(DisconnectReason.SERVER_SHUTDOWN);
     });
     await Promise.all(closePromises);

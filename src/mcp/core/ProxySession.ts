@@ -118,7 +118,7 @@ export class ProxySession {
     private clientSession: ClientSession,
     private sessionLogger: SessionLogger,
     eventStore: PersistentEventStore,
-    private onclose: (sessionId: string) => void
+    private onclose: (sessionId: string) => Promise<void>
   ) {
     // Initialize logger (needed in constructor because sessionId is required)
     this.logger = createLogger('ProxySession', { sessionId: this.sessionId });
@@ -266,13 +266,17 @@ export class ProxySession {
           onsessionclosed: async (sessionId: string) => {
             this.logger.info({ sessionId }, 'Session closed');
             // Call onclose callback to clean up resources
-            this.onclose(sessionId);
+            void this.onclose(sessionId).catch((error) => {
+              this.logger.error({ error, sessionId }, 'onclose callback failed');
+            });
           }
         });
         
         transport.onclose = () => {
           //TODO: Log event
-          this.onclose(this.sessionId);
+          void this.onclose(this.sessionId).catch((error) => {
+            this.logger.error({ error, sessionId: this.sessionId }, 'onclose callback failed');
+          });
         };
 
         // Connect server to transport layer
@@ -543,7 +547,7 @@ export class ProxySession {
         statusCode: 500,
       });
 
-      if (isReconnected == false && retryCount < 2) {
+      if (isReconnected === false && retryCount < 2) {
         return await this.handleToolCall(request, extra, retryCount + 1);
       }
 
@@ -777,7 +781,7 @@ export class ProxySession {
         statusCode: 500,
       });
 
-      if (isReconnected == false && retryCount < 2) {
+      if (isReconnected === false && retryCount < 2) {
         return await this.handleResourceRead(request, extra, retryCount + 1);
       }
 
@@ -1136,7 +1140,7 @@ export class ProxySession {
         duration: Date.now() - startTime,
         statusCode: 500,
       });
-      if (isReconnected == false && retryCount < 2) {
+      if (isReconnected === false && retryCount < 2) {
         return await this.handlePromptGet(request, extra, retryCount + 1);
       }
       throw error;
@@ -1311,7 +1315,7 @@ export class ProxySession {
         statusCode: 500,
       });
 
-      if (isReconnected == false && retryCount < 2) {
+      if (isReconnected === false && retryCount < 2) {
         return await this.handleComplete(request, extra, retryCount + 1);
       }
       throw error;
@@ -1511,12 +1515,13 @@ export class ProxySession {
 
     // Add timeout control
     const timeout = getReverseRequestTimeout('sampling');
+    let timeoutReject: ((reason: ReverseRequestTimeoutError) => void) | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
-        reject(new ReverseRequestTimeoutError('sampling', timeout));
-      }, timeout);
+      timeoutReject = reject;
     });
-
+    const timeoutId = setTimeout(() => {
+      timeoutReject?.(new ReverseRequestTimeoutError('sampling', timeout));
+    }, timeout);
     try {
       return await Promise.race([
         this.upstreamServer.createMessage(request.params, options),
@@ -1527,6 +1532,8 @@ export class ProxySession {
         this.logger.error({ timeout }, '[Sampling] Request timeout');
       }
       throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
@@ -1557,12 +1564,13 @@ export class ProxySession {
 
     // Add timeout control
     const timeout = getReverseRequestTimeout('roots');
+    let timeoutReject: ((reason: ReverseRequestTimeoutError) => void) | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
-        reject(new ReverseRequestTimeoutError('roots', timeout));
-      }, timeout);
+      timeoutReject = reject;
     });
-
+    const timeoutId = setTimeout(() => {
+      timeoutReject?.(new ReverseRequestTimeoutError('roots', timeout));
+    }, timeout);
     try {
       return await Promise.race([
         this.upstreamServer.listRoots(request.params, options),
@@ -1573,6 +1581,8 @@ export class ProxySession {
         this.logger.error({ timeout }, '[ListRoots] Request timeout');
       }
       throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
@@ -1605,12 +1615,13 @@ export class ProxySession {
 
     // Add timeout control
     const timeout = getReverseRequestTimeout('elicitation');
+    let timeoutReject: ((reason: ReverseRequestTimeoutError) => void) | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
-        reject(new ReverseRequestTimeoutError('elicitation', timeout));
-      }, timeout);
+      timeoutReject = reject;
     });
-
+    const timeoutId = setTimeout(() => {
+      timeoutReject?.(new ReverseRequestTimeoutError('elicitation', timeout));
+    }, timeout);
     try {
       return await Promise.race([
         this.upstreamServer.elicitInput(request.params, options),
@@ -1621,6 +1632,8 @@ export class ProxySession {
         this.logger.error({ timeout }, '[Elicitation] Request timeout');
       }
       throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
