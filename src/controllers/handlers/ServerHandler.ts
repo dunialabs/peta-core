@@ -187,18 +187,19 @@ export class ServerHandler {
       throw new AdminError('Invalid allowUserInput', AdminErrorCode.INVALID_REQUEST);
     }
 
-    if (!configTemplate || configTemplate.trim() === '' || configTemplate.trim() === '{}') {
-      throw new AdminError(
-        'For servers with allowUserInput=true, configTemplate is required',
-        AdminErrorCode.INVALID_REQUEST
-      );
-    }
-
     if (typeof category !== 'number' || !Object.values(ServerCategory).includes(category as ServerCategory)) {
       throw new AdminError('Invalid category', AdminErrorCode.INVALID_REQUEST);
     }
+
+    const configTemplateInvalid = !configTemplate || configTemplate.trim() === '' || configTemplate.trim() === '{}';
+    if ((allowUserInputValue === true || category === ServerCategory.Template || category === ServerCategory.RestApi) && configTemplateInvalid) {
+      throw new AdminError(
+        'configTemplate is required for this server',
+        AdminErrorCode.INVALID_REQUEST
+      );
+    }
     let usePetaOauthConfigValue = true;
-    let configTemplateStr = configTemplate;
+    let configTemplateStr = configTemplate ?? null;
     let launchConfigStr = launchConfig;
     if (category === ServerCategory.Template) {
       const configTemplateValue = JSON.parse(configTemplate || '{}');
@@ -334,7 +335,10 @@ export class ServerHandler {
               throw new AdminError('Invalid OAuth client secret', AdminErrorCode.INVALID_REQUEST);
             }
           }
-          const key = process.env.JWT_SECRET ?? 'oauth-jwt-secret';
+          const key = process.env.JWT_SECRET;
+          if (!key) {
+            throw new AdminError('JWT_SECRET environment variable is required', AdminErrorCode.INVALID_REQUEST);
+          }
           const encryptedData = await CryptoService.encryptData(decryptedLaunchConfig, key);
           launchConfigStr = JSON.stringify(encryptedData);
           configTemplateValue.oAuthConfig.deskClientId = oauth.clientId;
@@ -513,7 +517,8 @@ export class ServerHandler {
           }
         }
       } else {
-        const context = serverContext = ServerManager.instance.getServerContext(serverId);
+        const context = ServerManager.instance.getServerContext(serverId);
+        serverContext = context;
         if (context) {
           context.serverEntity = server;
           if (willHandlePublicAccessChange) {
@@ -600,7 +605,7 @@ export class ServerHandler {
     });
 
     // Notify all related users of server capability changes
-    let changed;
+    let changed: { toolsChanged: boolean; resourcesChanged: boolean; promptsChanged: boolean };
     if (server.allowUserInput) {
       changed = {
         toolsChanged: true,
@@ -718,7 +723,7 @@ export class ServerHandler {
       throw new AdminError(`Server ${targetId} not found`, AdminErrorCode.SERVER_NOT_FOUND);
     }
     const affectedSessions = SessionStore.instance.getSessionsUsingServer(targetId);
-    let changed;
+    let changed: { toolsChanged: boolean; resourcesChanged: boolean; promptsChanged: boolean };
     if (server.allowUserInput) {
       await ServerManager.instance.closeAllTemporaryServersByTemplate(targetId);
       changed = {
