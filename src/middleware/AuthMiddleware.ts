@@ -46,7 +46,25 @@ export class AuthMiddleware {
       if (sessionId && sessionId.length > 0) {
         const existingSession = SessionStore.instance.getSession(sessionId);
         if (existingSession) {
-          
+
+          const token = existingSession.token;
+          const isJwtFormat = token.includes('.') && token.split('.').length === 3;
+          if (isJwtFormat) {
+            const oauthResult = await this.oauthTokenValidator.validateToken(token);
+            if (!oauthResult.valid) {
+              await SessionStore.instance.removeAllUserSessions(
+                existingSession.userId,
+                DisconnectReason.SESSION_REMOVED
+              );
+              const authError = new AuthError(
+                AuthErrorType.INVALID_TOKEN,
+                oauthResult.error || 'OAuth token validation failed',
+                existingSession.userId
+              );
+              return this.sendAuthError(req, res, authError);
+            }
+          }
+           
           // New: Check if user info needs to be refreshed (every 5 minutes)
           await this.refreshUserInfoIfNeeded(existingSession);
           
@@ -89,6 +107,9 @@ export class AuthMiddleware {
           
           return next();
         } else {
+          if (req.method === 'DELETE') {
+            return next();
+          }
           res.status(400).json({
             jsonrpc: '2.0',
             error: {
@@ -345,9 +366,11 @@ export class AuthMiddleware {
     const permissions = parsedPermissions as Permissions;
     const userPreferences = JSON.parse(user.userPreferences) as Permissions;
 
+    const tokenMask = session.token.substring(0, 8) + '...' + session.token.substring(session.token.length - 8);
+
     const updatedAuthContext: AuthContext = {
       userId: user.userId,
-      token: session.token,
+      token: tokenMask,
       role: user.role,
       status: user.status,
       permissions: permissions,

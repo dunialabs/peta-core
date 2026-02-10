@@ -152,8 +152,19 @@ export class MCPController {
    */
   handleDelete = async (req: Request, res: Response): Promise<void> => {
 
-    const clientSession = req.clientSession!;
-    const sessionId = req.headers['Mcp-Session-Id'] as string || req.headers['mcp-session-id'] as string || clientSession.sessionId;
+    const sessionId = req.headers['Mcp-Session-Id'] as string || req.headers['mcp-session-id'] as string;
+    if (!sessionId || sessionId.length === 0) {
+      this.logger.error({ sessionId }, 'MCP request error: Invalid or missing session ID');
+      res.status(400).json({
+        jsonrpc: '2.0',
+        error: {
+          code: ErrorCode.ConnectionClosed,
+          message: 'Bad Request: No valid session ID provided',
+        },
+        id: null,
+      });
+      return;
+    }
 
     this.logger.info({ sessionId }, 'Received session termination request for session');
 
