@@ -111,6 +111,7 @@ export class ProxySession {
 
   // Logger for ProxySession
   private logger: ReturnType<typeof createLogger>;
+  private closeTriggered: boolean = false;
 
   constructor(
     private sessionId: string,
@@ -265,18 +266,13 @@ export class ProxySession {
           },
           onsessionclosed: async (sessionId: string) => {
             this.logger.info({ sessionId }, 'Session closed');
-            // Call onclose callback to clean up resources
-            void this.onclose(sessionId).catch((error) => {
-              this.logger.error({ error, sessionId }, 'onclose callback failed');
-            });
+            this.triggerOnClose(sessionId);
           }
         });
         
         transport.onclose = () => {
           //TODO: Log event
-          void this.onclose(this.sessionId).catch((error) => {
-            this.logger.error({ error, sessionId: this.sessionId }, 'onclose callback failed');
-          });
+          this.triggerOnClose(this.sessionId);
         };
 
         // Connect server to transport layer
@@ -1431,6 +1427,7 @@ export class ProxySession {
    */
   async cleanup(): Promise<void> {
     this.logger.info('Cleaning up proxy session');
+    this.closeTriggered = true;
 
     // Disconnect upstream transport
     if (this.upstreamTransport) {
@@ -1451,6 +1448,16 @@ export class ProxySession {
     this.requestIdMapper.destroy();
     this.progressTrackers.clear();
     this.notificationSubscriptions.clear();
+  }
+
+  private triggerOnClose(sessionId: string): void {
+    if (this.closeTriggered) {
+      return;
+    }
+    this.closeTriggered = true;
+    void this.onclose(sessionId).catch((error) => {
+      this.logger.error({ error, sessionId }, 'onclose callback failed');
+    });
   }
   
   /**

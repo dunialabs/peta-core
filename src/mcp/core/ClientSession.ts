@@ -28,6 +28,7 @@ export class ClientSession {
   private lastSseDisconnectedAt?: Date | null;
   private lastUserInfoRefresh?: number;
   private proxySession?: ProxySession;
+  private closeTriggered: boolean = false;
   // Logger for ClientSession
   private logger: ReturnType<typeof createLogger>;
 
@@ -764,6 +765,11 @@ export class ClientSession {
    * 3. Mark itself as Closed
    */
   async close(reason: DisconnectReason = DisconnectReason.CLIENT_DISCONNECT) {
+    if (this.closeTriggered) {
+      this.logger.debug({ reason }, 'ClientSession close already triggered');
+      return;
+    }
+    this.closeTriggered = true;
     this.logger.info({ reason }, 'Closing ClientSession');
     
     try {

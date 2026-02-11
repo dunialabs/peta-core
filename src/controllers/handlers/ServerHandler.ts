@@ -192,7 +192,7 @@ export class ServerHandler {
     }
 
     const configTemplateInvalid = !configTemplate || configTemplate.trim() === '' || configTemplate.trim() === '{}';
-    if ((allowUserInputValue === true || category === ServerCategory.Template || category === ServerCategory.RestApi) && configTemplateInvalid) {
+    if ((allowUserInputValue === true || category === ServerCategory.Template || category === ServerCategory.RestApi || category === ServerCategory.Skills) && configTemplateInvalid) {
       throw new AdminError(
         'configTemplate is required for this server',
         AdminErrorCode.INVALID_REQUEST

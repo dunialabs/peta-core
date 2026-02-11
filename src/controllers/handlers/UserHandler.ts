@@ -74,6 +74,18 @@ export class UserHandler {
       throw new AdminError('Missing required field: encryptedToken', AdminErrorCode.INVALID_REQUEST);
     }
 
+    let normalizedExpiresAt = expiresAt ?? 0;
+    if (expiresAt !== undefined && expiresAt !== null) {
+      const expiresAtNumber = typeof expiresAt === 'string' ? Number.parseInt(expiresAt, 10) : expiresAt;
+      if (!Number.isFinite(expiresAtNumber)) {
+        throw new AdminError('Invalid expiresAt', AdminErrorCode.INVALID_REQUEST);
+      }
+      normalizedExpiresAt = expiresAtNumber;
+      if (expiresAtNumber >= 1_000_000_000_000) {
+        normalizedExpiresAt = Math.floor(expiresAtNumber / 1000);
+      }
+    }
+
     // Check if user already exists
     const existingUser = await UserRepository.findByUserId(userId);
     if (existingUser) {
@@ -97,7 +109,7 @@ export class UserHandler {
       permissions: typeof permissions === 'string' ? permissions : JSON.stringify(permissions ?? {}),
       userPreferences: '{}',
       launchConfigs: '{}',
-      expiresAt: expiresAt ?? 0,
+      expiresAt: normalizedExpiresAt,
       createdAt: createdAt ?? Math.floor(Date.now() / 1000),
       updatedAt: updatedAt ?? Math.floor(Date.now() / 1000),
       ratelimit: ratelimit ?? 100,

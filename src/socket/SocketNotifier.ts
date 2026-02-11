@@ -42,6 +42,7 @@ export class SocketNotifier {
 
   // Logger for SocketNotifier
   private logger = createLogger('SocketNotifier');
+  private onlineSessionsNotifyInFlight = new Map<string, Promise<boolean>>();
 
   static instance: SocketNotifier = new SocketNotifier();
   static getInstance(): SocketNotifier {
@@ -230,28 +231,40 @@ export class SocketNotifier {
    * @returns Whether notification was successfully pushed
    */
   async notifyOnlineSessions(userId: string): Promise<boolean> {
-    this.logger.debug({ userId }, 'Notifying user online sessions');
-
-    try {
-      // Get session data from UserRequestHandler (transport-agnostic business logic)
-      const sessionData = await UserRequestHandler.instance.handleGetOnlineSessions(userId);
-
-      // Send notification
-      const success = this.sendNotification(userId, {
-        type: 'online_sessions',
-        message: `You have ${sessionData.length} active session(s)`,
-        data: { sessions: sessionData },
-        timestamp: Date.now(),
-        severity: 'info'
-      });
-
-      this.logger.debug({ userId, count: sessionData.length, success }, 'Online sessions notification sent');
-      return success;
-
-    } catch (error: any) {
-      this.logger.error({ error: error.message, userId }, 'Failed to notify online sessions');
-      return false;
+    const inFlight = this.onlineSessionsNotifyInFlight.get(userId);
+    if (inFlight) {
+      return inFlight;
     }
+
+    const notifyPromise = (async () => {
+      this.logger.debug({ userId }, 'Notifying user online sessions');
+
+      try {
+        // Get session data from UserRequestHandler (transport-agnostic business logic)
+        const sessionData = await UserRequestHandler.instance.handleGetOnlineSessions(userId);
+
+        // Send notification
+        const success = this.sendNotification(userId, {
+          type: 'online_sessions',
+          message: `You have ${sessionData.length} active session(s)`,
+          data: { sessions: sessionData },
+          timestamp: Date.now(),
+          severity: 'info'
+        });
+
+        this.logger.debug({ userId, count: sessionData.length, success }, 'Online sessions notification sent');
+        return success;
+
+      } catch (error: any) {
+        this.logger.error({ error: error.message, userId }, 'Failed to notify online sessions');
+        return false;
+      } finally {
+        this.onlineSessionsNotifyInFlight.delete(userId);
+      }
+    })();
+
+    this.onlineSessionsNotifyInFlight.set(userId, notifyPromise);
+    return notifyPromise;
   }
 
   // Notify users affected by server capability changes of permission changes
