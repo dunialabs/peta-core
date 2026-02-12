@@ -2,7 +2,6 @@ import { AdminRequest, AdminError, AdminErrorCode } from '../../types/admin.type
 import { ProxyRepository } from '../../repositories/ProxyRepository.js';
 import { LogRepository } from '../../repositories/LogRepository.js';
 import { LogSyncService } from '../../log/LogSyncService.js';
-import { Log } from '@prisma/client';
 import { createLogger } from '../../logger/index.js';
 
 /**

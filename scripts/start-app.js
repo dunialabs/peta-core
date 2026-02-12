@@ -73,6 +73,14 @@ if (fs.existsSync(dotenvPath)) {
 // Determine environment
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const isDevelopment = NODE_ENV === 'development';
+const shouldAutostartPetaAuth = process.env.PETA_AUTH_AUTOSTART !== 'false';
+const petaAuthBaseUrl = process.env.PETA_CORE_IN_DOCKER === 'true'
+  ? 'http://peta-auth:7788'
+  : 'http://localhost:7788';
+const petaAuthHealthUrl = `${petaAuthBaseUrl}/healthz`;
+const petaAuthHealthMaxWaitMs = 30000;
+const petaAuthHealthRetryIntervalMs = 5000;
+const petaAuthHealthMaxAttempts = Math.ceil(petaAuthHealthMaxWaitMs / petaAuthHealthRetryIntervalMs);
 
 /**
  * Read version from package.json
@@ -138,7 +146,7 @@ function createSpinner(text) {
 /**
  * Execute command with spinner
  */
-function executeWithSpinner(command, args, spinnerText, successMessage, options = {}) {
+function executeWithSpinner(command, args, spinnerText, successMessage, options = {}, failureMessage = null) {
   return new Promise((resolve, reject) => {
     const spinner = createSpinner(spinnerText);
     spinner.start();
@@ -170,9 +178,20 @@ function executeWithSpinner(command, args, spinnerText, successMessage, options 
         logSuccess(successMessage);
         resolve({ stdout, stderr, code });
       } else {
-        logError(successMessage.replace('successfully', 'failed').replace('built', 'build failed'));
-        if (stderr) {
-          console.error(chalk.red(stderr));
+        const fallbackMessage = successMessage.replace('successfully', 'failed').replace('built', 'build failed');
+        logError(failureMessage || fallbackMessage);
+        const hasStdout = stdout && stdout.trim().length > 0;
+        const hasStderr = stderr && stderr.trim().length > 0;
+        if (hasStdout) {
+          console.error(chalk.yellow('--- Command stdout ---'));
+          console.error(stdout.trimEnd());
+        }
+        if (hasStderr) {
+          console.error(chalk.red('--- Command stderr ---'));
+          console.error(stderr.trimEnd());
+        }
+        if (!hasStdout && !hasStderr) {
+          console.error(chalk.yellow('No output captured from failed command.'));
         }
         reject(new Error(`Command failed with exit code ${code}`));
       }
@@ -184,6 +203,66 @@ function executeWithSpinner(command, args, spinnerText, successMessage, options 
       reject(error);
     });
   });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function checkPetaAuthHealth() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4000);
+
+  try {
+    const response = await fetch(petaAuthHealthUrl, { signal: controller.signal });
+    return response.ok;
+  } catch (error) {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function waitForPetaAuthHealth() {
+  const spinner = createSpinner('Waiting for peta-auth health check...');
+  spinner.start();
+
+  for (let attempt = 1; attempt <= petaAuthHealthMaxAttempts; attempt++) {
+    const healthy = await checkPetaAuthHealth();
+    if (healthy) {
+      spinner.stop();
+      logSuccess(`peta-auth is healthy (${petaAuthHealthUrl})`);
+      return;
+    }
+
+    if (attempt < petaAuthHealthMaxAttempts) {
+      await sleep(petaAuthHealthRetryIntervalMs);
+    }
+  }
+
+  spinner.stop();
+  logError(`peta-auth health check failed after ${petaAuthHealthMaxWaitMs / 1000}s (${petaAuthHealthUrl})`);
+  throw new Error('peta-auth health check failed');
+}
+
+async function startPetaAuthIfNeeded() {
+  if (!shouldAutostartPetaAuth) {
+    logInfo('Skipping peta-auth autostart (PETA_AUTH_AUTOSTART=false)');
+    console.log();
+    return;
+  }
+
+  await executeWithSpinner(
+    'docker',
+    ['compose', 'up', '-d', 'peta-auth'],
+    'Starting peta-auth...',
+    'peta-auth started',
+    {},
+    'Failed to start peta-auth'
+  );
+
+  await waitForPetaAuthHealth();
+  console.log();
 }
 
 /**
@@ -202,7 +281,10 @@ async function startApplication() {
     );
     console.log(); // Add spacing
 
-    // Step 2: TypeScript compilation (development only)
+    // Step 2: Peta Auth auto-start (optional)
+    await startPetaAuthIfNeeded();
+
+    // Step 3: TypeScript compilation (development only)
     if (isDevelopment) {
       await executeWithSpinner(
         'npm',
@@ -223,7 +305,7 @@ async function startApplication() {
       console.log();
     }
 
-    // Step 3: Port allocation (development only)
+    // Step 4: Port allocation (development only)
     let backendPort = parseInt(process.env.BACKEND_PORT || '3002');
 
     if (isDevelopment) {
@@ -239,7 +321,7 @@ async function startApplication() {
       }
     }
 
-    // Step 4: Start the application
+    // Step 5: Start the application
     const spinner = createSpinner('Starting services...');
     spinner.start();
 
@@ -376,7 +458,7 @@ async function startApplication() {
       }
     }, 10000);
 
-    // Step 5: Graceful shutdown handling
+    // Step 6: Graceful shutdown handling
     let isShuttingDown = false;
 
     process.on('SIGINT', async () => {

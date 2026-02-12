@@ -18,7 +18,7 @@ export class IpWhitelistService {
   // Logger for IpWhitelistService
   private logger = createLogger('IpWhitelistService');
 
-  constructor(private logService?: LogService) {
+  constructor() {
     // Automatically initialize when service starts
     this.initialize().catch(error => {
       this.logger.error({ error }, 'Failed to initialize IP whitelist service');
@@ -61,7 +61,7 @@ export class IpWhitelistService {
       
       this.lastCacheUpdate = Date.now();
       
-      if (this.logService) {
+      if (LogService.getInstance()) {
         this.logger.debug({ entryCount: this.whitelist.length }, 'Loaded entries from database');
       }
     } catch (error) {
@@ -113,9 +113,6 @@ export class IpWhitelistService {
   //     const isEnabled = !whitelist.includes("0.0.0.0/0");
   //     console.log(`[IpWhitelistService] Whitelist updated. Enabled: ${isEnabled}, Count: ${whitelist.length}`);
       
-  //     if (this.logService) {
-  //       console.log(`IP whitelist updated. Count: ${whitelist.length}, Contains 0.0.0.0/0: ${whitelist.includes("0.0.0.0/0")}`);
-  //     }
   //   } catch (error) {
   //     console.error('[IpWhitelistService] Failed to update whitelist:', error);
   //     throw new Error(`Failed to update IP whitelist: ${error instanceof Error ? error.message : String(error)}`);

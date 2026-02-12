@@ -23,8 +23,6 @@ export class ProxyHandler {
   private logger = createLogger('ProxyHandler');
 
   constructor(
-    private sessionStore: SessionStore,
-    private serverManager: ServerManager,
     private socketService?: SocketService
   ) {}
 
@@ -177,9 +175,9 @@ export class ProxyHandler {
     await prisma.oAuthToken.deleteMany({});
 
     // Clear all sessions
-    await this.sessionStore.removeAllSessions();
+    await SessionStore.instance.removeAllSessions();
     // Stop all servers
-    await this.serverManager.shutdown();
+    await ServerManager.instance.shutdown();
 
     // Log admin operation
     LogService.getInstance().enqueueLog({

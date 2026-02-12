@@ -3,7 +3,7 @@
  */
 
 import { prisma } from '../config/prisma.js';
-import { Prisma, IpWhitelist } from '@prisma/client';
+import { IpWhitelist } from '@prisma/client';
 
 export class IpWhitelistRepository {
   /**

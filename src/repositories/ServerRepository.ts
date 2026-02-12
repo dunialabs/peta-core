@@ -179,6 +179,68 @@ export class ServerRepository {
   static async countByCondition(where: Prisma.ServerWhereInput): Promise<number> {
     return await prisma.server.count({ where });
   }
+
+  /**
+   * Update server capabilities cache
+   */
+  static async updateCapabilitiesCache(
+    serverId: string,
+    data: {
+      tools?: any;
+      resources?: any;
+      resourceTemplates?: any;
+      prompts?: any;
+    }
+  ): Promise<void> {
+    const updateData: any = {};
+
+    if (data.tools !== undefined) {
+      updateData.cachedTools = JSON.stringify(data.tools);
+    }
+    if (data.resources !== undefined) {
+      updateData.cachedResources = JSON.stringify(data.resources);
+    }
+    if (data.resourceTemplates !== undefined) {
+      updateData.cachedResourceTemplates = JSON.stringify(data.resourceTemplates);
+    }
+    if (data.prompts !== undefined) {
+      updateData.cachedPrompts = JSON.stringify(data.prompts);
+    }
+
+    await prisma.server.update({
+      where: { serverId },
+      data: updateData
+    });
+  }
+
+  /**
+   * Get server capabilities cache
+   */
+  static async getCapabilitiesCache(serverId: string): Promise<{
+    tools?: any;
+    resources?: any;
+    resourceTemplates?: any;
+    prompts?: any;
+  } | null> {
+    const server = await prisma.server.findUnique({
+      where: { serverId },
+      select: {
+        cachedTools: true,
+        cachedResources: true,
+        cachedResourceTemplates: true,
+        cachedPrompts: true
+      }
+    });
+
+    if (!server) return null;
+
+    return {
+      tools: server.cachedTools ? JSON.parse(server.cachedTools) : undefined,
+      resources: server.cachedResources ? JSON.parse(server.cachedResources) : undefined,
+      resourceTemplates: server.cachedResourceTemplates ? JSON.parse(server.cachedResourceTemplates) : undefined,
+      prompts: server.cachedPrompts ? JSON.parse(server.cachedPrompts) : undefined
+    };
+  }
 }
 
 // Export singleton (backward compatibility)

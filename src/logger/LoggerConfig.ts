@@ -16,6 +16,27 @@ const logLevel = (process.env.LOG_LEVEL || defaultLogLevel) as 'trace' | 'debug'
 const shouldPrettyPrint = process.env.LOG_PRETTY === 'true' || (isDevelopment && process.env.LOG_PRETTY !== 'false');
 
 /**
+ * Custom error serializer to ensure all error properties are logged
+ * This ensures that Error.message and custom properties (like UserError.code) are included
+ */
+const errorSerializer = (err: Error) => {
+  const serialized: Record<string, any> = {
+    type: err.constructor.name,
+    message: err.message,
+    stack: err.stack,
+  };
+
+  // Include all custom properties (like UserError.code, McpError.code, etc.)
+  Object.keys(err).forEach((key) => {
+    if (!['name', 'message', 'stack'].includes(key)) {
+      serialized[key] = (err as any)[key];
+    }
+  });
+
+  return serialized;
+};
+
+/**
  * Base Pino configuration
  */
 export const loggerConfig: LoggerOptions = {
@@ -30,6 +51,12 @@ export const loggerConfig: LoggerOptions = {
 
   // Timestamp configuration
   timestamp: () => `,"time":"${new Date().toISOString()}"`,
+
+  // Custom serializers for better error logging
+  serializers: {
+    error: errorSerializer,
+    err: errorSerializer, // Support both 'error' and 'err' keys
+  },
 
   // Pretty printing for development
   ...(shouldPrettyPrint && {

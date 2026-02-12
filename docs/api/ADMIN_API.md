@@ -158,6 +158,119 @@ interface AdminResponse<T = any> {
 }
 ```
 
+## Data Structures Overview
+
+### Enum Reference
+
+**UserStatus**
+- `0` Disabled
+- `1` Enabled
+- `2` Pending
+- `3` Suspended
+
+**UserRole**
+- `1` Owner
+- `2` Admin
+- `3` User
+
+**ServerCategory**
+- `1` Template
+- `2` CustomRemote
+- `3` RestApi
+
+**ServerAuthType**
+- `1` ApiKey
+- `2` GoogleAuth
+- `3` NotionAuth
+- `4` FigmaAuth
+- `5` GoogleCalendarAuth
+- `6` GithubAuth
+- `7` StripeAuth
+- `8` ZendeskAuth
+- `9` CanvasAuth
+
+**ServerStatus**
+- `0` Online
+- `1` Offline
+- `2` Connecting
+- `3` Error
+- `4` Sleeping (lazy start)
+
+**DangerLevel**
+- `0` Silent
+- `1` Notification
+- `2` Approval
+
+### Permissions (used by UPDATE_USER_PERMISSIONS / CREATE_USER / UPDATE_USER)
+
+```typescript
+type Permissions = {
+  [serverId: string]: {
+    enabled: boolean;                 // required
+    serverName?: string;
+    allowUserInput?: boolean;
+    authType?: number;                // ServerAuthType
+    category?: number;                // ServerCategory
+    configTemplate?: string;          // JSON string
+    configured?: boolean;
+    status?: number;                  // ServerStatus
+    tools?: {
+      [toolName: string]: { enabled: boolean; description?: string; dangerLevel?: 0 | 1 | 2 };
+    };
+    resources?: {
+      [resourceName: string]: { enabled: boolean; description?: string };
+    };
+    prompts?: {
+      [promptName: string]: { enabled: boolean; description?: string };
+    };
+  };
+};
+```
+
+**Minimum valid structure**:
+- `enabled` must be boolean
+- `tools/resources/prompts` must be objects when present
+- Invalid structure will fail authentication (`INVALID_PERMISSIONS`)
+
+### ServerConfigCapabilities (used by UPDATE_SERVER_CAPABILITIES)
+
+```typescript
+type ServerConfigCapabilities = {
+  tools: { [name: string]: { enabled: boolean; description?: string; dangerLevel?: 0 | 1 | 2 } };
+  resources: { [name: string]: { enabled: boolean; description?: string } };
+  prompts: { [name: string]: { enabled: boolean; description?: string } };
+};
+```
+
+### EncryptedData (common encrypted field format)
+
+`encryptedToken` / `launchConfig` are JSON strings with this structure:
+```typescript
+type EncryptedData = {
+  data: string; // Base64
+  iv: string;   // Base64
+  salt: string; // Base64
+  tag: string;  // Base64
+};
+```
+
+### Decrypted launchConfig Structure (used internally when connecting)
+
+**stdio**
+```json
+{ "type": "stdio", "command": "node", "args": ["server.js"], "env": { "A": "B" }, "cwd": "/path" }
+```
+
+**http**
+```json
+{ "type": "http", "url": "https://example.com/mcp", "headers": { "Authorization": "Bearer xxx" } }
+```
+
+**sse**
+```json
+{ "type": "sse", "url": "https://example.com/sse" }
+```
+
 ## Permission Description
 
 Admin API supports two role permissions:
@@ -166,6 +279,11 @@ Admin API supports two role permissions:
 - **Owner only**: Some sensitive operations only allow Owner role to execute (specially marked in API list)
 
 Permission verification is performed in ConfigController. Requests that do not meet permission requirements will return `FORBIDDEN (1003)` error.
+
+**publicAccess and permissions merge logic**:
+- If `permissions` does not include a `serverId`, availability falls back to `server.publicAccess` (true allows access)
+- If `permissions` includes a `serverId`, `permissions[serverId].enabled` takes precedence over `publicAccess`
+- Final tool/resource/prompt visibility is the merge of server capabilities and admin permissions; you can only override `enabled` for existing capability items
 
 ---
 
@@ -208,11 +326,28 @@ null
 ```
 
 **Function Description**:
+- **Replace semantics**: `permissions` replaces the user's existing permissions (not a patch)
+- If only some serverIds are provided, others are removed and fall back to `publicAccess`
 - Update permissions field in user database
 - If user has active sessions, push permission change notifications in real-time:
   - Send `tools/list_changed` when tools change
   - Send `resources/list_changed` when resources change
   - Send `prompts/list_changed` when prompts change
+
+**Minimal example** (disable a single server):
+```json
+{
+  "targetId": "user123",
+  "permissions": {
+    "filesystem": {
+      "enabled": false,
+      "tools": {},
+      "resources": {},
+      "prompts": {}
+    }
+  }
+}
+```
 
 ---
 
@@ -226,7 +361,6 @@ null
 - `status` (number, optional): User status, defaults to `UserStatus.Enabled (1)`
 - `role` (number, optional): User role, defaults to `UserRole.User (3)`
 - `permissions` (string or object, optional): Permission configuration, defaults to `{}`
-- `serverApiKeys` (string or array, optional): Server API key list, defaults to `[]`
 - `expiresAt` (number, optional): Expiration time (Unix timestamp, seconds), defaults to `0` (never expires)
 - `createdAt` (number, optional): Creation time (Unix timestamp, seconds), defaults to current time
 - `updatedAt` (number, optional): Update time (Unix timestamp, seconds), defaults to current time
@@ -248,6 +382,11 @@ null
   }
 }
 ```
+
+**Important Notes**:
+- `encryptedToken` must be an `EncryptedData` JSON string (see Data Structures Overview)
+- For non-Owner creation, the admin token is used to decrypt `encryptedToken`, and `userId` must equal the first 32 chars of `SHA-256(token)`
+- Owner can be created only once, and must be the first user (empty database)
 
 ---
 
@@ -540,15 +679,18 @@ null
 - `serverId` (string, required): Server ID (unique identifier)
 - `serverName` (string, optional): Server name, defaults to empty string
 - `enabled` (boolean, optional): Whether enabled, defaults to `true`
-- `launchConfig` (string, optional): Launch configuration JSON, string encrypted with owner token, required when allowUserInput == false
-- `capabilities` (string or object, optional): Capability configuration, defaults to `{}`
+- `launchConfig` (string, **required**): Encrypted launch configuration JSON (EncryptedData); must be non-empty and not `{}`; encrypted with Owner token
+- `capabilities` (string or object, optional): **ignored on create**; use `UPDATE_SERVER_CAPABILITIES (2003)` to set capabilities
 - `createdAt` (number, optional): Creation time (Unix timestamp, seconds), defaults to current time
 - `updatedAt` (number, optional): Update time (Unix timestamp, seconds), defaults to current time
-- `allowUserInput` (boolean, required): Whether to allow user input, defaults to `false`
+- `allowUserInput` (boolean, optional): Whether to allow user input, defaults to `false`
 - `proxyId` (number, optional): Associated proxy ID, defaults to `0`
 - `toolTmplId` (string, optional): Tool template ID, defaults to `null`
 - `authType` (number, required): Server authorization type, defaults to 1, API Key authentication, 2 Google OAuth authentication
-- `configTemplate` (string, optional): Tool template, required when allowUserInput == true
+- `configTemplate` (string, **required**): JSON config template string; must be non-empty and not `{}` (validated regardless of allowUserInput)
+- `category` (number, required): Server category. 1: template server, 2: custom remote server, 3: RESTful API server
+- `lazyStartEnabled` (boolean, optional): Enable lazy loading for this server. When true, server loads into memory but delays startup until first use, and auto-shuts down when idle. Defaults to `true`
+- `publicAccess` (boolean, optional): Whether public access is enabled. If true, users without explicit permissions can still access this server. Defaults to `false`
 
 **Return Result** (data):
 ```json
@@ -558,6 +700,80 @@ null
     "serverName": "My Server",
     "enabled": true,
     ...
+  }
+}
+```
+
+**ConfigTemplate notes (by category)**
+- **Template (1)**: must include `mcpJsonConf` and `credentials`, optional `oAuthConfig`
+- **CustomRemote (2)**: must include base URL info (used to assemble launchConfig for user config)
+- **RestApi (3)**: must include `apis[0].auth`; system injects `launchConfig.auth`
+
+**OAuth Template note**:
+- If `configTemplate.oAuthConfig.clientId` exists, the decrypted `launchConfig` must include `oauth` fields (`clientId`, `clientSecret`, `code`, `redirectUri`, etc.); system exchanges and persists tokens
+
+**Input examples (by category)**:
+
+**Template (1) - ApiKey (Postgres)**:
+```json
+{
+  "action": 2010,
+  "data": {
+    "serverId": "postgres",
+    "serverName": "Postgres",
+    "category": 1,
+    "authType": 1,
+    "allowUserInput": true,
+    "configTemplate": "{\"toolId\":\"5f2504e04f8911d39a0c0331222c312\",\"name\":\"Postgres\",\"description\":\"PostgreSQL MCP server running in Docker with full read-write access.\",\"credentials\":\"[{\\\"name\\\":\\\"POSTGRES URL\\\",\\\"description\\\":\\\"\\\",\\\"dataType\\\":1,\\\"key\\\":\\\"YOUR_POSTGRES_URL\\\"}]\",\"mcpJsonConf\":\"{\\\"command\\\":\\\"docker\\\",\\\"args\\\":[\\\"run\\\",\\\"-i\\\",\\\"--rm\\\",\\\"--pull=always\\\",\\\"-e\\\",\\\"POSTGRES_URL\\\",\\\"-e\\\",\\\"ACCESS_MODE\\\",\\\"ghcr.io/dunialabs/mcp-servers/postgres:latest\\\"],\\\"env\\\":{\\\"POSTGRES_URL\\\":\\\"YOUR_POSTGRES_URL\\\",\\\"ACCESS_MODE\\\":\\\"readwrite\\\"}}\",\"authType\":1,\"authConfig\":\"\",\"toolDefaultConfig\":\"{\\\"postgresListSchemas\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":0},\\\"postgresListTables\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":0},\\\"postgresDescribeTable\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":0},\\\"postgresGetTableStats\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":0},\\\"postgresExecuteQuery\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":1},\\\"postgresExecuteWrite\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":2},\\\"postgresExplainQuery\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":2}}\"}",
+    "launchConfig": "{\"data\":\"...\",\"iv\":\"...\",\"salt\":\"...\",\"tag\":\"...\"}"
+  }
+}
+```
+
+**Template (1) - OAuth (Notion)**:
+```json
+{
+  "action": 2010,
+  "data": {
+    "serverId": "notion",
+    "serverName": "Notion",
+    "category": 1,
+    "authType": 3,
+    "allowUserInput": true,
+    "configTemplate": "{\"toolId\":\"a7c3f8e9b2d64a5891f3c7b0e4d2a8f6\",\"name\":\"Notion\",\"description\":\"Model Context Protocol (MCP) server for Notion integration.\",\"credentials\":\"[{\\\"name\\\":\\\"ClientId\\\",\\\"description\\\":\\\"An identifier for your integration, found in the integration settings.\\\",\\\"dataType\\\":1,\\\"key\\\":\\\"YOUR_CLIENT_ID\\\"},{\\\"name\\\":\\\"ClientSecret\\\",\\\"description\\\":\\\"Client Secret\\\",\\\"dataType\\\":1,\\\"key\\\":\\\"YOUR_CLIENT_SECRET\\\"},{\\\"name\\\":\\\"OAuth Code\\\",\\\"description\\\":\\\"OAuth Authorization Code\\\",\\\"dataType\\\":1,\\\"key\\\":\\\"YOUR_OAUTH_CODE\\\"},{\\\"name\\\":\\\"OAuth Redirect URI\\\",\\\"description\\\":\\\"OAuth Redirect URI\\\",\\\"dataType\\\":1,\\\"key\\\":\\\"YOUR_OAUTH_REDIRECT_URL\\\"}]\",\"mcpJsonConf\":\"{\\\"command\\\":\\\"docker\\\",\\\"args\\\":[\\\"run\\\",\\\"--pull=always\\\",\\\"-i\\\",\\\"--rm\\\",\\\"-e\\\",\\\"notionToken\\\",\\\"ghcr.io/dunialabs/mcp-servers/notion:latest\\\"],\\\"oauth\\\":{\\\"clientId\\\":\\\"YOUR_CLIENT_ID\\\",\\\"clientSecret\\\":\\\"YOUR_CLIENT_SECRET\\\",\\\"accessToken\\\":\\\"YOUR_ACCESS_TOKEN\\\",\\\"code\\\":\\\"YOUR_OAUTH_CODE\\\",\\\"redirectUri\\\":\\\"YOUR_OAUTH_REDIRECT_URL\\\"}}\",\"authType\":3,\"authConfig\":\"\",\"oAuthConfig\":{\"authorizationUrl\":\"https://api.notion.com/v1/oauth/authorize\",\"tokenUrl\":\"https://api.notion.com/v1/oauth/token\",\"clientId\":\"2b1d872b-594c-80c7-a98e-0037f2066ebe\",\"userClientId\":\"2ced872b-594c-80d5-a0c5-0037f162006c\",\"responseType\":\"code\",\"extraParams\":{\"owner\":\"user\"}},\"toolDefaultConfig\":\"{\\\"notionGetPage\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":0},\\\"notionCreatePage\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":1},\\\"notionUpdatePage\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":1},\\\"notionGetPageProperties\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":0},\\\"notionGetDatabase\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":0},\\\"notionQueryDatabase\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":0},\\\"notionCreateDatabase\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":1},\\\"notionUpdateDatabase\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":1},\\\"notionGetBlockChildren\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":0},\\\"notionAppendBlocks\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":1},\\\"notionGetBlock\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":0},\\\"notionUpdateBlock\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":1},\\\"notionDeleteBlock\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":2},\\\"notionSearch\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":0},\\\"notionCreateComment\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":1},\\\"notionGetComments\\\":{\\\"enabled\\\":true,\\\"dangerLevel\\\":0}}\"}",
+    "launchConfig": "{\"data\":\"...\",\"iv\":\"...\",\"salt\":\"...\",\"tag\":\"...\"}"
+  }
+}
+```
+
+**CustomRemote (2)**:
+```json
+{
+  "action": 2010,
+  "data": {
+    "serverId": "custom-remote",
+    "serverName": "Custom Remote",
+    "category": 2,
+    "authType": 1,
+    "allowUserInput": true,
+    "configTemplate": "{\"url\":\"https://example.com/mcp\"}",
+    "launchConfig": "{\"data\":\"...\",\"iv\":\"...\",\"salt\":\"...\",\"tag\":\"...\"}"
+  }
+}
+```
+
+**RestApi (3)**:
+```json
+{
+  "action": 2010,
+  "data": {
+    "serverId": "rest-api",
+    "serverName": "REST API",
+    "category": 3,
+    "authType": 1,
+    "allowUserInput": true,
+    "configTemplate": "{\"baseUrl\":\"https://api.example.com\",\"apis\":[{\"path\":\"/\",\"auth\":{}}]}",
+    "launchConfig": "{\"data\":\"...\",\"iv\":\"...\",\"salt\":\"...\",\"tag\":\"...\"}"
   }
 }
 ```
@@ -600,9 +816,12 @@ null
 **Request Parameters** (data):
 - `serverId` (string, required): Server ID
 - `serverName` (string, optional): Server name
-- `launchConfig` (string, optional): Launch configuration, JSON configuration encrypted with owner token, cannot update when allowUserInput == true
-- `capabilities` (string or object, optional): Capability configuration, cannot update when allowUserInput == true
+- `launchConfig` (string or object, optional): Launch configuration encrypted with owner token. **Not updatable for Template with allowUserInput=true**
+- `capabilities` (string or object, optional): Capability configuration. **Merge semantics; omitted fields are not removed**
 - `enabled` (boolean, optional): Whether enabled
+- `configTemplate` (string, optional): Only RestApi/CustomRemote can update
+- `lazyStartEnabled` (boolean, optional): Enable lazy loading for this server. When true, server loads into memory but delays startup until first use, and auto-shuts down when idle
+- `publicAccess` (boolean, optional): Public access flag
 
 **Return Result** (data):
 ```json
@@ -615,8 +834,54 @@ null
 ```
 
 **Function Description**:
+- `allowUserInput` is immutable after creation
+- `configTemplate` is only updatable for RestApi/CustomRemote; Template updates will error
+- `capabilities` uses **merge semantics**; explicitly set `enabled=false` to disable
 - If server is running and `capabilities` or `launchConfig` is updated, will trigger reload or restart
 - If `enabled` changes to `false`, will stop server
+
+**Input examples (by category)**:
+
+**Template (1) - update name/enable only**:
+```json
+{
+  "action": 2012,
+  "data": {
+    "serverId": "notion",
+    "serverName": "Notion Personal",
+    "enabled": true
+  }
+}
+```
+
+**CustomRemote (2) - update configTemplate and launchConfig**:
+```json
+{
+  "action": 2012,
+  "data": {
+    "serverId": "custom-remote",
+    "configTemplate": "{\"url\":\"https://example.com/mcp\"}",
+    "launchConfig": "{\"data\":\"...\",\"iv\":\"...\",\"salt\":\"...\",\"tag\":\"...\"}"
+  }
+}
+```
+
+**RestApi (3) - update capabilities (merge)**:
+```json
+{
+  "action": 2012,
+  "data": {
+    "serverId": "rest-api",
+    "capabilities": {
+      "tools": {
+        "write_record": { "enabled": false, "description": "Disable write" }
+      },
+      "resources": {},
+      "prompts": {}
+    }
+  }
+}
+```
 
 ---
 

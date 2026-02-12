@@ -43,20 +43,14 @@ export class GlobalRequestRouter {
   // Logger for GlobalRequestRouter
   private logger = createLogger('GlobalRequestRouter');
   
-  private constructor(
-    private logService: LogService,
-    private sessionStore: SessionStore
-  ) {}
+  private constructor() {}
   
   /**
    * Get singleton instance
    */
-  static getInstance(
-    logService: LogService,
-    sessionStore: SessionStore
-  ): GlobalRequestRouter {
+  static getInstance(): GlobalRequestRouter {
     if (!GlobalRequestRouter.instance) {
-      GlobalRequestRouter.instance = new GlobalRequestRouter(logService, sessionStore);
+      GlobalRequestRouter.instance = new GlobalRequestRouter();
     }
     return GlobalRequestRouter.instance;
   }
@@ -81,7 +75,7 @@ export class GlobalRequestRouter {
     }, 'Handling sampling request from server');
 
     // Get ProxySession through sessionId
-    const proxySession = this.sessionStore.getProxySession(sessionId);
+    const proxySession = SessionStore.instance.getProxySession(sessionId);
     if (!proxySession) {
       this.logger.error({ sessionId }, 'No ProxySession found for sessionId');
       throw new McpError(
@@ -91,7 +85,7 @@ export class GlobalRequestRouter {
     }
 
     // Get SessionLogger for this session
-    const sessionLogger = this.sessionStore.getSessionLogger(sessionId);
+    const sessionLogger = SessionStore.instance.getSessionLogger(sessionId);
 
     // Log ReverseSamplingRequest (1201)
     const uniformRequestId = LogService.getInstance().generateUniformRequestId(sessionId);
@@ -181,7 +175,7 @@ export class GlobalRequestRouter {
     }, 'Handling roots list request from server');
 
     // Get ProxySession through sessionId
-    const proxySession = this.sessionStore.getProxySession(sessionId);
+    const proxySession = SessionStore.instance.getProxySession(sessionId);
     if (!proxySession) {
       this.logger.error({ sessionId }, 'No ProxySession found for sessionId');
       throw new McpError(
@@ -191,7 +185,7 @@ export class GlobalRequestRouter {
     }
 
     // Get SessionLogger for this session
-    const sessionLogger = this.sessionStore.getSessionLogger(sessionId);
+    const sessionLogger = SessionStore.instance.getSessionLogger(sessionId);
 
     // Log ReverseRootsRequest (1203)
     const uniformRequestId = LogService.getInstance().generateUniformRequestId(sessionId);
@@ -278,11 +272,11 @@ export class GlobalRequestRouter {
       proxyRequestId: proxyContext.proxyRequestId,
       parentUniformRequestId: proxyContext.uniformRequestId,
       method: 'elicit/input',
-      requestedSchema: request.params.requestedSchema
+      requestedSchema: request.params
     }, 'Handling elicitation request from server');
 
     // Get ProxySession through sessionId
-    const proxySession = this.sessionStore.getProxySession(sessionId);
+    const proxySession = SessionStore.instance.getProxySession(sessionId);
     if (!proxySession) {
       this.logger.error({ sessionId }, 'No ProxySession found for sessionId');
       throw new McpError(
@@ -292,7 +286,7 @@ export class GlobalRequestRouter {
     }
 
     // Get SessionLogger for this session
-    const sessionLogger = this.sessionStore.getSessionLogger(sessionId);
+    const sessionLogger = SessionStore.instance.getSessionLogger(sessionId);
 
     // Log ReverseElicitRequest (1205)
     const uniformRequestId = LogService.getInstance().generateUniformRequestId(sessionId);
@@ -356,7 +350,7 @@ export class GlobalRequestRouter {
     this.logger.info({ serverId }, 'Broadcasting tools list changed for server');
     
     // Get all sessions
-    const sessions = this.sessionStore.getAllSessions();
+    const sessions = SessionStore.instance.getAllSessions();
     const notificationKey = `tools_changed_${serverId}_${Date.now()}`;
 
     socketNotifier.notifyUserPermissionChangedByServer(serverId);
@@ -400,7 +394,7 @@ export class GlobalRequestRouter {
     this.logger.info({ serverId }, 'Broadcasting resources list changed for server');
     
     // Get all sessions
-    const sessions = this.sessionStore.getAllSessions();
+    const sessions = SessionStore.instance.getAllSessions();
     const notificationKey = `resources_changed_${serverId}_${Date.now()}`;
 
     socketNotifier.notifyUserPermissionChangedByServer(serverId);
@@ -455,7 +449,7 @@ export class GlobalRequestRouter {
     this.logger.debug({ serverId, resourceUri, subscriberCount: subscribers.size }, 'Broadcasting resource updated to subscribers');
 
     // Get all sessions
-    const sessions = this.sessionStore.getAllSessions();
+    const sessions = SessionStore.instance.getAllSessions();
     const notificationKey = `resource_updated_${serverId}_${resourceUri}_${Date.now()}`;
 
     for (const session of sessions) {
@@ -503,7 +497,7 @@ export class GlobalRequestRouter {
     this.logger.info({ serverId }, 'Broadcasting prompts list changed for server');
     
     // Get all sessions
-    const sessions = this.sessionStore.getAllSessions();
+    const sessions = SessionStore.instance.getAllSessions();
     const notificationKey = `prompts_changed_${serverId}_${Date.now()}`;
 
     socketNotifier.notifyUserPermissionChangedByServer(serverId);

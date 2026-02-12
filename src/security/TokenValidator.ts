@@ -1,8 +1,8 @@
 import { UserRepository } from '../repositories/UserRepository.js';
 import { AuthContext, AuthError, AuthErrorType, isValidPermissions } from '../types/auth.types.js';
-import { UserStatus, UserRole } from '../types/enums.js';
+import { UserStatus } from '../types/enums.js';
 import { CryptoService } from './CryptoService.js';
-import { McpServerCapabilities, Permissions } from '../mcp/types/mcp.js';
+import { Permissions } from '../mcp/types/mcp.js';
 
 export class TokenValidator {
 
@@ -65,7 +65,7 @@ export class TokenValidator {
       );
     }
     const permissions = permissionsRaw as Permissions;
-    const userPreferences = JSON.parse(user.userPreferences) as Permissions;
+    const userPreferences = JSON.parse(user.userPreferences || '{}') as Permissions;
 
     // 9. Construct authentication context
     return {
@@ -77,7 +77,7 @@ export class TokenValidator {
       userPreferences: userPreferences,
       launchConfigs: user.launchConfigs,
       authenticatedAt: new Date(),
-      expiresAt: user.expiresAt && user.expiresAt > 0 ? Math.floor(user.expiresAt / 1000) : null,
+      expiresAt: user.expiresAt && user.expiresAt > 0 ? user.expiresAt : null,
       rateLimit: user.ratelimit
     };
   }

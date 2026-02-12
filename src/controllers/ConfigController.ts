@@ -17,6 +17,7 @@ import { ProxyHandler } from './handlers/ProxyHandler.js';
 import { BackupHandler } from './handlers/BackupHandler.js';
 import { LogHandler } from './handlers/LogHandler.js';
 import { CloudflaredHandler } from './handlers/CloudflaredHandler.js';
+import { SkillsHandler } from './handlers/SkillsHandler.js';
 import { UserRole } from '../types/enums.js';
 import { createLogger } from '../logger/index.js';
 import { SocketService } from '../socket/SocketService.js';
@@ -34,24 +35,24 @@ export class ConfigController {
   private backupHandler: BackupHandler;
   private logHandler: LogHandler;
   private cloudflaredHandler: CloudflaredHandler;
+  private skillsHandler: SkillsHandler;
   
   // Logger for ConfigController
   private logger = createLogger('ConfigController');
 
   constructor(
-    private sessionStore: SessionStore,
-    private serverManager: ServerManager,
     private ipWhitelistService?: IpWhitelistService,
   ) {
     // Initialize all Handlers
-    this.userHandler = new UserHandler(sessionStore, serverManager);
-    this.serverHandler = new ServerHandler(sessionStore, serverManager);
-    this.queryHandler = new QueryHandler(sessionStore, serverManager);
+    this.userHandler = new UserHandler();
+    this.serverHandler = new ServerHandler();
+    this.queryHandler = new QueryHandler();
     this.ipWhitelistHandler = new IpWhitelistHandler(ipWhitelistService!);
-    this.proxyHandler = new ProxyHandler(sessionStore, serverManager);
-    this.backupHandler = new BackupHandler(sessionStore, serverManager, ipWhitelistService!);
+    this.proxyHandler = new ProxyHandler();
+    this.backupHandler = new BackupHandler(ipWhitelistService!);
     this.logHandler = new LogHandler();
     this.cloudflaredHandler = new CloudflaredHandler();
+    this.skillsHandler = new SkillsHandler();
   }
 
   /**
@@ -98,13 +99,20 @@ export class ConfigController {
         AdminActionType.CREATE_PROXY,
         AdminActionType.CREATE_USER,
         AdminActionType.GET_OWNER,
-        AdminActionType.RESTORE_DATABASE].includes(adminRequest.action)) {
+        AdminActionType.RESTORE_DATABASE,
+        AdminActionType.COUNT_USERS,
+        AdminActionType.COUNT_SERVERS].includes(adminRequest.action)) {
         if (!token) {
           throw new AdminError('Token is required', AdminErrorCode.FORBIDDEN);
         }
 
         if (req.authContext?.role !== UserRole.Owner && req.authContext?.role !== UserRole.Admin) {
           throw new AdminError('Only Owner and Admin role can perform admin operations.', AdminErrorCode.FORBIDDEN);
+        }
+
+        // Cache Owner token for lazy start
+        if (req.authContext?.role === UserRole.Owner && token) {
+          ServerManager.instance.setOwnerToken(token);
         }
       }
 
@@ -176,7 +184,7 @@ export class ConfigController {
           if (req.authContext?.role !== UserRole.Owner) {
             throw new AdminError('Only Owner role can create server.', AdminErrorCode.FORBIDDEN);
           }
-          result = await this.serverHandler.handleCreateServer(adminRequest);
+          result = await this.serverHandler.handleCreateServer(adminRequest, token!);
           break;
         case AdminActionType.GET_SERVERS:
           result = await this.serverHandler.handleGetServers(adminRequest);
@@ -294,6 +302,32 @@ export class ConfigController {
           result = await this.cloudflaredHandler.handleStopCloudflared(adminRequest);
           break;
 
+        // ==================== Skills Operations (10040-10043) ====================
+        case AdminActionType.LIST_SKILLS:
+          result = await this.skillsHandler.handleListSkills(adminRequest);
+          break;
+        case AdminActionType.UPLOAD_SKILL:
+          // Only Owner role can upload skills
+          if (req.authContext?.role !== UserRole.Owner) {
+            throw new AdminError('Only Owner role can upload skills.', AdminErrorCode.FORBIDDEN);
+          }
+          result = await this.skillsHandler.handleUploadSkill(adminRequest);
+          break;
+        case AdminActionType.DELETE_SKILL:
+          // Only Owner role can delete skills
+          if (req.authContext?.role !== UserRole.Owner) {
+            throw new AdminError('Only Owner role can delete skills.', AdminErrorCode.FORBIDDEN);
+          }
+          result = await this.skillsHandler.handleDeleteSkill(adminRequest);
+          break;
+        case AdminActionType.DELETE_SERVER_SKILLS:
+          // Only Owner role can delete server skills
+          if (req.authContext?.role !== UserRole.Owner) {
+            throw new AdminError('Only Owner role can delete server skills.', AdminErrorCode.FORBIDDEN);
+          }
+          result = await this.skillsHandler.handleDeleteServerSkills(adminRequest);
+          break;
+
         default:
           const errorResponse: AdminResponse = {
             success: false,
@@ -314,7 +348,8 @@ export class ConfigController {
       res.json(successResponse);
 
     } catch (error) {
-      this.logger.error({ error }, 'Admin request error');
+      const action = req.body.action;
+      this.logger.error({ action, error }, 'Admin request error');
       let code = AdminErrorCode.INVALID_REQUEST;
       if (error instanceof AdminError) {
         code = error.code;

@@ -9,11 +9,8 @@ import { CloudflaredService } from '../../services/CloudflaredService.js';
  * Controller layer: Responsible for request validation, logging, calls CloudflaredService to handle business logic
  */
 export class CloudflaredHandler {
-  private cloudflaredService: CloudflaredService;
 
-  constructor() {
-    this.cloudflaredService = CloudflaredService.getInstance();
-  }
+  constructor() {}
 
   /**
    * Update cloudflared configuration (8001)
@@ -61,7 +58,7 @@ export class CloudflaredHandler {
     }
 
     // Call service layer to update configuration
-    const result = await this.cloudflaredService.updateConfig(
+    const result = await CloudflaredService.getInstance().updateConfig(
       proxy.id,
       tunnelId,
       subdomain,
@@ -109,7 +106,7 @@ export class CloudflaredHandler {
     }
 
     // Call service layer to query configuration
-    const dnsConfs = await this.cloudflaredService.getConfigs(filters);
+    const dnsConfs = await CloudflaredService.getInstance().getConfigs(filters);
 
     return { dnsConfs: dnsConfs };
   }
@@ -126,7 +123,7 @@ export class CloudflaredHandler {
     }
 
     // Call service layer to delete configuration
-    const result = await this.cloudflaredService.deleteConfig(id, tunnelId);
+    const result = await CloudflaredService.getInstance().deleteConfig(id, tunnelId);
 
     // Log
     LogService.getInstance().enqueueLog({
@@ -142,7 +139,7 @@ export class CloudflaredHandler {
    */
   async handleRestartCloudflared(request: AdminRequest<any>): Promise<any> {
     // Call service layer to restart
-    const result = await this.cloudflaredService.restartCloudflared();
+    const result = await CloudflaredService.getInstance().restartCloudflared();
 
     // Log
     LogService.getInstance().enqueueLog({
@@ -161,7 +158,7 @@ export class CloudflaredHandler {
    */
   async handleStopCloudflared(request: AdminRequest<any>): Promise<any> {
     // Call service layer to stop
-    const result = await this.cloudflaredService.stopCloudflared();
+    const result = await CloudflaredService.getInstance().stopCloudflared();
 
     // Log
     LogService.getInstance().enqueueLog({

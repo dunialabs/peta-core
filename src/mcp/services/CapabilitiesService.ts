@@ -7,38 +7,28 @@
  * 3. Supports reuse in multiple places (Socket notifications, request-response, API interfaces, etc.)
  */
 
-import { SessionStore } from '../core/SessionStore.js';
 import { ServerManager } from '../core/ServerManager.js';
 import { UserRepository } from '../../repositories/UserRepository.js';
-import { ClientSession } from '../core/ClientSession.js';
 import {
   McpServerCapabilities,
   Permissions,
+  ServerConfigCapabilities,
   ServerConfigWithEnabled
 } from '../types/mcp.js';
 import { DangerLevel, ServerStatus } from '../../types/enums.js';
-import ServerRepository from '../../repositories/ServerRepository.js';
+import { ServerContext } from '../core/ServerContext.js';
 
 export class CapabilitiesService {
   private static instance: CapabilitiesService;
 
-  private constructor(
-    private sessionStore: SessionStore,
-    private serverManager: ServerManager
-  ) {}
+  private constructor() {}
 
   /**
    * Get singleton instance
    */
-  static getInstance(
-    sessionStore?: SessionStore,
-    serverManager?: ServerManager
-  ): CapabilitiesService {
+  static getInstance(): CapabilitiesService {
     if (!CapabilitiesService.instance) {
-      if (!sessionStore || !serverManager) {
-        throw new Error('CapabilitiesService not initialized. Call getInstance() with parameters first.');
-      }
-      CapabilitiesService.instance = new CapabilitiesService(sessionStore, serverManager);
+      CapabilitiesService.instance = new CapabilitiesService();
     }
     return CapabilitiesService.instance;
   }
@@ -58,7 +48,6 @@ export class CapabilitiesService {
       return {};
     }
 
-    const userLaunchConfigs = JSON.parse(user.launchConfigs ?? '{}') as { [serverId: string]: string };
     const userPreferences = JSON.parse(user.userPreferences ?? '{}') as McpServerCapabilities;
 
     const capabilities = await this.getCapabilitiesFromDatabase(userId);
@@ -87,28 +76,6 @@ export class CapabilitiesService {
             if (promptConfig.enabled === false) {
               delete serverConfig.prompts[promptName];
             }
-          }
-        }
-        
-        const server = await ServerRepository.findByServerId(serverId);
-        if (server && server.allowUserInput) {
-          const serverContext = this.serverManager.getTemporaryServer(serverId, userId);
-          if (serverContext) {
-            const mcpCapabilities = serverContext.getMcpCapabilities();
-            capabilities[serverId] = {
-              ...mcpCapabilities,
-              configured: userLaunchConfigs[serverId] ? true : false
-            };
-          } else {
-            capabilities[serverId] = {
-              ...(userPreferences[serverId] ?? {}),
-              enabled: true,
-              serverName: server.serverName,
-              allowUserInput: server.allowUserInput,
-              authType: server.authType,
-              configTemplate: server.configTemplate || '',
-              configured: userLaunchConfigs[serverId] ? true : false
-            };
           }
         }
       }
@@ -158,25 +125,24 @@ export class CapabilitiesService {
 
     // Parse user permissions
     const permissions = JSON.parse(user.permissions) as Permissions;
+    const launchConfigs = JSON.parse(user.launchConfigs ?? '{}') as { [serverId: string]: string };
     const capabilities: McpServerCapabilities = {};
 
     // Iterate through all servers
-    const allServers = await this.serverManager.getAllServers();
+    const allServers = await ServerManager.instance.getAllEnabledServers();
     for (const server of allServers) {
-      if (server.enabled === false) {
-        continue;
-      }
-
-      const configTemplate = server.configTemplate;
-      if (server.allowUserInput === true && (!configTemplate || configTemplate.trim() === '')) {
-        continue;
-      }
+      const configTemplate = server.allowUserInput ? server.configTemplate ?? '{}' : '{}';
 
       const serverId = server.serverId;
-      const enabled = permissions[serverId]?.enabled ?? true;
+      const enabled = permissions[serverId]?.enabled ?? server.publicAccess;
 
       // Get server capability configuration
-      const serverContext = this.serverManager.getServerContext(serverId);
+      let serverContext: ServerContext | undefined;
+      if (server.allowUserInput) {
+        serverContext = ServerManager.instance.getTemporaryServer(serverId, userId);
+      } else {
+        serverContext = ServerManager.instance.getServerContext(serverId);
+      }
       let mcpCapabilities: ServerConfigWithEnabled;
       let status: ServerStatus;
       if (serverContext) {
@@ -185,7 +151,19 @@ export class CapabilitiesService {
         status = serverContext.status;
       } else {
         // Get from database
-        mcpCapabilities = JSON.parse(server.capabilities) as ServerConfigWithEnabled;
+        const capabilities = JSON.parse(server.capabilities) as ServerConfigCapabilities;
+        mcpCapabilities = {
+          tools: capabilities.tools ?? {},
+          resources: capabilities.resources ?? {},
+          prompts: capabilities.prompts ?? {},
+          enabled: enabled,
+          serverName: server.serverName,
+          allowUserInput: server.allowUserInput,
+          authType: server.authType,
+          category: server.category,
+          configTemplate: configTemplate,
+          configured: true,
+        };
         status = ServerStatus.Offline;
       }
 
@@ -244,7 +222,7 @@ export class CapabilitiesService {
 
       // Construct complete server capability configuration
       // Determine if it's a user-configured Server
-      const userConfigured = server.allowUserInput && user.launchConfigs && JSON.parse(user.launchConfigs)[serverId];
+      const userConfigured = launchConfigs[serverId] !== undefined ;
 
       capabilities[serverId] = {
         ...mcpCapabilities,
@@ -252,8 +230,9 @@ export class CapabilitiesService {
         serverName: server.serverName,
         allowUserInput: server.allowUserInput,
         authType: server.authType,
+        category: server.category,
         configTemplate: configTemplate,
-        configured: server.allowUserInput ? Boolean(userConfigured) : false,
+        configured: server.allowUserInput ? userConfigured : true,
         status: status
       } as ServerConfigWithEnabled;
     }

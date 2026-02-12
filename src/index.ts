@@ -23,9 +23,12 @@ import { OAuthRouter } from './oauth/OAuthRouter.js';
 import { MCPRouter } from './mcp/MCPRouter.js';
 import { SocketService } from './socket/SocketService.js';
 import { socketNotifier } from './socket/SocketNotifier.js';
+import { UserAuthMiddleware } from './user/UserAuthMiddleware.js';
+import { UserController } from './user/UserController.js';
+import { UserRequestHandler } from './user/UserRequestHandler.js';
 
 import cors from 'cors';
-import { DEFAULT_PROTOCOL_VERSION } from './config/mcpSessionConfig.js';
+import { LATEST_PROTOCOL_VERSION }  from "@modelcontextprotocol/sdk/types.js";
 import { CapabilitiesService } from './mcp/services/CapabilitiesService.js';
 import { APP_INFO } from './config/config.js';
 import { createLogger } from './logger/index.js';
@@ -72,24 +75,23 @@ export async function initializeAuthModule() {
   const tokenValidator = new TokenValidator();
   
   // 3. Create session store
-  const sessionStore = new SessionStore(logService);
+  const sessionStore = SessionStore.instance;
   
   // 5. Create rate limit service
-  const rateLimitService = new RateLimitService(logService);
+  const rateLimitService = new RateLimitService();
   
   // 6. Create rate limit middleware
   const rateLimitMiddleware = new RateLimitMiddleware(rateLimitService);
   
   // 7. Create IP whitelist service
-  const ipWhitelistService = new IpWhitelistService(logService);
+  const ipWhitelistService = new IpWhitelistService();
   
   // 8. Create IP whitelist middleware
-  const ipWhitelistMiddleware = new IpWhitelistMiddleware(ipWhitelistService, logService);
+  const ipWhitelistMiddleware = new IpWhitelistMiddleware(ipWhitelistService);
   
   // 9. Create authentication middleware
   const authMiddleware = new AuthMiddleware(
-    tokenValidator,
-    sessionStore
+    tokenValidator
   );
   
   // 9.1. Create admin authentication middleware
@@ -98,17 +100,23 @@ export async function initializeAuthModule() {
   // 6. Create global server manager
   const serverManager = ServerManager.instance;
   
-  // 6.1. Set ServerManager dependencies
-  serverManager.setDependencies(logService, sessionStore);
-
-  CapabilitiesService.getInstance(sessionStore, serverManager);
+  CapabilitiesService.getInstance();
   
   // 10. Create configuration management interface
   const configController = new ConfigController(
-    sessionStore,
-    serverManager,
     ipWhitelistService
   );
+
+  // 10.1. Initialize User module (transport-agnostic business logic layer)
+  const userRequestHandler = UserRequestHandler.instance;
+
+  // 10.2. Create user authentication middleware
+  const userAuthMiddleware = new UserAuthMiddleware(tokenValidator);
+
+  // 10.3. Create user controller
+  const userController = UserController.instance;
+
+  appLogger.info('User module initialized successfully');
 
   // 9. Initialize event cleanup service
   const eventCleanupService = new EventCleanupService();
@@ -138,6 +146,9 @@ export async function initializeAuthModule() {
     sessionStore,
     serverManager,
     configController,
+    userRequestHandler,
+    userAuthMiddleware,
+    userController,
     logService,
     logSyncService,
     eventCleanupService,
@@ -267,7 +278,7 @@ export async function startApplication() {
           'WWW-Authenticate': `Bearer error="invalid_token", error_description="Missing Authorization header", resource_metadata="${metadataUrl}"`,
           'Allow': CORS_CONFIG.ALLOW_METHODS,
           'Content-Type': 'application/json',
-          'mcp-protocol-version': DEFAULT_PROTOCOL_VERSION,
+          'mcp-protocol-version': LATEST_PROTOCOL_VERSION,
           connection: 'keep-alive',
         }).end(
           JSON.stringify({
@@ -286,7 +297,7 @@ export async function startApplication() {
           'Access-Control-Expose-Headers': CORS_CONFIG.EXPOSE_HEADERS_BASIC,
           'Allow': CORS_CONFIG.ALLOW_METHODS,
           'Content-Type': 'application/json',
-          'mcp-protocol-version': DEFAULT_PROTOCOL_VERSION,
+          'mcp-protocol-version': LATEST_PROTOCOL_VERSION,
           connection: 'keep-alive',
         }).end(
           JSON.stringify({
@@ -323,9 +334,10 @@ export async function startApplication() {
     // ==================== General middleware ====================
 
     // Body parser middleware - must be before middleware that needs to access req.body
-    app.use(express.json());
+    // Increased limit for Skills ZIP file uploads (max 10MB + JSON overhead)
+    app.use(express.json({ limit: '15mb' }));
     // Add URL-encoded form parsing (required for OAuth)
-    app.use(express.urlencoded({ extended: true }));
+    app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
     // Commented out in production, can be enabled in development for debugging
     app.use((req, res, next) => {
@@ -355,7 +367,7 @@ export async function startApplication() {
     // ==================== MCP route registration ====================
 
     // Create and register MCP routes
-    const mcpRouter = new MCPRouter(authModule.sessionStore);
+    const mcpRouter = new MCPRouter();
     mcpRouter.registerRoutes(app, {
       ipWhitelistMiddleware: authModule.ipWhitelistMiddleware,
       authMiddleware: authModule.authMiddleware,
@@ -370,6 +382,15 @@ export async function startApplication() {
 
     // Register configuration management routes
     authModule.configController.registerRoutes(app);
+
+    // ==================== User route registration ====================
+
+    // Register user routes (requires valid user token, no role check)
+    // Apply user authentication middleware to /user routes
+    app.use('/user', authModule.userAuthMiddleware.authenticate);
+
+    // Register user routes
+    authModule.userController.registerRoutes(app);
 
     // Root path handler - returns basic service information
     app.get('/', (req, res) => {
@@ -408,7 +429,7 @@ export async function startApplication() {
     // Health check endpoint
     app.get('/health', async (req, res) => {
       try {
-        const serverStatus = await authModule.serverManager.healthCheck();
+        const serverStatus = await authModule.serverManager.getAllServersStatus();
         const sessionCount = authModule.sessionStore.getActiveSessionCount();
 
         res.status(200).json({
@@ -493,12 +514,10 @@ export async function startApplication() {
 
     // Create and initialize SocketService
     const socketService = new SocketService();
-    socketService.setSessionStore(authModule.sessionStore); // Set SessionStore
     socketService.initialize(server);
 
     // Set SocketNotifier
     socketNotifier.setSocketService(socketService);
-    socketNotifier.setSessionStore(authModule.sessionStore);  // Set SessionStore
 
     // Update socketService reference in authModule
     authModule.socketService = socketService;
@@ -519,7 +538,12 @@ export async function startApplication() {
     }
     
     // Graceful shutdown handling
+    let sigtermHandler: (() => void) | null = null;
+    let sigintHandler: (() => void) | null = null;
+
     const shutdown = async (signal: string) => {
+      const exitCode = (signal === 'UNCAUGHT_EXCEPTION' || signal === 'UNHANDLED_REJECTION') ? 1 : 0;
+
       // Prevent duplicate shutdown process execution
       if (isShuttingDown) {
         // Use debug level to reduce console noise in production
@@ -530,10 +554,17 @@ export async function startApplication() {
 
       isShuttingDown = true;
       // Prevent subsequent SIGINT/SIGTERM from interrupting child processes (e.g., docker stop)
-      process.off('SIGINT', shutdown);
-      process.off('SIGTERM', shutdown);
+      if (sigintHandler) {
+        process.off('SIGINT', sigintHandler);
+      }
+      if (sigtermHandler) {
+        process.off('SIGTERM', sigtermHandler);
+      }
       process.on('SIGINT', () => {
         console.log('SIGINT received during shutdown, ignored');
+      });
+      process.on('SIGTERM', () => {
+        console.log('SIGTERM received during shutdown, ignored');
       });
       console.log(`Received ${signal}, shutting down gracefully...`);
 
@@ -686,15 +717,21 @@ export async function startApplication() {
       } finally {
         console.log('✅ Shutdown complete');
         // Ensure exit regardless of circumstances
-        process.exit(0);
+        process.exit(exitCode);
       }
     };
 
     // Save shutdown function to global reference for ProxyHandler use
     shutdownFunction = shutdown;
 
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
+    sigtermHandler = () => {
+      shutdown('SIGTERM');
+    };
+    sigintHandler = () => {
+      shutdown('SIGINT');
+    };
+    process.on('SIGTERM', sigtermHandler);
+    process.on('SIGINT', sigintHandler);
     
     // Unhandled exception capture
     process.on('uncaughtException', (error) => {

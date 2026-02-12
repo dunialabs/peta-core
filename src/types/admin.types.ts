@@ -64,6 +64,12 @@ export enum AdminActionType {
   DELETE_CLOUDFLARED_CONFIG = 8003,       // Delete cloudflared configuration
   RESTART_CLOUDFLARED = 8004,             // Restart cloudflared
   STOP_CLOUDFLARED = 8005,                // Stop cloudflared
+
+  // Skills operations (10040-10043)
+  LIST_SKILLS = 10040,                    // List all skills
+  UPLOAD_SKILL = 10041,                   // Upload skill (ZIP file)
+  DELETE_SKILL = 10042,                   // Delete skill
+  DELETE_SERVER_SKILLS = 10043,           // Delete all skills for a server
 }
 
 /**
@@ -141,7 +147,13 @@ export enum AdminErrorCode {
   CLOUDFLARED_DATABASE_CONFIG_NOT_FOUND = 8005,
   CLOUDFLARED_LOCAL_FILE_NOT_FOUND = 8006,
   CLOUDFLARED_STOP_FAILED = 8007,
-  TUNNEL_CREATE_FAILED = 8008
+  TUNNEL_CREATE_FAILED = 8008,
+
+  // Skills-related errors (9000-9099)
+  SKILL_NOT_FOUND = 9001,
+  SKILL_UPLOAD_FAILED = 9002,
+  SKILL_DELETE_FAILED = 9003,
+  INVALID_SKILL_FORMAT = 9004,
 }
 
 // Extended Error class that includes AdminErrorCode

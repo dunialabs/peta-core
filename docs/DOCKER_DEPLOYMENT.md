@@ -50,9 +50,15 @@ The script will automatically:
 1. Check Docker environment
 2. Generate random passwords (JWT_SECRET, database password)
 3. Create docker-compose.yml and .env files
-4. Start all services (PostgreSQL + peta-core + Cloudflared)
+4. Start all services (PostgreSQL + peta-core + optional peta-auth + Cloudflared)
 5. Wait for health checks to pass
 6. Display access information
+
+If you are certain you will not use Peta-managed OAuth credentials, you can skip installing and starting `peta-auth`:
+
+```bash
+PETA_AUTH_AUTOSTART=false ./docker-deploy.sh
+```
 
 ### Manual Deployment
 
@@ -128,6 +134,20 @@ services:
     networks:
       - peta-network
 
+  # Peta Auth Service (used by peta-core)
+  peta-auth:
+    image: petaio/peta-auth:latest
+    container_name: peta-auth
+    restart: unless-stopped
+    # Optional: required only when using Peta-managed OAuth credentials
+    # Expose this port only when running peta-core on the host machine
+    # ports:
+    #   - '7788:7788'
+    networks:
+      - peta-network
+    volumes:
+      - peta-auth-data:/data
+
   # Peta Core Service (MCP Gateway)
   peta-core:
     image: petaio/peta-core:latest
@@ -145,6 +165,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL}
       LOG_PRETTY: ${LOG_PRETTY}
       CLOUDFLARED_CONTAINER_NAME: ${CLOUDFLARED_CONTAINER_NAME}
+      PETA_AUTH_AUTOSTART: ${PETA_AUTH_AUTOSTART}
       PETA_CORE_IN_DOCKER: "true"
       # Skip database container startup (database is started via docker-compose)
       SKIP_DB_CONTAINER_START: "true"
@@ -180,6 +201,8 @@ services:
 volumes:
   postgres_peta_core:
     driver: local
+  peta-auth-data:
+    driver: local
 
 networks:
   peta-network:
@@ -213,6 +236,10 @@ DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?sc
 # -------------------- JWT Secret Configuration --------------------
 # ⚠️ For production, be sure to change to a strong password (at least 32 characters)
 JWT_SECRET=your-jwt-secret-change-in-production-min-32-chars
+
+# -------------------- Peta Auth Configuration (Optional) --------------------
+# Auto-start peta-auth for Peta-managed OAuth credentials
+PETA_AUTH_AUTOSTART=true
 
 # -------------------- Logging Configuration (Pino Logger) --------------------
 LOG_LEVEL=info
@@ -259,6 +286,15 @@ DB_PASSWORD=$(openssl rand -base64 24)
 ```
 
 ### Optional Configuration
+
+#### Peta Auth (optional)
+
+Peta Core supports OAuth-based integrations (for example Google, Notion, GitHub, and Figma). You can either:
+
+1. Use **Peta-managed OAuth credentials** — requires the `peta-auth` service so Peta secrets remain isolated.
+2. Use **your own OAuth credentials** — `peta-auth` is not required.
+
+If you are certain you will not use Peta-managed credentials, set `PETA_AUTH_AUTOSTART=false` in `.env` to skip installing and starting `peta-auth`.
 
 #### Port Changes
 

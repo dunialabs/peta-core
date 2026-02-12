@@ -24,6 +24,7 @@ Peta Core includes a Socket.IO server for bidirectional real-time communication 
 - `SocketService` - Core Socket.IO server management (src/socket/SocketService.ts)
 - `SocketNotifier` - Utility functions for sending notifications (src/socket/SocketNotifier.ts)
 - Client example available in `examples/electron-client/`
+- **Transport-agnostic design**: Business logic (UserRequestHandler) is shared between Socket.IO and HTTP API layers
 
 **Usage:**
 ```typescript
@@ -44,6 +45,32 @@ const isOnline = socketNotifier.isUserOnline('userId');
 ```
 
 See `docs/SOCKET_USAGE.md` for complete documentation.
+
+### User API Endpoints
+
+The gateway provides a unified `/user` endpoint for user-facing operations. This endpoint uses the same action-based routing pattern as `/admin` endpoints.
+
+**Key Features:**
+- Single endpoint: `POST /user`
+- Action-based routing (UserActionType enum)
+- Shares business logic with Socket.IO layer (transport-agnostic architecture)
+- No role checking (any valid user can access)
+
+**Operations:**
+- GET_CAPABILITIES (1001) - Get capability configuration
+- SET_CAPABILITIES (1002) - Update capability preferences
+- CONFIGURE_SERVER (2001) - Configure user-specific servers (with personal credentials)
+- UNCONFIGURE_SERVER (2002) - Remove server configuration
+- GET_ONLINE_SESSIONS (3001) - Query active sessions
+
+**Architecture:**
+- Layer 1 (UserRequestHandler): Business logic (transport-agnostic)
+- Layer 2a (Socket.IO): Real-time communication layer
+- Layer 2b (HTTP API): RESTful API layer (`POST /user`)
+
+Both Socket and HTTP protocols execute identical business logic in UserRequestHandler.
+
+See `docs/api/USER_API.md` for complete API documentation.
 
 ### Multi-Role Proxy Pattern
 
@@ -373,6 +400,7 @@ Optional:
 - `ENABLE_HTTPS=true` - Enable HTTPS server
 - `SSL_CERT_PATH`, `SSL_KEY_PATH` - Custom certificate paths
 - `SKIP_CLOUDFLARED=true` - Skip Cloudflared setup in dev
+- `LAZY_START_ENABLED` - Enable lazy loading for MCP servers (default: true)
 - `LOG_LEVEL` - Log level (trace, debug, info, warn, error, fatal)
 - `LOG_PRETTY` - Pretty-print logs in development
 
@@ -572,7 +600,6 @@ Configuration is distributed across multiple files:
 
 - **`src/config/config.ts`** - App metadata from package.json (APP_INFO)
 - **`src/config/auth.config.ts`** - Token expiration, cookie settings
-- **`src/config/mcpSessionConfig.ts`** - MCP protocol version, timeouts
 - **`src/config/reverseRequestConfig.ts`** - Reverse request timeouts (30s)
 - **`.env`** - Runtime environment variables (DATABASE_URL, ports, SSL)
 
@@ -614,6 +641,7 @@ All errors logged with structured context (userId, sessionId, error details).
 ### 11. Admin vs User Routes
 
 - `/mcp` - Requires valid user token (any role)
+- `/user` - Requires valid user token (any role) - User operations API
 - `/admin/*` - Requires Owner/Admin role (enforced by `AdminAuthMiddleware`)
 - OAuth endpoints - Public or admin-only depending on endpoint
 
@@ -729,6 +757,7 @@ When implementing tests in the future:
 ### API Documentation
 - `docs/api/API.md` - MCP API endpoints
 - `docs/api/ADMIN_API.md` - Admin API endpoints
+- `docs/api/USER_API.md` - User API endpoints
 - `docs/api/SOCKET_USAGE.md` - Socket.IO usage guide
 
 ### Architecture Design

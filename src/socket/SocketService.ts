@@ -27,6 +27,7 @@ import {
 import { createLogger } from '../logger/index.js';
 import { APP_INFO } from '../config/config.js';
 import { ProxyRepository } from '../repositories/ProxyRepository.js';
+import { UserRequestHandler } from '../user/UserRequestHandler.js';
 
 /**
  * Pending request storage item
@@ -43,10 +44,9 @@ export class SocketService {
   private io: SocketIOServer | null = null;
   private tokenValidator: TokenValidator;
   private connections: Map<string, UserConnection[]> = new Map();
-  private sessionStore: any = null; // SessionStore instance (avoid circular dependency)
   private serverName: string = "Peta Core";
   private serverId: string = "peta-core";
-  
+
   // Logger for SocketService
   private logger = createLogger('SocketService');
 
@@ -59,14 +59,6 @@ export class SocketService {
 
   constructor() {
     this.tokenValidator = new TokenValidator();
-  }
-
-  /**
-   * Set SessionStore instance
-   * @param sessionStore SessionStore instance
-   */
-  setSessionStore(sessionStore: any): void {
-    this.sessionStore = sessionStore;
   }
 
   /**
@@ -241,14 +233,13 @@ export class SocketService {
       // 4.2 Listen for get capabilities request
       socket.on('get_capabilities', async (request: any) => {
         try {
-          const { CapabilitiesHandler } = await import('../socket/handlers/CapabilitiesHandler.js');
-          const handler = new CapabilitiesHandler();
-          const result = await handler.handleGetCapabilities(userId);
+          // Call UserRequestHandler (transport-agnostic business logic)
+          const capabilities = await UserRequestHandler.instance.handleGetCapabilities(userId);
 
           const response: SocketResponse = {
             requestId: request.requestId,
             success: true,
-            data: result,
+            data: { capabilities: capabilities },
             timestamp: Date.now()
           };
 
@@ -273,13 +264,8 @@ export class SocketService {
       // 4.3 Listen for set capabilities request
       socket.on('set_capabilities', async (request: any) => {
         try {
-          if (!this.sessionStore) {
-            throw new Error('SessionStore not initialized');
-          }
-
-          const { SetCapabilitiesHandler } = await import('../socket/handlers/SetCapabilitiesHandler.js');
-          const handler = new SetCapabilitiesHandler(this.sessionStore);
-          await handler.handleSetCapabilities(userId, request.data);
+          // Call UserRequestHandler (transport-agnostic business logic)
+          await UserRequestHandler.instance.handleSetCapabilities(userId, request.data);
 
           const response: SocketResponse = {
             requestId: request.requestId,
@@ -308,13 +294,11 @@ export class SocketService {
       // 5. Listen for configure Server event
       socket.on('configure_server', async (request: any) => {
         try {
-          const { ConfigureServerHandler } = await import('./handlers/ConfigureServerHandler.js');
-          const handler = new ConfigureServerHandler(this.sessionStore);
-
-          const result = await handler.handleConfigureServer(
+          // Call UserRequestHandler (transport-agnostic business logic)
+          const result = await UserRequestHandler.instance.handleConfigureServer(
             userId,
             socketData.userToken,
-            request.data,
+            request.data
           );
 
           const response: SocketResponse = {
@@ -345,12 +329,10 @@ export class SocketService {
       // 5.1 Listen for unconfigure Server event
       socket.on('unconfigure_server', async (request: any) => {
         try {
-          const { UnconfigureServerHandler } = await import('./handlers/UnconfigureServerHandler.js');
-          const handler = new UnconfigureServerHandler(this.sessionStore);
-
-          const result = await handler.handleUnconfigureServer(
+          // Call UserRequestHandler (transport-agnostic business logic)
+          const result = await UserRequestHandler.instance.handleUnconfigureServer(
             userId,
-            request.data,
+            request.data
           );
 
           const response: SocketResponse = {
@@ -416,13 +398,9 @@ export class SocketService {
       // 7. Actively push capability configuration after successful connection
       (async () => {
         try {
-          const { CapabilitiesHandler } = await import('../socket/handlers/CapabilitiesHandler.js');
-          const handler = new CapabilitiesHandler();
-          const result = await handler.handleGetCapabilities(userId);
-
           // Use socketNotifier to push capability change notification
           const { socketNotifier } = await import('../socket/SocketNotifier.js');
-          socketNotifier.notifyPermissionChanged(userId, result.capabilities);
+          socketNotifier.notifyPermissionChangedByUser(userId);
 
           // Push online session information
           socketNotifier.notifyOnlineSessions(userId);

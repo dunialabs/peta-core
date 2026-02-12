@@ -32,7 +32,6 @@ export class AuthMiddleware {
 
   constructor(
     private tokenValidator: TokenValidator,
-    private sessionStore: SessionStore,
   ) {
     this.oauthTokenValidator = new OAuthTokenValidator();
   }
@@ -45,9 +44,27 @@ export class AuthMiddleware {
       // 1. Check if there's already a valid session
       const sessionId = req.headers['Mcp-Session-Id'] as string || req.headers['mcp-session-id'] as string;
       if (sessionId && sessionId.length > 0) {
-        const existingSession = this.sessionStore.getSession(sessionId);
+        const existingSession = SessionStore.instance.getSession(sessionId);
         if (existingSession) {
-          
+
+          const token = existingSession.token;
+          const isJwtFormat = token.includes('.') && token.split('.').length === 3;
+          if (isJwtFormat) {
+            const oauthResult = await this.oauthTokenValidator.validateToken(token);
+            if (!oauthResult.valid) {
+              await SessionStore.instance.removeAllUserSessions(
+                existingSession.userId,
+                DisconnectReason.SESSION_REMOVED
+              );
+              const authError = new AuthError(
+                AuthErrorType.INVALID_TOKEN,
+                oauthResult.error || 'OAuth token validation failed',
+                existingSession.userId
+              );
+              return this.sendAuthError(req, res, authError);
+            }
+          }
+           
           // New: Check if user info needs to be refreshed (every 5 minutes)
           await this.refreshUserInfoIfNeeded(existingSession);
           
@@ -58,7 +75,7 @@ export class AuthMiddleware {
             
             if (!user || (user.expiresAt && user.expiresAt > 0 && Math.floor(Date.now() / 1000) > user.expiresAt)) {
               // Confirmed expired, clean up all user sessions
-              await this.sessionStore.removeAllUserSessions(
+              await SessionStore.instance.removeAllUserSessions(
                 existingSession.userId,
                 DisconnectReason.USER_EXPIRED
               );
@@ -79,7 +96,7 @@ export class AuthMiddleware {
           // Session valid, set request context
           req.authContext = existingSession.authContext;
           req.clientSession = existingSession;
-          this.sessionStore.getSessionLogger(existingSession.sessionId)?.updateContext(req.clientIp ?? '0.0.0.0', req.headers['user-agent'] as string || 'unknown');
+          SessionStore.instance.getSessionLogger(existingSession.sessionId)?.updateContext(req.clientIp ?? '0.0.0.0', req.headers['user-agent'] as string || 'unknown');
           
           // Update session active time
           existingSession.touch();
@@ -90,6 +107,9 @@ export class AuthMiddleware {
           
           return next();
         } else {
+          if (req.method === 'DELETE') {
+            return next();
+          }
           res.status(400).json({
             jsonrpc: '2.0',
             error: {
@@ -194,7 +214,7 @@ export class AuthMiddleware {
       req.authContext = authContext;
 
       // 4. Create new client session
-      const clientSession = await this.sessionStore.createSession(
+      const clientSession = await SessionStore.instance.createSession(
         AuthUtils.generateSessionId(),
         authContext.userId,
         token,
@@ -205,7 +225,7 @@ export class AuthMiddleware {
       req.clientSession = clientSession;
 
       // Log AuthTokenValidation (3001) - Only on FIRST validation (new session creation)
-      const sessionLogger = this.sessionStore.getSessionLogger(clientSession.sessionId);
+      const sessionLogger = SessionStore.instance.getSessionLogger(clientSession.sessionId);
       if (sessionLogger) {
         await sessionLogger.logAuth({
           action: MCPEventLogType.AuthTokenValidation,
@@ -344,11 +364,13 @@ export class AuthMiddleware {
     
     // Ensure permissions object structure is correct
     const permissions = parsedPermissions as Permissions;
-    const userPreferences = JSON.parse(user.userPreferences) as Permissions;
+    const userPreferences = JSON.parse(user.userPreferences || '{}') as Permissions;
+
+    const tokenMask = session.token.substring(0, 8) + '...' + session.token.substring(session.token.length - 8);
 
     const updatedAuthContext: AuthContext = {
       userId: user.userId,
-      token: session.token,
+      token: tokenMask,
       role: user.role,
       status: user.status,
       permissions: permissions,

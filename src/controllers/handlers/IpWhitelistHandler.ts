@@ -8,7 +8,6 @@ import { prisma } from '../../config/prisma.js';
  * IP whitelist operation handler (4000-4999)
  */
 export class IpWhitelistHandler {
-  private ipWhitelistRepository = IpWhitelistRepository;
 
   constructor(
     private ipWhitelistService: IpWhitelistService
@@ -60,7 +59,7 @@ export class IpWhitelistHandler {
    * Get IP whitelist (4002)
    */
   async handleGetIpWhitelist(request: AdminRequest<any>): Promise<any> {
-    const records = await this.ipWhitelistRepository.findAll();
+    const records = await IpWhitelistRepository.findAll();
     const whitelist = records.map(record => record.ip);
     
     let list: string[];
@@ -106,7 +105,7 @@ export class IpWhitelistHandler {
     const ids = records.map(r => r.id);
 
     // Delete from database
-    await this.ipWhitelistRepository.deleteByIds(ids);
+    await IpWhitelistRepository.deleteByIds(ids);
 
     // Reload from database into memory
     await this.ipWhitelistService.reloadFromDatabase();

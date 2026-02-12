@@ -3,6 +3,7 @@ import { IAuthStrategy } from './IAuthStrategy.js';
 import { GoogleAuthStrategy } from './GoogleAuthStrategy.js';
 import { NotionAuthStrategy } from './NotionAuthStrategy.js';
 import { FigmaAuthStrategy } from './FigmaAuthStrategy.js';
+import { GithubAuthStrategy } from './GithubAuthStrategy.js';
 import { createLogger } from '../../logger/index.js';
 
 // Logger for AuthStrategyFactory
@@ -24,6 +25,7 @@ export class AuthStrategyFactory {
   static create(authType: ServerAuthType, config: any): IAuthStrategy | null {
     switch (authType) {
       case ServerAuthType.GoogleAuth:
+      case ServerAuthType.GoogleCalendarAuth:
         return new GoogleAuthStrategy({
           clientId: config.clientId,
           clientSecret: config.clientSecret,
@@ -46,6 +48,16 @@ export class AuthStrategyFactory {
           refreshToken: config.refreshToken,
           accessToken: config.accessToken,
           expiresAt: config.expiresAt,
+        });
+
+      case ServerAuthType.GithubAuth:
+        return new GithubAuthStrategy({
+          clientId: config.clientId,
+          clientSecret: config.clientSecret,
+          refreshToken: config.refreshToken,
+          accessToken: config.accessToken,
+          expiresAt: config.expiresAt,
+          refreshTokenExpiresAt: config.refreshTokenExpiresAt,
         });
 
       case ServerAuthType.ApiKey:

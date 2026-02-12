@@ -9,7 +9,8 @@ This document provides an overview and navigation for all APIs in Peta Core.
   - [MCP Protocol Interface](#1-mcp-protocol-interface)
   - [OAuth 2.0 Authentication](#2-oauth-20-authentication)
   - [Admin API](#3-admin-api)
-  - [Socket.IO Real-time Communication](#4-socketio-real-time-communication)
+  - [User API](#4-user-api)
+  - [Socket.IO Real-time Communication](#5-socketio-real-time-communication)
 - [Error Handling](#error-handling)
 - [Complete Examples](#complete-examples)
 
@@ -243,7 +244,63 @@ curl -X POST http://localhost:3002/admin \
 
 ---
 
-### 4. Socket.IO Real-time Communication
+### 4. User API
+
+User API provides user-facing operations for capability management, server configuration, and session queries.
+
+**Complete Documentation**: 📚 **[USER_API.md](./USER_API.md)**
+
+#### Core Features
+
+| Category | Operations | Permission Required |
+|------|---------|---------|
+| **Capability Management** | Get/Set user capability preferences | Valid User Token |
+| **Server Configuration** | Configure/Unconfigure user-specific servers | Valid User Token |
+| **Session Queries** | Get online sessions | Valid User Token |
+
+**Key Features**:
+- ✅ Action-based routing (same pattern as Admin API)
+- ✅ Transport-agnostic (HTTP + Socket.IO)
+- ✅ No role checking (any valid user can access)
+- ✅ Shared business logic with Socket.IO layer
+- ✅ Real-time capability updates
+
+#### Unified Request Format
+
+All user requests use a **single endpoint** `POST /user`, distinguished by the `action` field:
+
+```typescript
+interface UserRequest<T = any> {
+  action: UserActionType;  // Operation type (numeric enum)
+  data?: T;                // Operation data (optional)
+}
+```
+
+**Example**:
+```bash
+curl -X POST http://localhost:3002/user \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{
+    "action": 1001
+  }'
+```
+
+#### Quick Reference
+
+| Operation | Action | Description |
+|------|--------|------|
+| Get Capabilities | `1001` | GET_CAPABILITIES |
+| Set Capabilities | `1002` | SET_CAPABILITIES |
+| Configure Server | `2001` | CONFIGURE_SERVER |
+| Unconfigure Server | `2002` | UNCONFIGURE_SERVER |
+| Get Online Sessions | `3001` | GET_ONLINE_SESSIONS |
+
+**Detailed Documentation**: See [USER_API.md](./USER_API.md) for all 5 user operations.
+
+---
+
+### 5. Socket.IO Real-time Communication
 
 Socket.IO provides bidirectional real-time communication between server and clients.
 
@@ -338,14 +395,16 @@ socket.on('notification', (data) => {
 - `-32602` - Invalid params
 - `-32603` - Internal error
 
-#### Admin API Error
+#### Admin/User API Error
+
+Admin API and User API both use the same error response format:
 
 ```json
 {
   "success": false,
   "error": {
     "code": 2001,
-    "message": "User user123 not found"
+    "message": "Server notion not found"
   }
 }
 ```
@@ -353,12 +412,13 @@ socket.on('notification', (data) => {
 **Common Error Codes**:
 - `1001` - Invalid request
 - `1002` - Unauthorized
-- `1003` - Insufficient permissions
-- `2001` - User not found
-- `3001` - Server not found
+- `1003` - User disabled / Insufficient permissions
+- `2001` - User/Server not found
+- `3001` - Server not found / Invalid capabilities
 - `5102` - Invalid IP format
 
-See [ADMIN_API.md - Error Code Reference](./ADMIN_API.md#appendix-error-code-reference) for details.
+See [ADMIN_API.md - Error Code Reference](./ADMIN_API.md#appendix-error-code-reference) for admin error codes.
+See [USER_API.md - Error Code Reference](./USER_API.md#appendix-error-code-reference) for user error codes.
 
 #### Authentication Error
 
@@ -468,6 +528,36 @@ curl -X POST http://localhost:3002/admin \
   }'
 ```
 
+### User API Example
+
+```bash
+# Get user's capability configuration
+curl -X POST http://localhost:3002/user \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": 1001
+  }'
+
+# Configure a user-specific server
+curl -X POST http://localhost:3002/user \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": 2001,
+    "data": {
+      "serverId": "notion",
+      "authConf": [
+        {
+          "key": "{{NOTION_API_KEY}}",
+          "value": "secret_xxx",
+          "dataType": 1
+        }
+      ]
+    }
+  }'
+```
+
 ### Socket.IO Example
 
 ```typescript
@@ -493,6 +583,7 @@ socket.on('notification', (data) => {
 ## Related Documentation
 
 - **[ADMIN_API.md](./ADMIN_API.md)** - Complete Admin API protocol documentation
+- **[USER_API.md](./USER_API.md)** - Complete User API protocol documentation
 - **[SOCKET_USAGE.md](./SOCKET_USAGE.md)** - Socket.IO real-time communication documentation
 - **[MCP Official Documentation](https://modelcontextprotocol.io/docs/)** - Model Context Protocol standard
 - **[OAuth 2.0 RFC 6749](https://datatracker.ietf.org/doc/html/rfc6749)** - OAuth 2.0 Authorization Framework

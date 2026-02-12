@@ -1,4 +1,4 @@
-import { DangerLevel, ServerStatus } from '../../types/enums';
+import { DangerLevel, ServerAuthType, ServerCategory, ServerStatus } from '../../types/enums';
 
 
 // Base capability configuration (common part)
@@ -30,7 +30,8 @@ export type ServerConfigWithEnabled = ServerConfigCapabilities & {
   enabled: boolean;
   serverName: string;
   allowUserInput: boolean;
-  authType: number;
+  authType: ServerAuthType;
+  category?: ServerCategory;
   configTemplate: string;      // JSON string format
   configured: boolean;          // Whether user has configured this Server
   status?: ServerStatus;

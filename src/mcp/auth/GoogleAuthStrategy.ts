@@ -7,6 +7,8 @@ interface GoogleOAuthConfig {
   clientId: string;
   clientSecret: string;
   refreshToken: string;
+  accessToken?: string;
+  expiresAt?: number;
 }
 
 /**
@@ -57,6 +59,27 @@ export class GoogleAuthStrategy implements IAuthStrategy {
    * Refresh access token
    */
   async refreshToken(): Promise<TokenInfo> {
+    // 1. Check if there is cached accessToken and expiresAt
+    if (this.config.accessToken && this.config.expiresAt) {
+      const now = Date.now();
+
+      // 2. Determine if expired (consider expired 5 minutes early to avoid edge cases)
+      const EXPIRY_BUFFER = 5 * 60 * 1000; // 5 minutes
+      if (now < this.config.expiresAt - EXPIRY_BUFFER) {
+        // 3. Not expired, return cached token directly
+        const expiresIn = Math.floor((this.config.expiresAt - now) / 1000);
+
+        console.log(`[GoogleAuthStrategy] Using cached token for ${this.config.clientId?.substring(0, 8)}..., expires in ${Math.floor(expiresIn / 3600)} hours`);
+
+        return {
+          accessToken: this.config.accessToken,
+          expiresIn: expiresIn,
+          expiresAt: this.config.expiresAt,
+        };
+      }
+
+      console.log(`[GoogleAuthStrategy] Cached token expired or expiring soon, refreshing...`);
+    }
     try {
       const response = await fetch(GoogleAuthStrategy.TOKEN_ENDPOINT, {
         method: 'POST',

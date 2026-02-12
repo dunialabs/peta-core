@@ -26,9 +26,9 @@ export class MCPRouter {
   // Logger for MCPRouter
   private logger = createLogger('MCPRouter');
 
-  constructor(sessionStore: SessionStore) {
+  constructor() {
     // Instantiate MCP controller
-    this.mcpController = new MCPController(sessionStore);
+    this.mcpController = new MCPController();
   }
 
   /**

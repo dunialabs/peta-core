@@ -53,6 +53,18 @@ model Server {
   toolTmplId     String? @map("tool_tmpl_id") @db.VarChar(128)
   authType       Int     @default(1) @map("auth_type")
   category       Int     @default(1) @map("category")
+  publicAccess   Boolean @default(false) @map("public_access")
+  usePetaOauthConfig Boolean @default(true) @map("use_peta_oauth_config")
+
+  // ========== Lazy Start related fields ==========
+  transportType        String?  @map("transport_type") @db.VarChar(10)  // 'stdio' | 'http' | 'sse'
+  lazyStartEnabled     Boolean  @default(true) @map("lazy_start_enabled")  // Whether lazy start is enabled for this server
+
+  // ========== Capabilities cache ==========
+  cachedTools          String?  @map("cached_tools") @db.Text  // JSON: ListToolsResult
+  cachedResources      String?  @map("cached_resources") @db.Text  // JSON: ListResourcesResult
+  cachedResourceTemplates String? @map("cached_resource_templates") @db.Text  // JSON: ListResourceTemplatesResult
+  cachedPrompts        String?  @map("cached_prompts") @db.Text  // JSON: ListPromptsResult
 
   @@map("server")
 }

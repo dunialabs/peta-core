@@ -17,7 +17,48 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - peta-network
+      - peta-core-network
+
+  peta-auth:
+    image: petaio/peta-auth:latest
+    container_name: peta-auth
+    restart: unless-stopped
+    ports:
+      - '7788:7788'
+    networks:
+      - peta-core-network
+    volumes:
+      - peta-auth-data:/data
+
+  # Peta Core service (uncomment when deploying)
+  # peta-core:
+  #   image: petaio/peta-core:latest
+  #   container_name: peta-core
+  #   restart: unless-stopped
+  #   ports:
+  #     - '${BACKEND_PORT:-3002}:3002'
+  #   environment:
+  #     - DATABASE_URL=postgresql://peta:peta123@postgres:5432/peta_mcp_gateway?schema=public
+  #     - SKILLS_DIR=/data/skills
+  #   volumes:
+  #     - ./skills:/data/skills    # Skills directory (shared with skillsmcp)
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   networks:
+  #     - peta-core-network
+
+  # Skills MCP server (uncomment when deploying)
+  # skillsmcp:
+  #   image: ghcr.io/dunialabs/mcp-servers/mcp-skills:1.0.0
+  #   container_name: peta-skillsmcp
+  #   restart: unless-stopped
+  #   environment:
+  #     - SKILLS_DIR=/app/skills
+  #   volumes:
+  #     - ./skills:/app/skills:ro  # Read-only mount of same skills directory
+  #   networks:
+  #     - peta-core-network
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -27,14 +68,16 @@ services:
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
     networks:
-      - peta-network
+      - peta-core-network
     volumes:
       - ./cloudflared:/etc/cloudflared
 
 volumes:
   postgres_data:
     driver: local
+  peta-auth-data:
+    driver: local
 
 networks:
-  peta-network:
+  peta-core-network:
     driver: bridge

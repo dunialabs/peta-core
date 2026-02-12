@@ -30,10 +30,16 @@ export class OAuthTokenValidator {
     error?: string;
   }> {
     try {
+      const jwtSecret = process.env.JWT_SECRET;
+      if (!jwtSecret) {
+        this.logger.error('JWT_SECRET environment variable is not configured');
+        return { valid: false, error: 'OAuth token validation is not configured on server' };
+      }
+
       // Validate JWT format and signature
       const decoded = jwt.verify(
         token,
-        process.env.JWT_SECRET || 'oauth-jwt-secret'
+        jwtSecret
       ) as OAuthTokenPayload;
 
       // Validate token type
@@ -68,8 +74,8 @@ export class OAuthTokenValidator {
       }
 
       // Build authentication context
-      const parsedPermissions = JSON.parse(user.permissions) 
-      const userPreferences = JSON.parse(user.userPreferences);
+      const parsedPermissions = JSON.parse(user.permissions);
+      const userPreferences = JSON.parse(user.userPreferences || '{}');
 
       const authContext: AuthContext = {
         userId: user.userId,
@@ -130,9 +136,8 @@ export class OAuthTokenValidator {
 
       return true;
     } catch (error) {
-      // On database query failure, default to token being valid (degradation handling to avoid service becoming completely unavailable)
-      // Silent handling to avoid log noise
-      return true;
+      this.logger.error({ error }, 'OAuth token database validation failed');
+      return false;
     }
   }
 

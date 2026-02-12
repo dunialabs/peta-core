@@ -1,13 +1,10 @@
 import { SessionStore } from '../../mcp/core/SessionStore.js';
-import { ServerManager } from '../../mcp/core/ServerManager.js';
 import { UserRepository } from '../../repositories/UserRepository.js';
 import { DisconnectReason } from '../../types/auth.types.js';
 import { Permissions } from '../../mcp/types/mcp.js';
-import { AuthUtils } from '../../utils/AuthUtils.js';
 import { AdminRequest, AdminError, AdminErrorCode } from '../../types/admin.types.js';
 import { prisma } from '../../config/prisma.js';
 import { UserRole, UserStatus, MCPEventLogType } from '../../types/enums.js';
-import { json } from 'stream/consumers';
 import { LogService } from '../../log/LogService.js';
 import { CapabilitiesService } from '../../mcp/services/CapabilitiesService.js';
 import { socketNotifier } from '../../socket/SocketNotifier.js';
@@ -21,10 +18,7 @@ export class UserHandler {
   // Logger for UserHandler
   private logger = createLogger('UserHandler');
 
-  constructor(
-    private sessionStore: SessionStore,
-    private serverManager: ServerManager
-  ) {}
+  constructor() {}
 
   /**
    * Disable user (1001)
@@ -80,6 +74,18 @@ export class UserHandler {
       throw new AdminError('Missing required field: encryptedToken', AdminErrorCode.INVALID_REQUEST);
     }
 
+    let normalizedExpiresAt = expiresAt ?? 0;
+    if (expiresAt !== undefined && expiresAt !== null) {
+      const expiresAtNumber = typeof expiresAt === 'string' ? Number.parseInt(expiresAt, 10) : expiresAt;
+      if (!Number.isFinite(expiresAtNumber)) {
+        throw new AdminError('Invalid expiresAt', AdminErrorCode.INVALID_REQUEST);
+      }
+      normalizedExpiresAt = expiresAtNumber;
+      if (expiresAtNumber >= 1_000_000_000_000) {
+        normalizedExpiresAt = Math.floor(expiresAtNumber / 1000);
+      }
+    }
+
     // Check if user already exists
     const existingUser = await UserRepository.findByUserId(userId);
     if (existingUser) {
@@ -103,7 +109,7 @@ export class UserHandler {
       permissions: typeof permissions === 'string' ? permissions : JSON.stringify(permissions ?? {}),
       userPreferences: '{}',
       launchConfigs: '{}',
-      expiresAt: expiresAt ?? 0,
+      expiresAt: normalizedExpiresAt,
       createdAt: createdAt ?? Math.floor(Date.now() / 1000),
       updatedAt: updatedAt ?? Math.floor(Date.now() / 1000),
       ratelimit: ratelimit ?? 100,
@@ -305,7 +311,7 @@ export class UserHandler {
     await UserRepository.update(targetId, { status: UserStatus.Disabled });
 
     // Disconnect all active sessions for this user
-    await this.sessionStore.removeAllUserSessions(
+    await SessionStore.instance.removeAllUserSessions(
       targetId,
       DisconnectReason.USER_DISABLED
     );
@@ -334,7 +340,7 @@ export class UserHandler {
     await UserRepository.update(targetId, {permissions: permissions});
 
     // Get user sessions
-    const userSessions = this.sessionStore.getUserSessions(targetId);
+    const userSessions = SessionStore.instance.getUserSessions(targetId);
     if (userSessions.length > 0) {
       // Update permissions for all active sessions (takes effect immediately)
       for (const session of userSessions) {
@@ -353,9 +359,7 @@ export class UserHandler {
 
     // ✨ Push complete capability configuration via Socket
     try {
-      const capabilitiesService = CapabilitiesService.getInstance();
-      const capabilities = await capabilitiesService.getUserCapabilities(targetId);
-      socketNotifier.notifyPermissionChanged(targetId, capabilities);
+      socketNotifier.notifyPermissionChangedByUser(targetId);
     } catch (error) {
       this.logger.error({ error, targetId }, 'Failed to notify permission changed via Socket for user');
     }

@@ -21,6 +21,7 @@ export enum ServerCategory {
   Template = 1,       // template server
   CustomRemote = 2,   // custom remote server
   RestApi = 3,        // RESTful API server
+  Skills = 4,         // skills server
 }
 
 export enum ServerAuthType {
@@ -28,6 +29,10 @@ export enum ServerAuthType {
   GoogleAuth = 2,   // Google OAuth authentication
   NotionAuth = 3,   // Notion OAuth authentication
   FigmaAuth = 4,   // Figma OAuth authentication
+  GoogleCalendarAuth = 5,   // Google Calendar OAuth authentication
+  GithubAuth = 6,   // Github OAuth authentication
+  ZendeskAuth = 7,   // Zendesk OAuth authentication
+  CanvasAuth = 8,   // Canvas OAuth authentication
 }
 
 export enum MCPEventLogType {
@@ -102,6 +107,7 @@ export enum ServerStatus {
   Offline = 1,  // Offline
   Connecting = 2, // Connecting
   Error = 3,    // Error
+  Sleeping = 4  // Sleeping (lazy start)
 }
 
 export enum DangerLevel {

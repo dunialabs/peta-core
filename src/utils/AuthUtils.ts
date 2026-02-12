@@ -1,6 +1,7 @@
 import { Permissions } from '../mcp/types/mcp.js';
 import { DetailedLogEntry } from '../types/auth.types.js';
 import { createLogger } from '../logger/index.js';
+import { ServerAuthType } from '../types/enums.js';
 
 // Logger for AuthUtils
 const logger = createLogger('AuthUtils');
@@ -206,6 +207,40 @@ export class AuthUtils {
     // If there are permission changes, log detailed information
     if (hasChanges) {
       this.logPermissionChange(userId, oldPermissions, newPermissions);
+    }
+  }
+
+  /**
+   * Get OAuth provider string from ServerAuthType
+   * 
+   * @param authType - Server authentication type
+   * @returns OAuth provider string ('google', 'notion', 'figma') or undefined if not an OAuth type
+   * 
+   * @example
+   * ```typescript
+   * const provider = AuthUtils.getOAuthProvider(ServerAuthType.GoogleAuth); // 'google'
+   * const provider = AuthUtils.getOAuthProvider(ServerAuthType.ApiKey); // undefined
+   * ```
+   */
+  static getOAuthProvider(authType: ServerAuthType): string | undefined {
+    switch (authType) {
+      case ServerAuthType.GoogleAuth:
+      case ServerAuthType.GoogleCalendarAuth:
+        return 'google';
+      case ServerAuthType.NotionAuth:
+        return 'notion';
+      case ServerAuthType.FigmaAuth:
+        return 'figma';
+      case ServerAuthType.GithubAuth:
+        return 'github';
+      case ServerAuthType.CanvasAuth:
+        return 'canvas';
+      case ServerAuthType.ZendeskAuth:
+        return 'zendesk';
+      case ServerAuthType.ApiKey:
+        return undefined;
+      default:
+        return undefined;
     }
   }
 }

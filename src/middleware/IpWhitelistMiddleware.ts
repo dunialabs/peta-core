@@ -23,7 +23,6 @@ export class IpWhitelistMiddleware {
   
   constructor(
     private ipWhitelistService: IpWhitelistService,
-    private logService?: LogService
   ) {}
 
   /**
@@ -55,7 +54,7 @@ export class IpWhitelistMiddleware {
         // Log denied access
         this.logger.warn({ clientIp }, 'Access denied for IP');
         
-        if (this.logService) {
+        if (LogService.getInstance()) {
           // TODO: Log to database
           this.logger.debug({ clientIp }, 'IP whitelist rejection logged');
         }

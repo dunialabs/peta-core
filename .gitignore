@@ -76,6 +76,10 @@ cloudflared/*.json
 cloudflared/config.yml
 !cloudflared/.gitkeep
 
+# Skills directory (uploaded skills)
+skills/*
+!skills/.gitkeep
+
 
 typescript-sdk-main/
 

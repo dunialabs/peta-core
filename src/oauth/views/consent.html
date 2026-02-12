@@ -180,7 +180,7 @@
         </div>
 
         <div class="info-box">
-            <div class="info-text">By authorizing, you allow <strong>{{CLIENT_NAME}}</strong> to access your MCP Gateway with the requested permissions. You can revoke this access at any time from your dashboard.</div>
+            <div class="info-text">By authorizing, you allow <strong>__CLIENT_NAME__</strong> to access your MCP Gateway with the requested permissions. You can revoke this access at any time from your dashboard.</div>
         </div>
 
         <div class="guide-section">
@@ -266,13 +266,13 @@
             console.log('[OAuth] Token received, submitting authorization');
 
             const formData = {
-                client_id: '{{CLIENT_ID}}',
-                redirect_uri: '{{REDIRECT_URI}}',
-                scope: '{{SCOPE}}',
-                state: '{{STATE}}',
-                code_challenge: '{{CODE_CHALLENGE}}',
-                code_challenge_method: '{{CODE_CHALLENGE_METHOD}}',
-                resource: '{{RESOURCE}}',
+                client_id: "{{CLIENT_ID}}",
+                redirect_uri: "{{REDIRECT_URI}}",
+                scope: "{{SCOPE}}",
+                state: "{{STATE}}",
+                code_challenge: "{{CODE_CHALLENGE}}",
+                code_challenge_method: "{{CODE_CHALLENGE_METHOD}}",
+                resource: "{{RESOURCE}}",
                 approved: true,
                 user_token: token
             };
@@ -312,7 +312,7 @@
             const encodedUrl = base64UrlEncode(currentUrl);
 
             if (encodedUrl) {
-                const proxyKey = '{{PROXY_KEY}}';
+                const proxyKey = "{{PROXY_KEY}}";
                 const schemeUrl = 'petadesk://peta.ai?type=1&url=' + encodedUrl +
                                   (proxyKey ? '&proxyKey=' + proxyKey : '');
                 openCustomScheme(schemeUrl);

@@ -155,12 +155,27 @@ OAuth 2.0 and multi-tenant settings are also configured via environment variable
 
 > For production deployments, treat `JWT_SECRET` as a high-value key: provision it from your secret manager or KMS, never check it into source control, and rotate it according to your organization’s security policies.
 
+#### Peta Auth (optional)
+
+Peta Core supports multiple OAuth-based integrations (for example Google, Notion, GitHub, and Figma). There are two ways to supply OAuth credentials:
+
+1. **Peta-managed credentials** (Peta provides `clientId` and `clientSecret`) — requires the separate `peta-auth` service so Peta secrets are never exposed.
+2. **Bring your own credentials** — no `peta-auth` service is required.
+
+If you are certain you will not use Peta-managed credentials, set `PETA_AUTH_AUTOSTART='false'` to skip installing and starting `peta-auth`.
+
 #### Logging
 
 | Name         | Required | Default                      | Description                                           |
 | ------------ | -------- | ---------------------------- | ----------------------------------------------------- |
 | `LOG_LEVEL`  |          | `trace` (dev), `info` (prod) | Log level: `trace`, `debug`, `info`, `warn`, `error`. |
 | `LOG_PRETTY` |          | `true` (dev), `false` (prod) | Enable pretty-printed logs in development.            |
+
+#### MCP Server Management
+
+| Name                  | Required | Default | Description                                                                                      |
+| --------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
+| `LAZY_START_ENABLED`  |          | `true`  | Enable lazy loading for MCP servers. When true, servers load config but delay startup until first use; idle servers auto-shutdown. |
 
 #### Cloudflared DDNS (optional)
 

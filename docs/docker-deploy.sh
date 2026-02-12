@@ -4,7 +4,7 @@
 # Peta-Core One-Click Deployment Script
 # ====================================
 # This script deploys Peta-Core service from Docker image petaio/peta-core:latest
-# Including PostgreSQL, peta-core, and Cloudflared services
+# Including PostgreSQL, peta-core, optional peta-auth, and Cloudflared services
 
 set -e
 
@@ -20,6 +20,7 @@ NC='\033[0m' # No Color
 BACKEND_PORT=${BACKEND_PORT:-3002}
 DB_PORT=${DB_PORT:-5434}
 DEPLOY_DIR=${DEPLOY_DIR:-./peta-core-deployment}
+PETA_AUTH_AUTOSTART=${PETA_AUTH_AUTOSTART:-true}
 
 # Logging functions
 log_info() {
@@ -203,6 +204,8 @@ services:
       JWT_SECRET: \${JWT_SECRET}
       LOG_LEVEL: \${LOG_LEVEL}
       LOG_PRETTY: \${LOG_PRETTY}
+      LAZY_START_ENABLED: \${LAZY_START_ENABLED}
+      PETA_AUTH_AUTOSTART: \${PETA_AUTH_AUTOSTART}
       CLOUDFLARED_CONTAINER_NAME: \${CLOUDFLARED_CONTAINER_NAME}
       PETA_CORE_IN_DOCKER: "true"
       # Skip database container startup (database is started via docker-compose)
@@ -220,6 +223,24 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+EOF
+
+    if [ "$PETA_AUTH_AUTOSTART" != "false" ]; then
+        cat >> docker-compose.yml <<EOF
+
+  # Peta Auth Service
+  peta-auth:
+    image: petaio/peta-auth:latest
+    container_name: peta-auth
+    restart: unless-stopped
+    networks:
+      - peta-network
+    volumes:
+      - peta-auth-data:/data
+EOF
+    fi
+
+    cat >> docker-compose.yml <<EOF
 
   # Cloudflared Service
   # Note: restart is set to "no" to prevent auto-start on deployment
@@ -239,6 +260,16 @@ services:
 volumes:
   ${VOLUME_NAME}:
     driver: local
+EOF
+
+    if [ "$PETA_AUTH_AUTOSTART" != "false" ]; then
+        cat >> docker-compose.yml <<EOF
+  peta-auth-data:
+    driver: local
+EOF
+    fi
+
+    cat >> docker-compose.yml <<EOF
 
 networks:
   peta-network:
@@ -280,6 +311,15 @@ JWT_SECRET=${JWT_SECRET}
 LOG_LEVEL=info
 LOG_PRETTY=false
 LOG_RESPONSE_MAX_LENGTH=300
+
+# -------------------- MCP Server Management --------------------
+# Lazy loading: Servers load config but delay startup until first use
+# Idle servers auto-shutdown to conserve resources
+LAZY_START_ENABLED=true
+
+# -------------------- Peta Auth Configuration (Optional) --------------------
+# Auto-start peta-auth for Peta-managed OAuth credentials
+PETA_AUTH_AUTOSTART=${PETA_AUTH_AUTOSTART}
 
 # -------------------- Cloudflared Configuration --------------------
 CLOUDFLARED_CONTAINER_NAME=peta-core-cloudflared

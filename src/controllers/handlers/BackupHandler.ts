@@ -31,8 +31,6 @@ export class BackupHandler {
   private logger = createLogger('BackupHandler');
 
   constructor(
-    private sessionStore: SessionStore,
-    private serverManager: ServerManager,
     private ipWhitelistService: IpWhitelistService
   ) {}
 
@@ -94,11 +92,11 @@ export class BackupHandler {
     try {
       // 1. Disconnect all user sessions
       this.logger.info('Disconnecting all sessions...');
-      await this.sessionStore.removeAllSessions();
+      await SessionStore.instance.removeAllSessions();
 
       // 2. Stop all MCP servers
       this.logger.info('Stopping all MCP servers...');
-      await this.serverManager.shutdown();
+      await ServerManager.instance.shutdown();
 
       // Database must be empty before restore
       // First check if proxy table is empty
@@ -156,7 +154,7 @@ export class BackupHandler {
 
       // 5. Reinitialize enabled MCP servers
       this.logger.info('Reinitializing enabled MCP servers...');
-      const { successServers, failedServers } = await this.serverManager.connectAllServers(token);
+      const { successServers, failedServers } = await ServerManager.instance.connectAllServers(token);
 
       // Log admin operation
       LogService.getInstance().enqueueLog({

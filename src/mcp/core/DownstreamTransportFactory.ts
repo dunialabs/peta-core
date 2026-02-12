@@ -23,19 +23,19 @@ export class DownstreamTransportFactory {
   /**
    * Create transport instance based on launch_config
    */
-  static async create(launchConfig: Record<string, any>): Promise<Transport> {
+  static async create(launchConfig: Record<string, any>): Promise<{transport: Transport, transportType: DownstreamTransportType}> {
     const transportType = this.detectTransportType(launchConfig);
     
     try {
       switch (transportType) {
         case 'stdio':
-          return this.createStdioTransport(launchConfig);
+          return { transport: this.createStdioTransport(launchConfig), transportType };
         
         case 'http':
-          return await this.createHttpTransport(launchConfig);
+          return { transport: await this.createHttpTransport(launchConfig), transportType };
         
         case 'sse':
-          return this.createSSETransport(launchConfig);
+          return { transport: this.createSSETransport(launchConfig), transportType };
         
         default:
           throw new Error(`Unsupported transport type: ${transportType}`);
@@ -48,7 +48,7 @@ export class DownstreamTransportFactory {
   /**
    * Infer transport type from launch_config
    */
-  private static detectTransportType(config: any): DownstreamTransportType {
+  public static detectTransportType(config: any): DownstreamTransportType {
     // Explicitly specified type takes priority
     if (config.type) {
       return config.type;

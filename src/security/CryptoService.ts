@@ -17,15 +17,20 @@ export class CryptoService {
    * Calculate MD5 hash of token as user ID
    */
   static async calculateUserId(token: string): Promise<string> {
+    const hash = await this.hash(token);
+    return hash.substring(0, 32);
+  }
+
+  static async hash(data: string): Promise<string> {
     const encoder = new TextEncoder();
-    const data = encoder.encode(token);
+    const dataBuffer = encoder.encode(data);
 
     // Use SHA-256 instead of MD5 (more secure)
-    const hashBuffer = await webcrypto.subtle.digest('SHA-256', data);
+    const hashBuffer = await webcrypto.subtle.digest('SHA-256', dataBuffer);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     
     // Take first 32 characters to simulate MD5 length, or adjust as needed
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32);
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
   }
 
   private static readonly PBKDF2_ITERATIONS = 100000

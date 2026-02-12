@@ -1,9 +1,7 @@
-import { SessionStore } from '../../mcp/core/SessionStore.js';
 import { ServerManager } from '../../mcp/core/ServerManager.js';
-import { UserRepository } from '../../repositories/UserRepository.js';
 import { ServerRepository } from '../../repositories/ServerRepository.js';
 import { AdminRequest, AdminError, AdminErrorCode } from '../../types/admin.types.js';
-import { McpServerCapabilities, Permissions, ServerConfigCapabilities, ServerConfigWithEnabled } from '../../mcp/types/mcp.js';
+import { McpServerCapabilities, ServerConfigCapabilities } from '../../mcp/types/mcp.js';
 import { ServerStatus } from '../../types/enums.js';
 import { CapabilitiesService } from '../../mcp/services/CapabilitiesService.js';
 import { createLogger } from '../../logger/index.js';
@@ -15,33 +13,33 @@ export class QueryHandler {
   // Logger for QueryHandler
   private logger = createLogger('QueryHandler');
 
-  constructor(
-    private sessionStore: SessionStore,
-    private serverManager: ServerManager
-  ) {}
+  constructor() {}
 
   /**
    * Get all server capabilities configuration (3002)
    */
   async handleGetAvailableServersCapabilities(request: AdminRequest<any>): Promise<{ capabilities: McpServerCapabilities }> {
-    const capabilities = this.serverManager.getAvailableServersCapabilities();
-    const servers = await ServerRepository.findAll();
+    const capabilities = ServerManager.instance.getAvailableServersCapabilities();
+    const servers = await ServerManager.instance.getAllServers();
     for (const server of servers) {
-      if (server.enabled === false) {
-        continue;
-      }
-      if (capabilities[server.serverId]) {
+
+      if (!server.enabled) {
         continue;
       }
 
-      const serverCapabilities = server.allowUserInput ? {} : JSON.parse(server.capabilities ?? '{}');
+      if (capabilities[server.serverId]) {
+        capabilities[server.serverId].enabled = server.publicAccess;
+        continue;
+      }
+
+      const serverCapabilities = JSON.parse(server.capabilities ?? '{}');
       capabilities[server.serverId] = {
-        enabled: server.enabled,
+        enabled: server.publicAccess,
         serverName: server.serverName,
         allowUserInput: server.allowUserInput,
         authType: server.authType,
-        configTemplate: server.configTemplate || '',
-        configured: false,
+        configTemplate: '{}',
+        configured: true,
         tools: serverCapabilities.tools ?? {},
         resources: serverCapabilities.resources ?? {},
         prompts: serverCapabilities.prompts ?? {}
@@ -59,6 +57,13 @@ export class QueryHandler {
     const { targetId } = request.data;
 
     const capabilities = await CapabilitiesService.getInstance().getCapabilitiesFromDatabase(targetId);
+    for (const [serverId, serverConfig] of Object.entries(capabilities)) {
+      if (serverConfig.allowUserInput) {
+        serverConfig.tools = {};
+        serverConfig.resources = {};
+        serverConfig.prompts = {};
+      }
+    }
     return {
       capabilities: capabilities
     };
@@ -68,7 +73,7 @@ export class QueryHandler {
    * Get all server status (3004)
    */
   async handleGetServersStatus(request: AdminRequest<any>): Promise<{ serversStatus: { [serverID: string]: ServerStatus } }> {
-    const results = await this.serverManager.healthCheck();
+    const results = await ServerManager.instance.healthCheck();
     return {
       serversStatus: results
     };
@@ -80,25 +85,37 @@ export class QueryHandler {
   async handleGetServersCapabilities(request: AdminRequest<any>): Promise<{ capabilities: ServerConfigCapabilities }> {
     const { targetId } = request.data;
 
-    const serverContext = this.serverManager.getServerContext(targetId);
-    if (!serverContext) {
+    let capabilities: ServerConfigCapabilities
+    let serverName: string;
+    let serverId: string;
+    const serverContext = ServerManager.instance.getServerContext(targetId);
+    if (serverContext) {
+      const serverCapabilities = serverContext.getMcpCapabilities();
+      capabilities = {
+        tools: serverCapabilities.tools ?? {},
+        resources: serverCapabilities.resources ?? {},
+        prompts: serverCapabilities.prompts ?? {}
+      }
+      serverName = serverContext.serverEntity.serverName;
+      serverId = serverContext.serverEntity.serverId;
+    } else {
       const serverEntity = await ServerRepository.findByServerId(targetId);
       if (!serverEntity) {
         throw new AdminError(`Server ${targetId} not found`, AdminErrorCode.SERVER_NOT_FOUND);
       }
-      const capabilities = JSON.parse(serverEntity.capabilities);
-      return {
-        capabilities: { tools: capabilities.tools ?? {}, resources: capabilities.resources ?? {}, prompts: capabilities.prompts ?? {} }
-      }
+      capabilities = JSON.parse(serverEntity.capabilities);
+      serverName = serverEntity.serverName;
+      serverId = serverEntity.serverId;
     }
 
-    const serverCapabilities = serverContext.getMcpCapabilities();
     this.logger.debug({
-      serverId: serverContext.serverEntity.serverId,
-      serverCapabilities
+      serverId: serverId,
+      serverName: serverName,
+      capabilities: capabilities
     }, 'Server capabilities retrieved');
+
     return {
-      capabilities: serverCapabilities
+      capabilities: capabilities
     };
   }
 }

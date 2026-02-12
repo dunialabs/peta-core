@@ -1,4 +1,3 @@
-import { LogService } from '../log/LogService.js';
 import { createLogger } from '../logger/index.js';
 
 export interface RateLimitResult {
@@ -20,7 +19,7 @@ export class RateLimitService {
   // Logger for RateLimitService
   private logger = createLogger('RateLimitService');
   
-  constructor(private logService: LogService) {
+  constructor() {
     // Start scheduled cleanup task
     this.startCleanupTimer();
   }
