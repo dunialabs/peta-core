@@ -7,7 +7,7 @@ This document describes the complete protocol specification for Peta Core Admin 
 ## Basic Information
 
 - **Endpoint**: `POST /admin`
-- **Authentication**: Bearer Token
+- **Authentication**: Bearer Token (Peta access token; opaque bearer token)
 - **Content Type**: `application/json`
 - **Character Encoding**: UTF-8
 
@@ -91,7 +91,7 @@ export enum AdminActionType {
 ```bash
 curl -X POST http://localhost:3002/admin \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Authorization: Bearer YOUR_PETA_ACCESS_TOKEN" \
   -d '{
     "action": 1011,
     "data": {

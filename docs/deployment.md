@@ -147,14 +147,13 @@ All configuration is set via environment variables (for example in a `.env` file
 
 #### Authentication
 
-| Name                  | Required          | Default | Description                                                                                              |
-| --------------------- | ----------------- | ------- | -------------------------------------------------------------------------------------------------------- |
-| `JWT_SECRET`          | ✓ (in production) | –       | Secret used to sign and verify Peta service tokens.                                                      |
-| `PETA_AUTH_AUTOSTART` |                   | `true`  | Auto-start peta-auth for Peta-managed OAuth credentials. Set to `false` to skip installing/starting it. |
+| Name         | Required          | Default | Description                                         |
+| ------------ | ----------------- | ------- | --------------------------------------------------- |
+| `JWT_SECRET` | ✓ (in production) | –       | Secret used to sign and verify OAuth access tokens (JWT) issued by Peta Core. |
 
 OAuth 2.0 and multi-tenant settings are also configured via environment variables; refer to `../.env.example` and the API docs for the full list.
 
-> For production deployments, treat `JWT_SECRET` and any vault-encryption related secrets as high-value keys: provision them from your secret manager or KMS, never check them into source control, and rotate them according to your organization’s security policies.
+> For production deployments, treat `JWT_SECRET` as a high-value key: provision it from your secret manager or KMS, never check it into source control, and rotate it according to your organization’s security policies.
 
 #### Peta Auth (optional)
 

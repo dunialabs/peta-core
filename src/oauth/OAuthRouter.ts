@@ -45,6 +45,7 @@ export class OAuthRouter {
     app.get('/authorize', this.oauthController.showAuthorizePage);
     app.post('/authorize', this.oauthController.authorize);
     app.post('/token', this.oauthController.token);
+    app.post('/introspect', this.oauthController.introspect);
     app.post('/revoke', this.oauthController.revoke);
 
     // 3. OAuth client management endpoints - Requires admin permissions

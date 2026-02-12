@@ -180,8 +180,8 @@ export class AuthMiddleware {
             );
           }
         } else if (isHexFormat) {
-          // 128-bit hex format, use traditional token validation
-          this.logger.debug('Token detected as traditional format (128-bit hex), using traditional validation');
+          // 128-character hex format, use traditional token validation
+          this.logger.debug('Token detected as traditional format (128-character hex), using traditional validation');
           authContext = await this.tokenValidator.validateToken(token);
         } else {
           // Unknown format, try both validation methods

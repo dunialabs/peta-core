@@ -29,7 +29,7 @@ From the agent’s perspective there is only one MCP server. Behind that interfa
 
 Typical responsibilities inside the gateway include:
 
-- Validating Peta service tokens and resolving user/agent identity.
+- Validating Peta access tokens (OAuth JWT or opaque) and resolving user/agent identity.
 - Applying RBAC/ABAC policies, quotas, and network restrictions.
 - Determining whether a request is allowed, blocked, or requires human approval.
 - Injecting encrypted credentials into downstream MCP servers at execution time.
