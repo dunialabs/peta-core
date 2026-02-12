@@ -87,7 +87,7 @@ Peta Core is the core backend service of the Peta MCP stack. In typical deployme
 At a high level, Peta Core is responsible for:
 
 - Terminating and proxying MCP connections from agents and MCP-compatible clients (acting as an MCP server upstream and an MCP client downstream).
-- Issuing and validating short-lived service tokens for users and agents.
+- Handling authentication and token lifecycle for clients and downstream servers.
 - Routing requests to downstream MCP servers and managing downstream server lifecycle as needed.
 - Injecting external credentials from an encrypted MCP vault at execution time (secrets never ship to clients).
 - Enforcing per-user, per-agent, and per-tool policy decisions (RBAC/ABAC and capability filtering).
@@ -104,15 +104,14 @@ At a high level, Peta Core is responsible for:
 Peta Core provides the runtime layer of the MCP Control Plane: secure credential handling, policy enforcement, approvals, and audit — for every tool call.
 
 ### 1) Managed MCP Gateway & Runtime
-- **Transparent MCP proxying.** Acts as an MCP server upstream and an MCP client downstream — no custom extensions required.
-- **Multi-server routing.** Mount multiple downstream MCP servers behind one stable endpoint (e.g. `serverId::toolName`).
-- **Lazy loading (optional).** Load server configurations into memory without startup; servers launch on-demand and auto-shutdown when idle to optimize resource usage.
+- **Transparent MCP proxying and routing.** Acts as an MCP server upstream and an MCP client downstream and routes to multiple downstream MCP servers behind one stable endpoint (e.g. `serverId::toolName`).
+- **Built-in OAuth 2.0 for MCP clients.** Authorization code + PKCE, refresh tokens, dynamic client registration, introspection, and revocation.
 - **Downstream lifecycle (optional).** Run/monitor downstream servers with health checks and lifecycle hooks when needed.
 
 ### 2) Secure Vault & Server-side Credential Injection
-- **Secrets never reach MCP clients.** Credentials stay encrypted server-side and are injected just-in-time at execution.
-- **Vault-backed connectors.** Downstream MCP servers receive the credentials they need only for the duration of a call.
+- **Secrets never reach MCP clients.** Credentials stay encrypted at rest and are injected just-in-time at execution.
 - **Encrypted config storage.** Server configs and per-user configuration blobs can be stored encrypted at rest.
+- **OAuth token brokerage for downstream services.** Peta Core stores OAuth configuration encrypted, refreshes access tokens automatically, and injects only access tokens into downstream runtimes (no external broker, fewer re-auths, refresh tokens never exposed).
 - See: [Security & Permissions](./docs/security.md) for encryption and key management details.
 
 ### 3) Policy Enforcement & Approvals
@@ -174,7 +173,7 @@ Peta Console is a web-based administration UI for operators and security teams. 
 Peta Console talks to Peta Core using the Admin API:
 
 - A single `/admin` endpoint with action codes for operations (user, server, and policy management).
-- Authenticated with admin-level JWT or OAuth 2.0 credentials.
+- Authenticated with a Peta access token (opaque bearer token) for an Owner/Admin user.
 - Designed to be scriptable; you can call the same API from your own automation.
 </details>
 
@@ -266,4 +265,3 @@ Subject to the terms of the Elastic License 2.0, you are encouraged to:
 For detailed terms, see the [LICENSE](../LICENSE) file.
 
 Copyright © 2026 [Dunia Labs, Inc.](https://dunialabs.io)
-

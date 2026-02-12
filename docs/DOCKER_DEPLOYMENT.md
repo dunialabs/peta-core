@@ -345,20 +345,9 @@ curl http://localhost:3002/health
 
 ### OAuth 2.0 Authentication
 
-#### Client Credentials Grant
+Peta Core supports OAuth 2.0 authorization code + PKCE for user-interactive clients and refresh tokens for renewal.
 
-Suitable for server-to-server communication:
-
-```bash
-# Get access token
-curl -X POST http://localhost:3002/oauth/token \
-  -H "Content-Type: application/json" \
-  -d '{
-    "grant_type": "client_credentials",
-    "client_id": "your_client_id",
-    "client_secret": "your_client_secret"
-  }'
-```
+For non-interactive automation, you can also authenticate to `/mcp` and `/admin` using a Peta access token (opaque bearer token) associated with a user.
 
 #### Authorization Code Grant with PKCE
 
@@ -370,10 +359,10 @@ CODE_VERIFIER=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-43)
 CODE_CHALLENGE=$(echo -n $CODE_VERIFIER | openssl dgst -sha256 -binary | base64 | tr -d "=+/" | cut -c1-43)
 
 # 2. Get authorization code (open in browser)
-open "http://localhost:3002/oauth/authorize?client_id=your_client_id&response_type=code&redirect_uri=http://localhost:3000/callback&code_challenge=$CODE_CHALLENGE&code_challenge_method=S256"
+open "http://localhost:3002/authorize?client_id=your_client_id&response_type=code&redirect_uri=http://localhost:3000/callback&code_challenge=$CODE_CHALLENGE&code_challenge_method=S256"
 
 # 3. Exchange authorization code for access token
-curl -X POST http://localhost:3002/oauth/token \
+curl -X POST http://localhost:3002/token \
   -H "Content-Type: application/json" \
   -d '{
     "grant_type": "authorization_code",
