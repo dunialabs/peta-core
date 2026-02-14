@@ -234,12 +234,16 @@ export class ServerHandler {
                 code: string;
                 redirectUri: string;
                 tokenUrl?: string;
+                codeVerifier?: string;
+                scope?: string;
               } = {
                 clientId: oauth.clientId,
                 provider: provider,
                 key: hashKey,
                 code: oauth.code,
-                redirectUri: oauth.redirectUri
+                redirectUri: oauth.redirectUri,
+                codeVerifier: oauth.codeVerifier,
+                scope: [ServerAuthType.ZendeskAuth].includes(authType) ? oauthConfig.scope : undefined
               };
 
               if ((provider === 'zendesk' || provider === 'canvas') && oauthConfig?.tokenUrl) {
@@ -302,7 +306,9 @@ export class ServerHandler {
                   clientId: clientId,
                   clientSecret: clientSecret,
                   code: oauth.code,
-                  redirectUri: oauth.redirectUri
+                  redirectUri: oauth.redirectUri,
+                  codeVerifier: oauth.codeVerifier,
+                  scope: [ServerAuthType.ZendeskAuth].includes(authType) ? oauthConfig.scope : undefined
                 });
 
                 if (exchangeResult.accessToken && exchangeResult.refreshToken) {

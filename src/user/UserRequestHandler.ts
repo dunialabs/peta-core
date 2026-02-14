@@ -259,6 +259,7 @@ export class UserRequestHandler {
           }, {});
           const oauthCode = authConfValue.YOUR_OAUTH_CODE.value;
           const oauthRedirectUrl = authConfValue.YOUR_OAUTH_REDIRECT_URL.value;
+          const oauthCodeVerifier = authConfValue.YOUR_OAUTH_CODE_VERIFIER.value;
           if (typeof oauthCode !== 'string' || oauthCode === '') {
             throw new UserError(`code is required and cannot be empty`, UserErrorCode.SERVER_CONFIG_INVALID);
           }
@@ -284,12 +285,16 @@ export class UserRequestHandler {
               code: string;
               redirectUri: string;
               tokenUrl?: string;
+              codeVerifier?: string;
+              scope?: string;
             } = {
               clientId: oauth.clientId,
               provider: provider,
               key: hashKey,
               code: oauthCode,
-              redirectUri: oauthRedirectUrl
+              redirectUri: oauthRedirectUrl,
+              codeVerifier: oauthCodeVerifier,
+              scope: [ServerAuthType.CanvaAuth].includes(server.authType) ? oauthConfig.scope : undefined
             };
 
             if ((provider === 'zendesk' || provider === 'canvas') && oauthConfig?.tokenUrl) {
@@ -342,7 +347,11 @@ export class UserRequestHandler {
                 clientId: oauth.clientId,
                 clientSecret: oauth.clientSecret,
                 code: oauthCode,
-                redirectUri: oauthRedirectUrl
+                redirectUri: oauthRedirectUrl,
+                codeVerifier: oauthCodeVerifier,
+                scope: [ServerAuthType.ZendeskAuth, ServerAuthType.CanvaAuth].includes(server.authType)
+                  ? oauthConfig.scope
+                  : undefined
               });
 
               if (exchangeResult.accessToken && exchangeResult.refreshToken) {
