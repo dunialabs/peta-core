@@ -17,13 +17,19 @@ export const zendeskAdapter: ProviderAdapter = {
   name: 'zendesk',
 
   buildRequest(ctx: ExchangeContext): ProviderRequest {
-    const body = {
+    const body: Record<string, unknown> = {
       grant_type: 'authorization_code',
       client_id: ctx.clientId,
       client_secret: ctx.clientSecret,
       code: ctx.code,
       redirect_uri: ctx.redirectUri,
+      expires_in: 172800, // 2 days
+      refresh_token_expires_in: 7776000 // 90 days
     };
+
+    if (ctx.scope) {
+      body.scope = ctx.scope;
+    }
 
     return {
       headers: {
