@@ -363,6 +363,15 @@ export class UserRequestHandler {
                   refreshToken: exchangeResult.refreshToken,
                   expiresAt: expiresAt
                 };
+                if ([ServerAuthType.ZendeskAuth].includes(server.authType)) {
+                  decryptedLaunchConfigValue.oauth.tokenUrl = oauthConfig.tokenUrl;
+                }
+                if (server.authType === ServerAuthType.ZendeskAuth) {
+                  decryptedLaunchConfigValue.oauth.scope = oauthConfig.scope;
+                  if (exchangeResult.raw.refresh_token_expires_in && typeof exchangeResult.raw.refresh_token_expires_in === 'number') {
+                    decryptedLaunchConfigValue.oauth.refreshTokenExpiresAt = Date.now() + exchangeResult.raw.refresh_token_expires_in * 1000;
+                  }
+                }
                 launchConfig = decryptedLaunchConfigValue;
               } else {
                 throw new UserError('Failed to exchange OAuth code', UserErrorCode.SERVER_CONFIG_INVALID);
