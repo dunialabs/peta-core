@@ -312,6 +312,8 @@ export class ServerManager {
       case ServerAuthType.GoogleCalendarAuth:
       case ServerAuthType.FigmaAuth:
       case ServerAuthType.GithubAuth:
+      case ServerAuthType.CanvaAuth:
+      case ServerAuthType.ZendeskAuth:
         launchConfig.env = {
           ...launchConfig.env,
           accessToken: accessToken,
@@ -1045,6 +1047,8 @@ export class ServerManager {
       case ServerAuthType.NotionAuth:
       case ServerAuthType.FigmaAuth:
       case ServerAuthType.GithubAuth:
+      case ServerAuthType.CanvaAuth:
+      case ServerAuthType.ZendeskAuth:
         serverContext.userToken = token;
         await this.initializeOAuthWithRefresh(serverContext, launchConfig);
         break;
@@ -1068,6 +1072,8 @@ export class ServerManager {
     serverContext: ServerContext,
     launchConfig: Record<string, any>
   ): Promise<void> {
+    const authType = serverContext.serverEntity.authType;
+
     // 1. Verify OAuth configuration exists
     if (
       !launchConfig.oauth?.clientId ||
@@ -1076,6 +1082,15 @@ export class ServerManager {
     ) {
       throw new Error(
         `[ServerManager] Missing OAuth configuration for server ${serverContext.serverID}. Required: clientId, clientSecret, refreshToken`
+      );
+    }
+
+    if (
+      [ServerAuthType.ZendeskAuth].includes(authType) &&
+      (!launchConfig.oauth.tokenUrl || typeof launchConfig.oauth.tokenUrl !== 'string')
+    ) {
+      throw new Error(
+        `[ServerManager] Missing OAuth tokenUrl for server ${serverContext.serverID} (ZendeskAuth)`
       );
     }
 

@@ -320,6 +320,15 @@ export class ServerHandler {
                     refreshToken: exchangeResult.refreshToken,
                     expiresAt: expiresAt
                   };
+                  if ([ServerAuthType.ZendeskAuth].includes(authType)) {
+                    decryptedLaunchConfigValue.oauth.tokenUrl = oauthConfig.tokenUrl;
+                  }
+                  if (authType === ServerAuthType.ZendeskAuth) {
+                    decryptedLaunchConfigValue.oauth.scope = oauthConfig.scope;
+                    if (exchangeResult.raw.refresh_token_expires_in && typeof exchangeResult.raw.refresh_token_expires_in === 'number') {
+                      decryptedLaunchConfigValue.oauth.refreshTokenExpiresAt = Date.now() + exchangeResult.raw.refresh_token_expires_in * 1000;
+                    }
+                  }
                   const encryptedData = await CryptoService.encryptData(JSON.stringify(decryptedLaunchConfigValue), token);
                   launchConfigStr = JSON.stringify(encryptedData);
                 } else {
