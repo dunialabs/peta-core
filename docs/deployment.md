@@ -55,7 +55,7 @@ SKIP_CLOUDFLARED=true npm run dev
 Peta Core ships with a shell script that prepares a Docker-based deployment:
 
 ```bash
-curl -O https://github.com/dunialabs/peta-core/blob/main/docs/docker-deploy.sh
+curl -O https://raw.githubusercontent.com/dunialabs/peta-core/main/docs/docker-deploy.sh
 chmod +x docker-deploy.sh
 ./docker-deploy.sh
 ```
