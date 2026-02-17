@@ -39,7 +39,7 @@ Use the automated deployment script to complete all configuration and startup wi
 
 ```bash
 # Download the deployment script
-curl -O https://github.com/dunialabs/peta-core/blob/main/docs/docker-deploy.sh
+curl -O https://raw.githubusercontent.com/dunialabs/peta-core/main/docs/docker-deploy.sh
 chmod +x docker-deploy.sh
 
 # Run the deployment script
@@ -91,7 +91,7 @@ Ensure the following ports are not in use:
 
 ```bash
 # 1. Download the deployment script
-curl -O https://github.com/dunialabs/peta-core/blob/main/docs/docker-deploy.sh
+curl -O https://raw.githubusercontent.com/dunialabs/peta-core/main/docs/docker-deploy.sh
 chmod +x docker-deploy.sh
 
 # 2. Run the deployment script
