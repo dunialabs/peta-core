@@ -167,12 +167,14 @@ services:
       CLOUDFLARED_CONTAINER_NAME: ${CLOUDFLARED_CONTAINER_NAME}
       PETA_AUTH_AUTOSTART: ${PETA_AUTH_AUTOSTART}
       PETA_CORE_IN_DOCKER: "true"
+      HOST_SKILLS_DIR: ${HOST_SKILLS_DIR}  # Absolute host path to skills directory (required for skills MCP)
       # Skip database container startup (database is started via docker-compose)
       SKIP_DB_CONTAINER_START: "true"
     ports:
       - '${BACKEND_PORT}:${BACKEND_PORT}'
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # Mount Docker socket for starting downstream MCP service containers
+      - ./skills:/data/skills  # Skills directory (required for skills MCP servers)
       - ./cloudflared:/app/cloudflared  # Shared cloudflared configuration directory
     networks:
       - peta-network

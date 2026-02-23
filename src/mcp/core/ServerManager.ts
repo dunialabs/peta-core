@@ -40,6 +40,7 @@ import { ClientSession } from './ClientSession.js';
 import { socketNotifier } from '../../socket/SocketNotifier.js';
 import { ProxyContext } from '../../types/mcp.types.js';
 import { createLogger } from '../../logger/index.js';
+import { SKILLS_CONFIG } from '../../config/skillsConfig.js';
 
 /**
  * Subscription state structure
@@ -729,6 +730,7 @@ export class ServerManager {
       const baseLaunchConfig = await this.decryptLaunchConfig(token, serverEntity);
 
       const launchConfig: Record<string, any> = JSON.parse(baseLaunchConfig);
+      this.resolveSkillsVolumeMounts(launchConfig);
 
       // 2. Initialize authentication (handle OAuth token)
       await this.initializeAuthentication(serverContext, launchConfig, token);
@@ -843,6 +845,63 @@ export class ServerManager {
 
       throw error;
     }
+  }
+
+  private resolveSkillsVolumeMounts(launchConfig: Record<string, any>): void {
+    if (launchConfig.command !== 'docker' || !Array.isArray(launchConfig.args)) {
+      return;
+    }
+
+    const hostSkillsDir = SKILLS_CONFIG.HOST_SKILLS_DIR.replace(/\/+$/, '');
+    const isInDocker = process.env.PETA_CORE_IN_DOCKER === 'true';
+
+    if (isInDocker && !hostSkillsDir) {
+      this.logger.warn('HOST_SKILLS_DIR not set while running in Docker. Skills volume mounts may fail on Linux.');
+      return;
+    }
+
+    if (!hostSkillsDir) {
+      return;
+    }
+
+    if (isInDocker && !hostSkillsDir.startsWith('/')) {
+      this.logger.warn({ hostSkillsDir }, 'HOST_SKILLS_DIR must be an absolute host path when PETA_CORE_IN_DOCKER=true. Skills volume mounts may fail on Linux.');
+      return;
+    }
+
+    const args: string[] = launchConfig.args;
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      if ((arg === '-v' || arg === '--volume') && i + 1 < args.length) {
+        args[i + 1] = this.rewriteSkillsVolumeArg(args[i + 1], hostSkillsDir);
+      } else if (arg.startsWith('-v=') || arg.startsWith('--volume=')) {
+        const eqIdx = arg.indexOf('=');
+        const rewritten = this.rewriteSkillsVolumeArg(arg.substring(eqIdx + 1), hostSkillsDir);
+        args[i] = arg.substring(0, eqIdx + 1) + rewritten;
+      }
+    }
+  }
+
+  private rewriteSkillsVolumeArg(volumeSpec: string, hostSkillsDir: string): string {
+    const parts = volumeSpec.split(':');
+    if (parts.length < 2) {
+      return volumeSpec;
+    }
+
+    const source = parts[0];
+    if (source.startsWith('./skills/') || source.startsWith('skills/')) {
+      const relativePart = source.startsWith('./') ? source.substring(2) : source;
+      const afterSkills = relativePart.substring('skills/'.length);
+      if (!afterSkills || afterSkills.startsWith('/') || afterSkills.split('/').some(seg => seg === '..')) {
+        this.logger.warn({ volumeSpec }, 'Rejecting skills volume mount rewrite: path traversal detected');
+        return volumeSpec;
+      }
+      parts[0] = `${hostSkillsDir}/${afterSkills}`;
+      this.logger.info({ original: source, resolved: parts[0] }, 'Rewrote skills volume mount for Docker-in-Docker compatibility');
+      return parts.join(':');
+    }
+
+    return volumeSpec;
   }
 
   async updateServerCapabilities(serverContext: ServerContext): Promise<void> {

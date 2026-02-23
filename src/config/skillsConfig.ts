@@ -9,6 +9,8 @@ export const SKILLS_CONFIG = {
    */
   SKILLS_DIR: process.env.SKILLS_DIR || './skills',
 
+  HOST_SKILLS_DIR: process.env.HOST_SKILLS_DIR || '',
+
   /**
    * Maximum ZIP file size in bytes (10MB)
    */

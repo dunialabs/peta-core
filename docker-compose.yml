@@ -40,6 +40,7 @@ services:
   #   environment:
   #     - DATABASE_URL=postgresql://peta:peta123@postgres:5432/peta_mcp_gateway?schema=public
   #     - SKILLS_DIR=/data/skills
+  #     - HOST_SKILLS_DIR=${HOST_SKILLS_DIR:-}  # Absolute host path to skills directory for Docker-in-Docker volume mounts
   #   volumes:
   #     - ./skills:/data/skills    # Skills directory (shared with skillsmcp)
   #   depends_on:
