@@ -7,7 +7,7 @@ import { ProxyRepository } from '../../repositories/ProxyRepository.js';
 import { IpWhitelistRepository } from '../../repositories/IpWhitelistRepository.js';
 import { AdminRequest, AdminError, AdminErrorCode } from '../../types/admin.types.js';
 import { prisma } from '../../config/prisma.js';
-import { User, Server, Proxy, IpWhitelist } from '@prisma/client';
+import { User, Server, Proxy as ProxyModel, IpWhitelist } from '@prisma/client';
 import { LogService } from '../../log/LogService.js';
 import { MCPEventLogType } from '../../types/enums.js';
 import { createLogger } from '../../logger/index.js';
@@ -18,7 +18,7 @@ interface BackupData {
   tables: {
     users: User[];
     servers: Server[];
-    proxies: Proxy[];
+    proxies: ProxyModel[];
     ipWhitelist: IpWhitelist[];
   };
 }
@@ -59,7 +59,7 @@ export class BackupHandler {
       // Log admin operation
       LogService.getInstance().enqueueLog({
         action: MCPEventLogType.AdminBackupDatabase,
-        requestParams: JSON.stringify({ proxyId : proxies[0].id })
+        requestParams: JSON.stringify({ proxyId : proxies.length > 0 ? proxies[0].id : 0 })
       });
 
       return {
@@ -89,33 +89,30 @@ export class BackupHandler {
 
     const { users = [], servers = [], proxies = [], ipWhitelist = [] } = backup.tables;
 
+    let shutdownCompleted = false;
+
     try {
-      // 1. Disconnect all user sessions
-      this.logger.info('Disconnecting all sessions...');
-      await SessionStore.instance.removeAllSessions();
-
-      // 2. Stop all MCP servers
-      this.logger.info('Stopping all MCP servers...');
-      await ServerManager.instance.shutdown();
-
-      // Database must be empty before restore
-      // First check if proxy table is empty
-      const proxy = await ProxyRepository.findFirst();
-      if (proxy) {
+      const existingProxy = await ProxyRepository.findFirst();
+      if (existingProxy) {
         throw new AdminError('Proxy is not empty', AdminErrorCode.INVALID_REQUEST);
       }
 
-      // Then check if user table is empty
-      const users = await UserRepository.findAll();
-      if (users.length > 0) {
+      const existingUsers = await UserRepository.findAll();
+      if (existingUsers.length > 0) {
         throw new AdminError('Users are not empty', AdminErrorCode.INVALID_REQUEST);
       }
 
-      // Then check if server table is empty
-      const servers = await ServerRepository.findAll();
-      if (servers.length > 0) {
+      const existingServers = await ServerRepository.findAll();
+      if (existingServers.length > 0) {
         throw new AdminError('Servers are not empty', AdminErrorCode.INVALID_REQUEST);
       }
+
+      this.logger.info('Disconnecting all sessions...');
+      await SessionStore.instance.removeAllSessions();
+
+      this.logger.info('Stopping all MCP servers...');
+      await ServerManager.instance.shutdown();
+      shutdownCompleted = true;
 
       // 3. Restore all table data in transaction
       this.logger.info('Restoring database tables...');
@@ -150,7 +147,14 @@ export class BackupHandler {
 
       // 4. Reload IP whitelist to memory
       this.logger.info('Reloading IP whitelist...');
-      await this.ipWhitelistService.reloadFromDatabase();
+      try {
+        await this.ipWhitelistService.reloadFromDatabase();
+      } catch (reloadError) {
+        this.logger.warn(
+          { error: reloadError },
+          'IP whitelist reload failed after restore, will retry on next request'
+        );
+      }
 
       // 5. Reinitialize enabled MCP servers
       this.logger.info('Reinitializing enabled MCP servers...');
@@ -159,7 +163,7 @@ export class BackupHandler {
       // Log admin operation
       LogService.getInstance().enqueueLog({
         action: MCPEventLogType.AdminRestoreDatabase,
-        requestParams: JSON.stringify({ proxyId : proxies[0].id })
+        requestParams: JSON.stringify({ proxyId : proxies.length > 0 ? proxies[0].id : 0 })
       });
 
       return {
@@ -174,6 +178,14 @@ export class BackupHandler {
         }
       };
     } catch (error: any) {
+      if (shutdownCompleted) {
+        try {
+          await ServerManager.instance.connectAllServers(token);
+        } catch (recoveryError) {
+          this.logger.error({ error: recoveryError }, 'Recovery reconnection failed');
+        }
+      }
+
       this.logger.error({ error }, 'Restore failed');
       throw new AdminError(`Restore failed: ${error.message}`, AdminErrorCode.RESTORE_FAILED);
     }
