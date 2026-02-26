@@ -174,6 +174,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # Mount Docker socket for starting downstream MCP service containers
       - ./cloudflared:/app/cloudflared  # Shared cloudflared configuration directory
+      - ./skills:/data/skills  # Skills storage directory (enables auto host-path detection for child containers)
     networks:
       - peta-network
     healthcheck:
