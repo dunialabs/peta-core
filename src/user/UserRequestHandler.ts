@@ -259,7 +259,8 @@ export class UserRequestHandler {
           }, {});
           const oauthCode = authConfValue.YOUR_OAUTH_CODE.value;
           const oauthRedirectUrl = authConfValue.YOUR_OAUTH_REDIRECT_URL.value;
-          const oauthCodeVerifier = authConfValue.YOUR_OAUTH_CODE_VERIFIER.value;
+          const oauthCodeVerifier = authConfValue.YOUR_OAUTH_PKCE_VERIFIER.value;
+
           if (typeof oauthCode !== 'string' || oauthCode === '') {
             throw new UserError(`code is required and cannot be empty`, UserErrorCode.SERVER_CONFIG_INVALID);
           }
