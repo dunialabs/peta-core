@@ -42,7 +42,6 @@ import { ProxyContext } from '../../types/mcp.types.js';
 import { createLogger } from '../../logger/index.js';
 import * as path from 'path';
 import { resolveHostPath } from '../../utils/DockerHostPathResolver.js';
-import { SKILLS_CONFIG } from '../../config/skillsConfig.js';
 
 /**
  * Subscription state structure
@@ -2104,8 +2103,14 @@ export class ServerManager {
    * inside the peta-core container will not be found by the daemon.
    *
    * We query the Docker socket to discover the host-side path that is mounted
-   * at SKILLS_DIR (/data/skills) inside the peta-core container, then substitute
-   * that path into any matching volume args before the child container is spawned.
+   * at /data/skills (the well-known container mount point for skills) inside the
+   * peta-core container, then substitute that path into any matching volume args
+   * before the child container is spawned.
+   *
+   * Note: We use the fixed mount point /data/skills for the Docker socket lookup,
+   * independent of SKILLS_CONFIG.SKILLS_DIR, because these are two separate
+   * concerns: the mount point is determined by docker-compose, while SKILLS_DIR
+   * controls where the application reads/writes files.
    *
    * This is a no-op on macOS/Windows native installs, or when the Docker socket
    * is not available.
@@ -2117,25 +2122,27 @@ export class ServerManager {
     }
 
     // Only needed when peta-core itself is running inside Docker
-    if (!process.env.PETA_CORE_IN_DOCKER) {
+    if (process.env.PETA_CORE_IN_DOCKER !== 'true') {
       return;
     }
 
-    const containerSkillsDir = SKILLS_CONFIG.SKILLS_DIR; // e.g. /data/skills
+    // Use the fixed container-side mount point (set by docker-compose volumes),
+    // not SKILLS_CONFIG.SKILLS_DIR, to look up the corresponding host path.
+    const CONTAINER_SKILLS_MOUNT = '/data/skills';
 
-    const hostSkillsDir = await resolveHostPath(containerSkillsDir);
+    const hostSkillsDir = await resolveHostPath(CONTAINER_SKILLS_MOUNT);
     if (!hostSkillsDir) {
       // Not in Docker, socket unavailable, or mount not found – leave args unchanged
       return;
     }
 
     this.logger.debug(
-      { containerSkillsDir, hostSkillsDir },
+      { containerMount: CONTAINER_SKILLS_MOUNT, hostSkillsDir },
       'Rewriting skills volume mount paths to host-absolute paths'
     );
 
     launchConfig.args = (launchConfig.args as string[]).map((arg) =>
-      this.rewriteSkillsVolumeArg(arg, containerSkillsDir, hostSkillsDir)
+      this.rewriteSkillsVolumeArg(arg, CONTAINER_SKILLS_MOUNT, hostSkillsDir)
     );
   }
 
