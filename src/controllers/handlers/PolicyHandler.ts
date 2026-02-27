@@ -28,11 +28,11 @@ export class PolicyHandler {
     const { serverId } = request.data || {};
 
     if (serverId !== undefined) {
-      const policy = await PolicyRepository.findActiveByServerId(serverId);
-      return { policySets: policy ? [policy] : [] };
+      const policies = await PolicyRepository.findByServerId(serverId);
+      return { policySets: policies };
     }
 
-    const policySets = await PolicyRepository.findAllActive();
+    const policySets = await PolicyRepository.findAll();
     return { policySets };
   }
 

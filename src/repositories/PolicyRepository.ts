@@ -18,7 +18,7 @@ type ToolPolicySetDelegate = {
     orderBy: { version: 'asc' | 'desc' };
   }): Promise<ToolPolicySet | null>;
   findMany(args: {
-    where: { status: string; serverId?: string | null };
+    where: { status?: string; serverId?: string | null };
     orderBy?: { version: 'asc' | 'desc' };
   }): Promise<ToolPolicySet[]>;
   create(args: {
@@ -61,6 +61,19 @@ export class PolicyRepository {
       where: {
         status: 'active'
       }
+    });
+  }
+
+  static async findAll(): Promise<ToolPolicySet[]> {
+    return await toolPolicySetModel.toolPolicySet.findMany({
+      where: {}
+    });
+  }
+
+  static async findByServerId(serverId: string | null): Promise<ToolPolicySet[]> {
+    return await toolPolicySetModel.toolPolicySet.findMany({
+      where: { serverId },
+      orderBy: { version: 'desc' }
     });
   }
 
