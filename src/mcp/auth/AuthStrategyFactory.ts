@@ -69,7 +69,6 @@ export class AuthStrategyFactory {
           refreshToken: config.refreshToken,
           accessToken: config.accessToken,
           expiresAt: config.expiresAt,
-          scope: config.scope,
         });
 
       case ServerAuthType.ZendeskAuth:

@@ -10,7 +10,6 @@ interface CanvaOAuthConfig {
   refreshToken: string;
   accessToken?: string;
   expiresAt?: number;
-  scope?: string;
 }
 
 /**
@@ -21,7 +20,6 @@ interface CanvaTokenResponse {
   refresh_token?: string;
   expires_in?: number;
   token_type?: string;
-  scope?: string;
 }
 
 const logger = createLogger('CanvaAuthStrategy');
@@ -84,10 +82,6 @@ export class CanvaAuthStrategy implements IAuthStrategy {
         refresh_token: this.config.refreshToken,
       });
 
-      if (this.config.scope) {
-        body.set('scope', this.config.scope);
-      }
-
       const response = await fetch(CanvaAuthStrategy.TOKEN_ENDPOINT, {
         method: 'POST',
         headers: {
@@ -148,7 +142,6 @@ export class CanvaAuthStrategy implements IAuthStrategy {
       refreshToken: this.config.refreshToken,
       accessToken: this.config.accessToken,
       expiresAt: this.config.expiresAt,
-      scope: this.config.scope,
     };
   }
 
