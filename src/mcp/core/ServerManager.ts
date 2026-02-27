@@ -2103,9 +2103,8 @@ export class ServerManager {
    * inside the peta-core container will not be found by the daemon.
    *
    * We query the Docker socket to discover the host-side path that is mounted
-   * at /data/skills (the well-known container mount point for skills) inside the
-   * peta-core container, then substitute that path into any matching volume args
-   * before the child container is spawned.
+   * at /data/skills (the peta-core container mount point), then substitute that
+   * host path into any child-container volume args that target /app/skills.
    *
    * Note: We use the fixed mount point /data/skills for the Docker socket lookup,
    * independent of SKILLS_CONFIG.SKILLS_DIR, because these are two separate
@@ -2126,23 +2125,24 @@ export class ServerManager {
       return;
     }
 
-    // Use the fixed container-side mount point (set by docker-compose volumes),
-    // not SKILLS_CONFIG.SKILLS_DIR, to look up the corresponding host path.
-    const CONTAINER_SKILLS_MOUNT = '/data/skills';
+    // peta-core container mount used to resolve host absolute path.
+    const CORE_CONTAINER_SKILLS_MOUNT = '/data/skills';
+    // Child skillsmcp container destination mount.
+    const CHILD_CONTAINER_SKILLS_MOUNT = '/app/skills';
 
-    const hostSkillsDir = await resolveHostPath(CONTAINER_SKILLS_MOUNT);
+    const hostSkillsDir = await resolveHostPath(CORE_CONTAINER_SKILLS_MOUNT);
     if (!hostSkillsDir) {
       // Not in Docker, socket unavailable, or mount not found – leave args unchanged
       return;
     }
 
     this.logger.debug(
-      { containerMount: CONTAINER_SKILLS_MOUNT, hostSkillsDir },
+      { containerMount: CORE_CONTAINER_SKILLS_MOUNT, childMount: CHILD_CONTAINER_SKILLS_MOUNT, hostSkillsDir },
       'Rewriting skills volume mount paths to host-absolute paths'
     );
 
     launchConfig.args = (launchConfig.args as string[]).map((arg) =>
-      this.rewriteSkillsVolumeArg(arg, CONTAINER_SKILLS_MOUNT, hostSkillsDir)
+      this.rewriteSkillsVolumeArg(arg, CHILD_CONTAINER_SKILLS_MOUNT, hostSkillsDir)
     );
   }
 
@@ -2151,11 +2151,11 @@ export class ServerManager {
    * skills directory.
    *
    * Handles the standard bind-mount format:  <source>:<destination>[:<options>]
-   * Only rewrites when the source starts with "./skills/" (relative path).
+   * Rewrites recognized source prefixes to the resolved host skills path.
    */
   private rewriteSkillsVolumeArg(
     arg: string,
-    containerSkillsDir: string,
+    childContainerSkillsDir: string,
     hostSkillsDir: string
   ): string {
     // Volume specs always contain at least one colon
@@ -2167,22 +2167,26 @@ export class ServerManager {
     const source = arg.slice(0, colonIdx);
     const rest = arg.slice(colonIdx); // includes the leading ':'
 
-    // Only rewrite relative ./skills/* source paths
-    const relativePrefix = './skills/';
-    if (!source.startsWith(relativePrefix)) {
-      return arg;
-    }
-
-    // Verify the destination matches or is under SKILLS_DIR
+    // Verify the destination matches or is under child skills dir.
     const afterColon = rest.slice(1); // strip leading ':'
     const destAndOptions = afterColon.split(':');
     const dest = destAndOptions[0];
-    if (dest !== containerSkillsDir && !dest.startsWith(containerSkillsDir + '/')) {
+    if (dest !== childContainerSkillsDir && !dest.startsWith(childContainerSkillsDir + '/')) {
       return arg;
     }
 
-    // Rewrite: ./skills/<serverId>  →  <hostSkillsDir>/<serverId>
-    const serverId = source.slice(relativePrefix.length);
+    const sourcePrefixes = ['./skills/', '/app/skills/', '/data/skills/'];
+    const matchedPrefix = sourcePrefixes.find((prefix) => source.startsWith(prefix));
+    if (!matchedPrefix) {
+      return arg;
+    }
+
+    // Rewrite: <prefix><serverId> -> <hostSkillsDir>/<serverId>
+    const serverId = source.slice(matchedPrefix.length);
+    if (!serverId) {
+      return arg;
+    }
+
     const newSource = path.join(hostSkillsDir, serverId);
     return newSource + rest;
   }
