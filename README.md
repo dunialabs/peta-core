@@ -123,6 +123,11 @@ Peta Core provides the runtime layer of the MCP Control Plane: secure credential
 - **Audit trail by default.** Record who called what, the policy decision, and the outcome (without logging raw secrets).
 - **Structured logs & metrics hooks.** Designed to integrate with your logging/monitoring stack.
 
+### 5) Skills Support
+- **Skills via MCP.** Serve reusable agent skills (`SKILL.md` packages) as MCP-discoverable capabilities through a managed Skills MCP Server, so any connected client can load them on demand.
+- **Centralized hosting.** Store and manage skill packages per downstream server, with policy, auth, and audit applied consistently.
+- **Secure upload & lifecycle.** Upload ZIP archives with built-in protections, then list, delete, and bulk-manage skills via the Admin API.
+
 ### Reliability
 - **Stream resumption.** Persist events so clients can resume streams via `Last-Event-ID` after interruptions.
 - **Real-time notifications channel.** Supports approval/notification workflows (e.g. Desk integrations).
@@ -158,10 +163,20 @@ Peta Console is a web-based administration UI for operators and security teams. 
   - Control which tools, resources, and prompts are exposed from each server.
   - Enable or disable servers per workspace or environment.
 
+- **Skills management**
+  - Upload, browse, and delete skill packages per server.
+  - Drag-and-drop ZIP uploads with automatic `SKILL.md` detection.
+  - Search, sort, and bulk-manage skills from the Console UI.
+
 - **Permission and policy management**
   - Define per-user and per-workspace permissions for tools, resources, and prompts.
   - Mark high-risk tools as approval-required.
   - Inspect effective permissions for a given user or client.
+
+- **Access token metadata (namespaces & tags)**
+  - Assign a namespace (workspace) and tags to each access token for logical grouping.
+  - Filter tokens by namespace or tag and display metadata as badges in the token list.
+  - Bulk-update token metadata across multiple tokens; tags support replace, add, remove, and clear.
 
 - **Monitoring and audit**
   - Browse recent tool calls and their outcomes.
