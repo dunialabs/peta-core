@@ -295,7 +295,7 @@ export class UserRequestHandler {
               code: oauthCode,
               redirectUri: oauthRedirectUrl,
               codeVerifier: oauthCodeVerifier,
-              scope: [ServerAuthType.CanvaAuth].includes(server.authType) ? oauthConfig.scope : undefined
+              scope: [ServerAuthType.ZendeskAuth, ServerAuthType.CanvaAuth].includes(server.authType) ? oauthConfig.scope : undefined
             };
 
             if ((provider === 'zendesk' || provider === 'canvas') && oauthConfig?.tokenUrl) {
@@ -367,8 +367,10 @@ export class UserRequestHandler {
                 if ([ServerAuthType.ZendeskAuth].includes(server.authType)) {
                   decryptedLaunchConfigValue.oauth.tokenUrl = oauthConfig.tokenUrl;
                 }
-                if (server.authType === ServerAuthType.ZendeskAuth) {
+                if ([ServerAuthType.ZendeskAuth, ServerAuthType.CanvaAuth].includes(server.authType)) {
                   decryptedLaunchConfigValue.oauth.scope = oauthConfig.scope;
+                }
+                if (server.authType === ServerAuthType.ZendeskAuth) {
                   if (exchangeResult.raw.refresh_token_expires_in && typeof exchangeResult.raw.refresh_token_expires_in === 'number') {
                     decryptedLaunchConfigValue.oauth.refreshTokenExpiresAt = Date.now() + exchangeResult.raw.refresh_token_expires_in * 1000;
                   }
