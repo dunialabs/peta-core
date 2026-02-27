@@ -186,8 +186,13 @@ export class PolicyDslEvaluator {
         return Array.isArray(right) && !right.includes(left);
       case 'matches': {
         const pattern = String(right);
-        if (pattern.length > 200) {
+        if (pattern.length > 512) {
           logger.warn({ patternLength: pattern.length }, 'Regex pattern too long in DSL condition');
+          return false;
+        }
+        const subject = String(left);
+        if (subject.length > 4096) {
+          logger.warn({ subjectLength: subject.length }, 'Regex subject too long in DSL condition');
           return false;
         }
         try {
@@ -203,6 +208,10 @@ export class PolicyDslEvaluator {
   }
 
   private matchGlob(pattern: string, value: string): boolean {
+    if (pattern.length > 512) {
+      logger.warn({ patternLength: pattern.length }, 'Glob pattern too long in DSL matcher');
+      return false;
+    }
     let regexPattern = '^';
 
     for (const char of pattern) {
