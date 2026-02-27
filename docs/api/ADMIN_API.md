@@ -82,7 +82,20 @@ export enum AdminActionType {
   GET_CLOUDFLARED_CONFIGS = 8002,         // Query cloudflared configuration list
   DELETE_CLOUDFLARED_CONFIG = 8003,       // Delete cloudflared configuration
   RESTART_CLOUDFLARED = 8004,             // Restart cloudflared
-  STOP_CLOUDFLARED = 8005                 // Stop cloudflared
+  STOP_CLOUDFLARED = 8005,                // Stop cloudflared
+
+  // Policy operations (9100-9199)
+  CREATE_POLICY_SET = 9101,               // Create policy set
+  GET_POLICY_SETS = 9102,                 // Get policy sets
+  UPDATE_POLICY_SET = 9103,               // Update policy set
+  DELETE_POLICY_SET = 9104,               // Delete policy set
+  GET_EFFECTIVE_POLICY = 9105,            // Get effective policy
+
+  // Approval operations (9200-9299)
+  LIST_APPROVAL_REQUESTS = 9201,          // List approval requests
+  GET_APPROVAL_REQUEST = 9202,            // Get approval request
+  DECIDE_APPROVAL_REQUEST = 9203,         // Decide approval request
+  COUNT_PENDING_APPROVALS = 9204          // Count pending approvals
 }
 
 ### Request Examples
@@ -1722,6 +1735,289 @@ null
 - For complete cleanup, use `DELETE_CLOUDFLARED_CONFIG (8003)`
 
 ---
+
+---
+
+### Policy Operations (9100-9199)
+
+#### 9101 CREATE_POLICY_SET
+
+**Permission**: Owner + Admin
+**Function**: Create a new tool policy set. If `serverId` is omitted, the policy set is global (applies to all servers).
+
+**Request Parameters** (data):
+- `serverId` (string, optional): Server ID to scope this policy set. Omit for a global policy set.
+- `dsl` (object, required): Policy DSL object defining the rules for this policy set.
+
+**Return Result** (data):
+```json
+{
+  "id": "clxxx...",
+  "serverId": "server-abc",
+  "version": 1,
+  "status": "active",
+  "dsl": { "schemaVersion": 1, "rules": [] },
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}
+```
+
+**DSL Schema Reference**:
+The `dsl` object follows this structure:
+- `schemaVersion` (number): Schema version, currently `1`
+- `rules` (array): List of policy rules. Each rule contains:
+  - `match` (object): Criteria to match a tool call (e.g., `toolName`, `serverId`)
+  - `extract` (object, optional): Fields to extract from tool arguments for condition evaluation
+  - `when` (object, optional): Conditions that must be true for the rule to apply
+  - `effect` (string): Action to take — `"allow"`, `"deny"`, or `"require_approval"`
+
+---
+
+#### 9102 GET_POLICY_SETS
+
+**Permission**: Owner + Admin
+**Function**: List policy sets. If `serverId` is provided, returns only policy sets for that server. Otherwise returns all policy sets.
+
+**Request Parameters** (data):
+- `serverId` (string, optional): Filter by server ID.
+
+**Return Result** (data):
+```json
+{
+  "policySets": [
+    {
+      "id": "clxxx...",
+      "serverId": "server-abc",
+      "version": 1,
+      "status": "active",
+      "dsl": { "schemaVersion": 1, "rules": [] },
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
+#### 9103 UPDATE_POLICY_SET
+
+**Permission**: Owner + Admin
+**Function**: Update an existing policy set's DSL or status. The `version` field increments when `dsl` is updated.
+
+**Request Parameters** (data):
+- `id` (string, required): Policy set ID.
+- `dsl` (object, optional): New DSL object to replace the existing one.
+- `status` (string, optional): New status — `"active"` or `"archived"`.
+
+**Return Result** (data):
+```json
+{
+  "id": "clxxx...",
+  "serverId": "server-abc",
+  "version": 2,
+  "status": "active",
+  "dsl": { "schemaVersion": 1, "rules": [] },
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:01:00.000Z"
+}
+```
+
+---
+
+#### 9104 DELETE_POLICY_SET
+
+**Permission**: Owner + Admin
+**Function**: Permanently delete a policy set by ID. Returns the deleted record.
+
+**Request Parameters** (data):
+- `id` (string, required): Policy set ID to delete.
+
+**Return Result** (data):
+```json
+{
+  "id": "clxxx...",
+  "serverId": "server-abc",
+  "version": 2,
+  "status": "archived",
+  "dsl": { "schemaVersion": 1, "rules": [] },
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:01:00.000Z"
+}
+```
+
+---
+
+#### 9105 GET_EFFECTIVE_POLICY
+
+**Permission**: Owner + Admin
+**Function**: Get the effective (active) policy sets for a given server. Returns active server-specific policy sets combined with active global policy sets (where `serverId` is null). If `serverId` is omitted, returns only global active policy sets.
+
+**Request Parameters** (data):
+- `serverId` (string, optional): Server ID to resolve effective policy for.
+
+**Return Result** (data):
+```json
+{
+  "policySets": [
+    {
+      "id": "clxxx...",
+      "serverId": "server-abc",
+      "version": 1,
+      "status": "active",
+      "dsl": { "schemaVersion": 1, "rules": [] },
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+**Function Description**:
+- Only returns policy sets with `status = "active"`
+- Combines server-specific policy sets (matching `serverId`) with global policy sets (`serverId` is null)
+- Use this to determine which rules are currently enforced for a given server
+
+---
+
+### Approval Operations (9200-9299)
+
+#### 9201 LIST_APPROVAL_REQUESTS
+
+**Permission**: Owner + Admin
+**Function**: List pending, non-expired approval requests with optional filtering. All filter parameters are optional and combined with AND logic.
+
+**Request Parameters** (data):
+- `userId` (string, optional): Filter by user ID.
+- `serverId` (string, optional): Filter by server ID.
+- `toolName` (string, optional): Filter by tool name.
+
+**Return Result** (data):
+```json
+{
+  "requests": [
+    {
+      "id": "clxxx...",
+      "userId": "user-abc",
+      "serverId": "server-abc",
+      "toolName": "send_email",
+      "canonicalArgs": {},
+      "redactedArgs": {},
+      "requestHash": "sha256-hex",
+      "status": "PENDING",
+      "decidedAt": null,
+      "decisionReason": null,
+      "executedAt": null,
+      "executionError": null,
+      "uniformRequestId": null,
+      "expiresAt": "2026-01-01T01:00:00.000Z",
+      "policyVersion": 1,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
+#### 9202 GET_APPROVAL_REQUEST
+
+**Permission**: Owner + Admin
+**Function**: Get a single approval request by ID.
+
+**Request Parameters** (data):
+- `id` (string, required): Approval request ID.
+
+**Return Result** (data):
+```json
+{
+  "id": "clxxx...",
+  "userId": "user-abc",
+  "serverId": "server-abc",
+  "toolName": "send_email",
+  "canonicalArgs": {},
+  "redactedArgs": {},
+  "requestHash": "sha256-hex",
+  "status": "PENDING",
+  "decidedAt": null,
+  "decisionReason": null,
+  "executedAt": null,
+  "executionError": null,
+  "uniformRequestId": null,
+  "expiresAt": "2026-01-01T01:00:00.000Z",
+  "policyVersion": 1,
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}
+```
+
+**Field Description**:
+- `status`: Current state — `"PENDING"`, `"APPROVED"`, `"REJECTED"`, or `"EXPIRED"`
+- `decidedAt`: Timestamp when the decision was made, or `null`
+- `decisionReason`: Optional reason provided when decided, or `null`
+- `canonicalArgs`: Normalized tool arguments used for hashing/comparison
+- `redactedArgs`: Redacted arguments safe for logging/display
+- `requestHash`: Deterministic hash used for deduplication
+- `expiresAt`: Timestamp after which the request automatically expires
+- `policyVersion`: The policy set version that triggered this approval request
+- `executedAt` / `executionError`: Execution result metadata after approval
+- `uniformRequestId`: Optional correlation ID for upstream request mapping
+
+---
+
+#### 9203 DECIDE_APPROVAL_REQUEST
+
+**Permission**: Owner + Admin
+**Function**: Approve or reject a pending approval request. The deciding admin's identity is recorded.
+
+**Request Parameters** (data):
+- `id` (string, required): Approval request ID.
+- `decision` (string, required): Decision to apply — `"APPROVED"` or `"REJECTED"`.
+- `reason` (string, optional): Human-readable reason for the decision.
+
+**Return Result** (data):
+```json
+{
+  "id": "clxxx...",
+  "userId": "user-abc",
+  "serverId": "server-abc",
+  "toolName": "send_email",
+  "canonicalArgs": {},
+  "redactedArgs": {},
+  "requestHash": "sha256-hex",
+  "status": "APPROVED",
+  "decidedAt": "2026-01-01T00:05:00.000Z",
+  "decisionReason": "Reviewed and approved",
+  "executedAt": null,
+  "executionError": null,
+  "uniformRequestId": null,
+  "expiresAt": "2026-01-01T01:00:00.000Z",
+  "policyVersion": 1,
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:05:00.000Z"
+}
+```
+
+**Error Cases**:
+- If the request is not in `PENDING` status, the decision cannot be applied
+
+---
+
+#### 9204 COUNT_PENDING_APPROVALS
+
+**Permission**: Owner + Admin
+**Function**: Count the number of pending approval requests for a specific user.
+
+**Request Parameters** (data):
+- `userId` (string, required): User ID to count pending requests for.
+
+**Return Result** (data):
+```json
+{
+  "count": 5
+}
+```
 
 ## Appendix: Error Code Reference
 
