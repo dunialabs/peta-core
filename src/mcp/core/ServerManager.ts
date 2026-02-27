@@ -313,9 +313,22 @@ export class ServerManager {
       case ServerAuthType.FigmaAuth:
       case ServerAuthType.GithubAuth:
       case ServerAuthType.CanvaAuth:
-      case ServerAuthType.ZendeskAuth:
         launchConfig.env = {
           ...launchConfig.env,
+          accessToken: accessToken,
+        };
+        break;
+
+      case ServerAuthType.ZendeskAuth:
+        let zendeskSubdomain = launchConfig.env?.zendeskSubdomain;
+        if (!zendeskSubdomain) {
+          throw new Error('[ServerManager] Missing zendeskSubdomain for server auth type ZendeskAuth');
+        }
+
+        zendeskSubdomain = zendeskSubdomain.replace('https://', '').replace('.zendesk.com', '');
+        launchConfig.env = {
+          ...launchConfig.env,
+          "zendeskSubdomain": zendeskSubdomain,
           accessToken: accessToken,
         };
         break;
