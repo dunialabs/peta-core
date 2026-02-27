@@ -626,11 +626,6 @@ export class ProxySession {
         statusCode: 500,
       });
 
-      if (isReconnected === false && retryCount < 2) {
-        return await this.handleToolCall(request, extra, retryCount + 1);
-      }
-
-
       if (approvalRequestId) {
         const failedReq = await approvalService.markFailed(approvalRequestId, errorMsg).catch(() => null);
         if (failedReq) {
@@ -641,6 +636,10 @@ export class ProxySession {
           });
         }
         approvalRequestId = null;
+      }
+
+      if (isReconnected === false && retryCount < 2) {
+        return await this.handleToolCall(request, extra, retryCount + 1);
       }
 
       // Create error result
