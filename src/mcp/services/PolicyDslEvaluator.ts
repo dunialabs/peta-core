@@ -185,8 +185,13 @@ export class PolicyDslEvaluator {
       case 'not_in':
         return Array.isArray(right) && !right.includes(left);
       case 'matches': {
+        const pattern = String(right);
+        if (pattern.length > 200) {
+          logger.warn({ patternLength: pattern.length }, 'Regex pattern too long in DSL condition');
+          return false;
+        }
         try {
-          return new RegExp(String(right)).test(String(left));
+          return new RegExp(pattern).test(String(left));
         } catch {
           logger.warn({ pattern: right }, 'Invalid regex in DSL condition');
           return false;
