@@ -477,6 +477,86 @@ export class SocketNotifier {
     return response.success ? response.data : null;
   }
 
+  // ==================== Approval Workflow Notifications ====================
+
+  notifyApprovalCreated(userId: string, approvalData: {
+    id: string;
+    toolName: string;
+    serverId: string | null;
+    redactedArgs: unknown;
+    expiresAt: Date;
+    createdAt: Date;
+    status: string;
+    uniformRequestId?: string | null;
+    policyVersion: number;
+    matchedRuleId: string | null;
+    reason: string | null;
+  }): boolean {
+    return this.notifyUser(userId, 'notification', {
+      type: 'approval_created',
+      message: `Approval required for tool: ${approvalData.toolName}`,
+      data: approvalData,
+      timestamp: Date.now(),
+      severity: 'warning' as const,
+    });
+  }
+
+  notifyApprovalDecided(userId: string, decisionData: {
+    id: string;
+    toolName: string;
+    decision: string;
+    reason?: string | null;
+  }): boolean {
+    const verb = decisionData.decision === 'APPROVED' ? 'approved' : 'rejected';
+    return this.notifyUser(userId, 'notification', {
+      type: 'approval_decided',
+      message: `Tool ${decisionData.toolName} has been ${verb}`,
+      data: decisionData,
+      timestamp: Date.now(),
+      severity: decisionData.decision === 'APPROVED' ? 'success' as const : 'warning' as const,
+    });
+  }
+
+  notifyApprovalExpired(userId: string, expirationData: {
+    id: string;
+    toolName: string;
+  }): boolean {
+    return this.notifyUser(userId, 'notification', {
+      type: 'approval_expired',
+      message: `Approval for tool ${expirationData.toolName} has expired`,
+      data: expirationData,
+      timestamp: Date.now(),
+      severity: 'info' as const,
+    });
+  }
+
+  notifyApprovalExecuted(userId: string, executionData: {
+    id: string;
+    toolName: string;
+  }): boolean {
+    return this.notifyUser(userId, 'notification', {
+      type: 'approval_executed',
+      message: `Tool ${executionData.toolName} executed successfully`,
+      data: executionData,
+      timestamp: Date.now(),
+      severity: 'success' as const,
+    });
+  }
+
+  notifyApprovalFailed(userId: string, failureData: {
+    id: string;
+    toolName: string;
+    error: string;
+  }): boolean {
+    return this.notifyUser(userId, 'notification', {
+      type: 'approval_failed',
+      message: `Tool ${failureData.toolName} execution failed`,
+      data: failureData,
+      timestamp: Date.now(),
+      severity: 'error' as const,
+    });
+  }
+
 }
 
 // Export singleton instance

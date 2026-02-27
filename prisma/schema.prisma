@@ -217,3 +217,44 @@ model OAuthToken {
   @@index([accessTokenExpiresAt])
   @@map("oauth_tokens")
 }
+
+// ==================== Content-Aware Tool Policies & Async HITL Queue ====================
+
+model ApprovalRequest {
+  id               String    @id @default(cuid())
+  userId           String    @map("user_id") @db.VarChar(64)
+  serverId         String?   @map("server_id") @db.VarChar(128)
+  toolName         String    @map("tool_name")
+  canonicalArgs    Json      @map("canonical_args")
+  redactedArgs     Json      @map("redacted_args")
+  policyVersion    Int       @map("policy_version")
+  requestHash      String    @map("request_hash") @db.VarChar(64)
+  status           String    @map("status") @db.VarChar(20) // PENDING | APPROVED | REJECTED | EXPIRED | EXECUTING | EXECUTED | FAILED
+  expiresAt        DateTime  @map("expires_at")
+  decidedAt        DateTime? @map("decided_at")
+  decisionReason   String?   @map("decision_reason") @db.Text
+  executedAt       DateTime? @map("executed_at")
+  executionError   String?   @map("execution_error") @db.Text
+  uniformRequestId String?   @map("uniform_request_id") @db.VarChar
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@index([requestHash, status])
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  @@index([expiresAt, status])
+  @@map("approval_request")
+}
+
+model ToolPolicySet {
+  id        String   @id @default(cuid())
+  serverId  String?  @map("server_id") @db.VarChar(128) // null = global policy
+  version   Int      @default(1)
+  status    String   @default("active") @map("status") @db.VarChar(20) // active | archived
+  dsl       Json     @map("dsl") // PolicyDsl JSON
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([serverId, status])
+  @@map("tool_policy_set")
+}

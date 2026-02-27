@@ -28,6 +28,7 @@ import { createLogger } from '../logger/index.js';
 import { APP_INFO } from '../config/config.js';
 import { ProxyRepository } from '../repositories/ProxyRepository.js';
 import { UserRequestHandler } from '../user/UserRequestHandler.js';
+import { approvalService } from '../mcp/services/ApprovalService.js';
 
 /**
  * Pending request storage item
@@ -357,6 +358,57 @@ export class SocketService {
           };
 
           socket.emit(SOCKET_RESPONSE_EVENT, response);
+        }
+      });
+
+      socket.on('approval_decide', async (
+        payload: { id: string; decision: 'APPROVED' | 'REJECTED'; reason?: string },
+        ack?: (response: { success: boolean; id: string; decision?: 'APPROVED' | 'REJECTED'; error?: string }) => void
+      ) => {
+        const sendAck = (response: { success: boolean; id: string; decision?: 'APPROVED' | 'REJECTED'; error?: string }): void => {
+          if (typeof ack === 'function') {
+            ack(response);
+            return;
+          }
+          socket.emit('approval_decide_ack', response);
+        };
+
+        try {
+          if (!payload?.id || (payload.decision !== 'APPROVED' && payload.decision !== 'REJECTED')) {
+            sendAck({ success: false, id: payload?.id ?? '', error: 'Invalid approval_decide payload' });
+            return;
+          }
+
+          const existing = await approvalService.getById(payload.id);
+          if (!existing) {
+            sendAck({ success: false, id: payload.id, error: 'Approval request not found' });
+            return;
+          }
+
+          if (existing.userId !== userId) {
+            this.logger.warn({ userId, approvalRequestId: payload.id }, 'Rejected cross-user approval_decide attempt');
+            sendAck({ success: false, id: payload.id, error: 'Approval request does not belong to user' });
+            return;
+          }
+
+          const decided = await approvalService.decide(payload.id, payload.decision, payload.reason);
+          if (!decided) {
+            sendAck({ success: false, id: payload.id, error: 'Decision failed: request not pending or already expired' });
+            return;
+          }
+
+          const { socketNotifier } = await import('../socket/SocketNotifier.js');
+          socketNotifier.notifyApprovalDecided(userId, {
+            id: decided.id,
+            toolName: decided.toolName,
+            decision: decided.status,
+            reason: decided.decisionReason,
+          });
+
+          sendAck({ success: true, id: decided.id, decision: payload.decision });
+        } catch (error: any) {
+          this.logger.error({ error, userId, payload }, 'approval_decide failed');
+          sendAck({ success: false, id: payload?.id ?? '', error: error?.message || 'Failed to process approval decision' });
         }
       });
 

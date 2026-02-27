@@ -80,10 +80,12 @@ import { Request, Response } from 'express';
 import { PersistentEventStore } from './PersistentEventStore.js';
 import { RequestIdMapper } from './RequestIdMapper.js';
 import { APP_INFO } from '../../config/config.js';
-import { DangerLevel, MCPEventLogType } from "../../types/enums.js";
+import { DangerLevel, MCPEventLogType, PolicyDecision } from '../../types/enums.js';
 import { socketNotifier } from '../../socket/SocketNotifier.js';
 import { ProxyContext } from '../../types/mcp.types.js';
 import { createLogger } from '../../logger/index.js';
+import { policyEngine } from '../services/PolicyEngine.js';
+import { approvalService } from '../services/ApprovalService.js';
 
 /**
  * MCP Proxy Session
@@ -357,6 +359,7 @@ export class ProxySession {
     // Generate uniformRequestId for correlation
     const uniformRequestId = LogService.getInstance().generateUniformRequestId(this.sessionId);
     const originalRequestId = extra.requestId;
+    let approvalRequestId: string | null = null;
 
     const result = this.clientSession.parseName(toolName);
 
@@ -427,42 +430,99 @@ export class ProxySession {
     }
 
     const userDangerLevel = this.clientSession.getDangerLevel(result.serverID, result.originalName);
-    let dangerLevel = userDangerLevel ?? targetServerContext!.getDangerLevel(result.originalName);
-    
-    if (dangerLevel === DangerLevel.Approval) {
-      // User manual approval required, call validator to get user verification result
-      const toolDescription = targetServerContext?.getToolDescription(result.originalName) ?? '';
-      const toolParams = JSON.stringify(request.params.arguments);
+    const serverDangerLevel = targetServerContext!.getDangerLevel(result.originalName);
+    const dangerLevel: DangerLevel = userDangerLevel ?? serverDangerLevel ?? DangerLevel.Silent;
 
-      const userAgent = this.clientSession.clientInfo?.name ?? this.clientSession.authContext.userAgent ?? 'default';
-      // Call validator to get user verification result (timeout 55 seconds)
-      const confirmed = await socketNotifier.askUserConfirm(
-        this.userId,
-        userAgent,
-        this.sessionLogger.getIp(),
-        result.originalName,
-        toolDescription,
-        toolParams
-      );
+    const policyResult = await policyEngine.evaluate({
+      userId: this.userId,
+      serverId: result.serverID,
+      toolName: result.originalName,
+      args: (request.params.arguments ?? {}) as Record<string, unknown>,
+      dangerLevel,
+    });
 
-      if (!confirmed) {
+    if (policyResult.decision === PolicyDecision.Deny) {
+      const errorTime = Date.now();
+      const errorMsg = `Tool execution denied by policy: ${policyResult.reason ?? 'policy rule'}`;
+
+      await this.sessionLogger.logClientRequest({
+        action: MCPEventLogType.RequestTool,
+        serverId: result.serverID,
+        upstreamRequestId: String(originalRequestId),
+        uniformRequestId: uniformRequestId,
+        requestParams: request.params,
+        error: `Error: PolicyDenied: ${errorMsg}`,
+        duration: errorTime - startTime,
+        statusCode: 403,
+      });
+
+      throw new McpError(ErrorCode.InvalidRequest, errorMsg);
+    }
+
+    if (policyResult.decision === PolicyDecision.RequireApproval) {
+      const approvalCheck = await approvalService.checkOrCreateApproval({
+        userId: this.userId,
+        serverId: result.serverID,
+        toolName: result.originalName,
+        args: (request.params.arguments ?? {}) as Record<string, unknown>,
+        policyVersion: policyResult.policyVersion,
+        uniformRequestId,
+      });
+
+      if (approvalCheck.needsApproval) {
+        if (approvalCheck.created) {
+          socketNotifier.notifyApprovalCreated(this.userId, {
+            id: approvalCheck.request!.id,
+            toolName: result.originalName,
+            serverId: result.serverID,
+            redactedArgs: approvalCheck.request!.redactedArgs,
+            expiresAt: approvalCheck.request!.expiresAt,
+            createdAt: approvalCheck.request!.createdAt,
+            status: approvalCheck.request!.status,
+            uniformRequestId,
+            policyVersion: policyResult.policyVersion,
+            matchedRuleId: policyResult.matchedRuleId,
+            reason: policyResult.reason,
+          });
+        }
+
         const errorTime = Date.now();
-        const errorMsg = 'User denied tool execution';
+        const errorMsg = `Approval required for tool: ${result.originalName}. Request ID: ${approvalCheck.request!.id}`;
 
-        // Log as user denied operation
         await this.sessionLogger.logClientRequest({
           action: MCPEventLogType.RequestTool,
           serverId: result.serverID,
           upstreamRequestId: String(originalRequestId),
           uniformRequestId: uniformRequestId,
           requestParams: request.params,
-          error: `Error: UserDenied: ${errorMsg}`,
+          error: `Error: ApprovalRequired: ${errorMsg}`,
           duration: errorTime - startTime,
-          statusCode: 403,
+          statusCode: 202,
         });
 
         throw new McpError(ErrorCode.InvalidRequest, errorMsg);
       }
+
+      const claimResult = await approvalService.claimForExecution(approvalCheck.requestHash);
+      if (!claimResult.claimed) {
+        const errorTime = Date.now();
+        const errorMsg = 'Approval request could not be claimed for execution';
+
+        await this.sessionLogger.logClientRequest({
+          action: MCPEventLogType.RequestTool,
+          serverId: result.serverID,
+          upstreamRequestId: String(originalRequestId),
+          uniformRequestId: uniformRequestId,
+          requestParams: request.params,
+          error: `Error: ApprovalClaimFailed: ${errorMsg}`,
+          duration: errorTime - startTime,
+          statusCode: 409,
+        });
+
+        throw new McpError(ErrorCode.InvalidRequest, errorMsg);
+      }
+
+      approvalRequestId = claimResult.request!.id;
     }
 
     // Use RequestIdMapper to generate unique proxy request ID
@@ -524,6 +584,29 @@ export class ProxySession {
         statusCode: serverResult.isError ? 500 : 200,
       });
 
+
+      if (approvalRequestId) {
+        if (serverResult.isError === true) {
+          const failedReq = await approvalService.markFailed(approvalRequestId, 'Tool returned error').catch(() => null);
+          if (failedReq) {
+            socketNotifier.notifyApprovalFailed(this.userId, {
+              id: failedReq.id,
+              toolName: result.originalName,
+              error: 'Tool returned error',
+            });
+          }
+        } else {
+          const executedReq = await approvalService.markExecuted(approvalRequestId).catch(() => null);
+          if (executedReq) {
+            socketNotifier.notifyApprovalExecuted(this.userId, {
+              id: executedReq.id,
+              toolName: result.originalName,
+            });
+          }
+        }
+        approvalRequestId = null;
+      }
+
       return serverResult;
     } catch (error) {
       this.logger.error({ error }, 'Error handling tool call');
@@ -545,6 +628,19 @@ export class ProxySession {
 
       if (isReconnected === false && retryCount < 2) {
         return await this.handleToolCall(request, extra, retryCount + 1);
+      }
+
+
+      if (approvalRequestId) {
+        const failedReq = await approvalService.markFailed(approvalRequestId, errorMsg).catch(() => null);
+        if (failedReq) {
+          socketNotifier.notifyApprovalFailed(this.userId, {
+            id: failedReq.id,
+            toolName: result.originalName,
+            error: errorMsg,
+          });
+        }
+        approvalRequestId = null;
       }
 
       // Create error result
