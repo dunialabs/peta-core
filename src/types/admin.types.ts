@@ -70,6 +70,20 @@ export enum AdminActionType {
   UPLOAD_SKILL = 10041,                   // Upload skill (ZIP file)
   DELETE_SKILL = 10042,                   // Delete skill
   DELETE_SERVER_SKILLS = 10043,           // Delete all skills for a server
+
+  // Policy operations (9100-9199)
+  CREATE_POLICY_SET = 9101,               // Create a new tool policy set
+  GET_POLICY_SETS = 9102,                 // List tool policy sets
+  UPDATE_POLICY_SET = 9103,               // Update a tool policy set
+  DELETE_POLICY_SET = 9104,               // Delete a tool policy set
+  GET_EFFECTIVE_POLICY = 9105,            // Get the effective (merged) policy for evaluation
+
+  // Approval operations (9200-9299)
+  LIST_APPROVAL_REQUESTS = 9201,          // List approval requests (with filters)
+  GET_APPROVAL_REQUEST = 9202,            // Get a single approval request by ID
+  DECIDE_APPROVAL_REQUEST = 9203,         // Approve or reject an approval request
+  GET_PENDING_APPROVALS_COUNT = 9204,     // Get count of pending approval requests
+
 }
 
 /**

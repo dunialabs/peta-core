@@ -1,0 +1,290 @@
+/**
+ * ApprovalService - Async Human-in-the-Loop Approval Queue Manager
+ *
+ * Orchestrates the approval lifecycle:
+ * 1. PolicyEngine decides REQUIRE_APPROVAL
+ * 2. ApprovalService creates/deduplicates a pending request (via requestHash)
+ * 3. Client (Desk) receives notification and shows approval UI
+ * 4. User approves/rejects via Desk → ApprovalService.decide()
+ * 5. Next tool call with same requestHash finds APPROVED → claims and executes
+ *
+ * Key properties:
+ * - Idempotent: duplicate tool calls with same args deduplicate via requestHash
+ * - Durable: approval state persists in DB, survives restarts
+ * - Async: no synchronous 55s timeout — approval can happen at any time before expiry
+ */
+
+import { createLogger } from '../../logger/index.js';
+import { ApprovalStatus } from '../../types/enums.js';
+import { ApprovalRepository, CreateApprovalParams } from '../../repositories/ApprovalRepository.js';
+import { approvalRequestHasher } from './ApprovalRequestHasher.js';
+import type { ApprovalRequest } from '@prisma/client';
+
+const logger = createLogger('ApprovalService');
+
+/** Default approval expiry: 10 minutes */
+const DEFAULT_EXPIRY_MS = 10 * 60 * 1000;
+
+export interface CreateApprovalInput {
+  userId: string;
+  serverId: string | null;
+  toolName: string;
+  args: Record<string, unknown>;
+  policyVersion: number;
+  uniformRequestId?: string | null;
+  expiresInMs?: number;
+}
+
+export interface ApprovalCheckResult {
+  /** Whether approval is required and pending */
+  needsApproval: boolean;
+  created: boolean;
+  /** The approval request (if created or found pending) */
+  request: ApprovalRequest | null;
+  /** The request hash for retry matching */
+  requestHash: string;
+}
+
+export interface ApprovalClaimResult {
+  /** Whether the approved request was successfully claimed */
+  claimed: boolean;
+  /** The claimed approval request */
+  request: ApprovalRequest | null;
+}
+
+export class ApprovalService {
+  private static instance: ApprovalService;
+  private expirySweeper: NodeJS.Timeout | null = null;
+
+  private constructor() {}
+
+  static getInstance(): ApprovalService {
+    if (!ApprovalService.instance) {
+      ApprovalService.instance = new ApprovalService();
+    }
+    return ApprovalService.instance;
+  }
+
+  /**
+   * Create or retrieve a pending approval request.
+   *
+   * Called by ProxySession.handleToolCall() when PolicyEngine returns REQUIRE_APPROVAL.
+   *
+   * Flow:
+   * 1. Compute requestHash from (userId, serverId, toolName, args, policyVersion)
+   * 2. Try to INSERT new PENDING request (ON CONFLICT → deduplicate)
+   * 3. If existing APPROVED request found → return it for immediate claim
+   * 4. If PENDING → caller should return error with retry token to client
+   *
+   * @returns ApprovalCheckResult indicating whether approval is still needed
+   */
+  async checkOrCreateApproval(input: CreateApprovalInput): Promise<ApprovalCheckResult> {
+    const { userId, serverId, toolName, args, policyVersion, uniformRequestId, expiresInMs } = input;
+
+    const requestHash = approvalRequestHasher.computeHash(
+      userId,
+      serverId,
+      toolName,
+      args,
+      policyVersion
+    );
+
+    const canonicalArgsJson = approvalRequestHasher.canonicalizeArgs(toolName, args);
+    const canonicalArgs = JSON.parse(canonicalArgsJson) as Record<string, unknown>;
+    const redactedArgs = this.redactArgs(args);
+
+    const expiresAt = new Date(Date.now() + (expiresInMs ?? DEFAULT_EXPIRY_MS));
+
+    const params: CreateApprovalParams = {
+      userId,
+      serverId,
+      toolName,
+      canonicalArgs,
+      redactedArgs,
+      policyVersion,
+      requestHash,
+      expiresAt,
+      uniformRequestId: uniformRequestId ?? null,
+    };
+
+    const { created, request } = await ApprovalRepository.createOrGetPending(params);
+
+    if (created) {
+      logger.info(
+        { approvalRequestId: request.id, requestHash, toolName, userId },
+        'Created new pending approval request'
+      );
+    }
+
+    if (!created && request.status === ApprovalStatus.Approved) {
+      logger.info(
+        { approvalRequestId: request.id, requestHash },
+        'Found existing APPROVED request, ready to claim'
+      );
+      return { needsApproval: false, created: false, request, requestHash };
+    }
+
+    return { needsApproval: true, created, request, requestHash };
+  }
+
+  /**
+   * Try to claim an approved request for execution.
+   *
+   * Called when a retry tool call arrives and the request has been approved.
+   * Atomically transitions APPROVED → EXECUTING to prevent double execution.
+   */
+  async claimForExecution(requestHash: string): Promise<ApprovalClaimResult> {
+    const request = await ApprovalRepository.claimApprovedForExecution(requestHash);
+
+    if (!request) {
+      logger.debug({ requestHash }, 'No APPROVED request to claim');
+      return { claimed: false, request: null };
+    }
+
+    logger.info(
+      { approvalRequestId: request.id, requestHash },
+      'Claimed approval request for execution'
+    );
+
+    return { claimed: true, request };
+  }
+
+  async decide(
+    approvalRequestId: string,
+    decision: 'APPROVED' | 'REJECTED',
+    reason?: string
+  ): Promise<ApprovalRequest | null> {
+    const request = await ApprovalRepository.decide(approvalRequestId, decision, reason);
+
+    if (!request) {
+      logger.warn(
+        { approvalRequestId, decision },
+        'Decision failed: request not found, not PENDING, or expired'
+      );
+      return null;
+    }
+
+    logger.info(
+      { approvalRequestId, decision, requestHash: request.requestHash },
+      `Approval request ${decision.toLowerCase()}`
+    );
+
+    return request;
+  }
+
+  async markExecuted(id: string): Promise<ApprovalRequest | null> {
+    return ApprovalRepository.markExecuted(id);
+  }
+
+  async markFailed(id: string, error: string): Promise<ApprovalRequest | null> {
+    return ApprovalRepository.markFailed(id, error);
+  }
+
+  async listPending(
+    userId?: string | null,
+    filters?: { serverId?: string; toolName?: string }
+  ): Promise<ApprovalRequest[]> {
+    return ApprovalRepository.listPending(userId ?? null, filters);
+  }
+
+  async countPending(userId?: string | null): Promise<number> {
+    return ApprovalRepository.countPending(userId ?? null);
+  }
+
+  async getById(id: string): Promise<ApprovalRequest | null> {
+    return ApprovalRepository.findById(id);
+  }
+
+  async expireStale(): Promise<ApprovalRequest[]> {
+    const requests = await ApprovalRepository.expireStale();
+    if (requests.length > 0) {
+      logger.info({ count: requests.length }, 'Expired stale approval requests');
+    }
+    return requests;
+  }
+
+  startExpirySweeper(notifier: { notifyApprovalExpired: (userId: string, data: { id: string; toolName: string }) => void }): void {
+    if (this.expirySweeper) {
+      return;
+    }
+
+    this.expirySweeper = setInterval(() => {
+      void this.expireStale()
+        .then((expiredRequests) => {
+          for (const request of expiredRequests) {
+            notifier.notifyApprovalExpired(request.userId, {
+              id: request.id,
+              toolName: request.toolName,
+            });
+          }
+        })
+        .catch((error) => {
+          logger.error({ error }, 'Failed to run approval expiry sweeper');
+        });
+    }, 60_000);
+  }
+
+  stopExpirySweeper(): void {
+    if (!this.expirySweeper) {
+      return;
+    }
+
+    clearInterval(this.expirySweeper);
+    this.expirySweeper = null;
+  }
+
+  /**
+   * Redact tool arguments for display purposes.
+   *
+   * Strategy:
+   * - Keep all keys visible
+   * - Truncate string values longer than 100 chars
+   * - Replace deeply nested objects with "[object]"
+   * - Keep numbers, booleans, and short strings as-is
+   */
+  private redactArgs(args: Record<string, unknown>, depth: number = 0): Record<string, unknown> {
+    const redacted: Record<string, unknown> = {};
+    const MAX_STRING_LENGTH = 100;
+    const MAX_DEPTH = 2;
+
+    for (const [key, value] of Object.entries(args)) {
+      if (value === null || value === undefined) {
+        redacted[key] = value;
+      } else if (typeof value === 'string') {
+        redacted[key] = value.length > MAX_STRING_LENGTH
+          ? value.substring(0, MAX_STRING_LENGTH) + '...'
+          : value;
+      } else if (typeof value === 'number' || typeof value === 'boolean') {
+        redacted[key] = value;
+      } else if (Array.isArray(value)) {
+        if (depth < MAX_DEPTH) {
+          redacted[key] = value.map((item) => {
+            if (item === null || item === undefined) return item;
+            if (typeof item === 'string') {
+              return item.length > MAX_STRING_LENGTH
+                ? item.substring(0, MAX_STRING_LENGTH) + '...'
+                : item;
+            }
+            if (typeof item === 'number' || typeof item === 'boolean') return item;
+            if (typeof item === 'object') return '[object]';
+            return String(item);
+          });
+        } else {
+          redacted[key] = `[Array(${value.length})]`;
+        }
+      } else if (typeof value === 'object') {
+        if (depth < MAX_DEPTH) {
+          redacted[key] = this.redactArgs(value as Record<string, unknown>, depth + 1);
+        } else {
+          redacted[key] = '[object]';
+        }
+      } else {
+        redacted[key] = String(value);
+      }
+    }
+
+    return redacted;
+  }
+}
+
+export const approvalService = ApprovalService.getInstance();

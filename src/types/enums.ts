@@ -115,3 +115,19 @@ export enum DangerLevel {
   Notification = 1,  // Execute with Notification - Function executes automatically and displays result to user
   Approval = 2       // Require Manual Approval - User must manually approve before function execution
 }
+
+export enum ApprovalStatus {
+  Pending = 'PENDING',
+  Approved = 'APPROVED',
+  Rejected = 'REJECTED',
+  Expired = 'EXPIRED',
+  Executing = 'EXECUTING',
+  Executed = 'EXECUTED',
+  Failed = 'FAILED',
+}
+
+export enum PolicyDecision {
+  Allow = 'ALLOW',
+  RequireApproval = 'REQUIRE_APPROVAL',
+  Deny = 'DENY',
+}
