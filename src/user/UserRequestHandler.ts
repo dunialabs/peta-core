@@ -295,7 +295,7 @@ export class UserRequestHandler {
               code: oauthCode,
               redirectUri: oauthRedirectUrl,
               codeVerifier: oauthCodeVerifier,
-              scope: [ServerAuthType.CanvaAuth].includes(server.authType) ? oauthConfig.scope : undefined
+              scope: [ServerAuthType.ZendeskAuth].includes(server.authType) ? oauthConfig.scope : undefined
             };
 
             if ((provider === 'zendesk' || provider === 'canvas') && oauthConfig?.tokenUrl) {
@@ -350,7 +350,7 @@ export class UserRequestHandler {
                 code: oauthCode,
                 redirectUri: oauthRedirectUrl,
                 codeVerifier: oauthCodeVerifier,
-                scope: [ServerAuthType.ZendeskAuth, ServerAuthType.CanvaAuth].includes(server.authType)
+                scope: [ServerAuthType.ZendeskAuth].includes(server.authType)
                   ? oauthConfig.scope
                   : undefined
               });
