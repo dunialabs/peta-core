@@ -14,6 +14,7 @@ import { githubAdapter } from './github.js';
 import { stripeAdapter } from './stripe.js';
 import { zendeskAdapter } from './zendesk.js';
 import { canvasAdapter } from './canvas.js';
+import { canvaAdapter } from './canva.js';
 
 /**
  * Map of provider names to their adapters
@@ -26,6 +27,7 @@ const providers: Map<string, ProviderAdapter> = new Map([
   ['stripe', stripeAdapter],
   ['zendesk', zendeskAdapter],
   ['canvas', canvasAdapter],
+  ['canva', canvaAdapter],
 ]);
 
 /**

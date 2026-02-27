@@ -234,12 +234,16 @@ export class ServerHandler {
                 code: string;
                 redirectUri: string;
                 tokenUrl?: string;
+                codeVerifier?: string;
+                scope?: string;
               } = {
                 clientId: oauth.clientId,
                 provider: provider,
                 key: hashKey,
                 code: oauth.code,
-                redirectUri: oauth.redirectUri
+                redirectUri: oauth.redirectUri,
+                codeVerifier: oauth.codeVerifier,
+                scope: [ServerAuthType.ZendeskAuth].includes(authType) ? oauthConfig.scope : undefined
               };
 
               if ((provider === 'zendesk' || provider === 'canvas') && oauthConfig?.tokenUrl) {
@@ -302,7 +306,9 @@ export class ServerHandler {
                   clientId: clientId,
                   clientSecret: clientSecret,
                   code: oauth.code,
-                  redirectUri: oauth.redirectUri
+                  redirectUri: oauth.redirectUri,
+                  codeVerifier: oauth.codeVerifier,
+                  scope: [ServerAuthType.ZendeskAuth].includes(authType) ? oauthConfig.scope : undefined
                 });
 
                 if (exchangeResult.accessToken && exchangeResult.refreshToken) {
@@ -314,6 +320,15 @@ export class ServerHandler {
                     refreshToken: exchangeResult.refreshToken,
                     expiresAt: expiresAt
                   };
+                  if ([ServerAuthType.ZendeskAuth].includes(authType)) {
+                    decryptedLaunchConfigValue.oauth.tokenUrl = oauthConfig.tokenUrl;
+                  }
+                  if (authType === ServerAuthType.ZendeskAuth) {
+                    decryptedLaunchConfigValue.oauth.scope = oauthConfig.scope;
+                    if (exchangeResult.raw.refresh_token_expires_in && typeof exchangeResult.raw.refresh_token_expires_in === 'number') {
+                      decryptedLaunchConfigValue.oauth.refreshTokenExpiresAt = Date.now() + exchangeResult.raw.refresh_token_expires_in * 1000;
+                    }
+                  }
                   const encryptedData = await CryptoService.encryptData(JSON.stringify(decryptedLaunchConfigValue), token);
                   launchConfigStr = JSON.stringify(encryptedData);
                 } else {
