@@ -196,7 +196,7 @@ export class PolicyDslEvaluator {
           return false;
         }
         try {
-          return new RegExp(pattern).test(String(left));
+          return new RegExp(pattern).test(subject);
         } catch {
           logger.warn({ pattern: right }, 'Invalid regex in DSL condition');
           return false;
