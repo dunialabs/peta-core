@@ -31,6 +31,10 @@ export const zendeskAdapter: ProviderAdapter = {
       body.scope = ctx.scope;
     }
 
+    if (ctx.codeVerifier) {
+      body.code_verifier = ctx.codeVerifier;
+    }
+
     return {
       headers: {
         'Content-Type': 'application/json',
