@@ -42,6 +42,8 @@ export interface PolicyEvaluateResult {
 
 export class PolicyEngine {
   private static instance: PolicyEngine;
+  private cache = new Map<string, { policies: Awaited<ReturnType<typeof PolicyRepository.getEffectivePolicy>>; fetchedAt: number }>();
+  private static CACHE_TTL_MS = 30_000;
 
   private constructor() {}
 
@@ -64,7 +66,17 @@ export class PolicyEngine {
   async evaluate(params: PolicyEvaluateParams): Promise<PolicyEvaluateResult> {
     const { userId, serverId, toolName, args, dangerLevel } = params;
 
-    const policies = await PolicyRepository.getEffectivePolicy(serverId);
+    const cacheKey = serverId ?? '__global__';
+    const cached = this.cache.get(cacheKey);
+    const now = Date.now();
+    let policies: Awaited<ReturnType<typeof PolicyRepository.getEffectivePolicy>>;
+
+    if (cached && now - cached.fetchedAt < PolicyEngine.CACHE_TTL_MS) {
+      policies = cached.policies;
+    } else {
+      policies = await PolicyRepository.getEffectivePolicy(serverId);
+      this.cache.set(cacheKey, { policies, fetchedAt: now });
+    }
 
     if (policies.length === 0) {
       return this.fallbackToDangerLevel(dangerLevel);
@@ -152,6 +164,16 @@ export class PolicyEngine {
         return PolicyDecision.Allow;
     }
   }
+
+  clearCache(serverId?: string | null): void {
+    if (serverId !== undefined && serverId !== null) {
+      this.cache.delete(serverId);
+      this.cache.delete('__global__');
+    } else {
+      this.cache.clear();
+    }
+  }
+
 }
 
 export const policyEngine = PolicyEngine.getInstance();
