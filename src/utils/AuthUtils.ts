@@ -214,7 +214,7 @@ export class AuthUtils {
    * Get OAuth provider string from ServerAuthType
    * 
    * @param authType - Server authentication type
-   * @returns OAuth provider string ('google', 'notion', 'figma') or undefined if not an OAuth type
+   * @returns OAuth provider string ('google', 'notion', 'figma', etc.) or undefined if not an OAuth type
    * 
    * @example
    * ```typescript
@@ -235,6 +235,8 @@ export class AuthUtils {
         return 'github';
       case ServerAuthType.CanvasAuth:
         return 'canvas';
+      case ServerAuthType.CanvaAuth:
+        return 'canva';
       case ServerAuthType.ZendeskAuth:
         return 'zendesk';
       case ServerAuthType.ApiKey:
