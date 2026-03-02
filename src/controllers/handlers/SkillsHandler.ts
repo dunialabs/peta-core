@@ -172,7 +172,7 @@ export class SkillsHandler {
    * - serverId: string - Skills Server ID
    * - skillName: string - Name of skill to delete
    */
-  async handleDeleteSkill(request: AdminRequest<any>): Promise<DeleteSkillResult> {
+  async handleDeleteSkill(request: AdminRequest<any>, token: string): Promise<DeleteSkillResult> {
     const serverId = this.validateServerId(request.data);
     const { skillName } = request.data || {};
 
@@ -184,7 +184,9 @@ export class SkillsHandler {
 
     try {
       const skillsService = getSkillsService();
-      return await skillsService.deleteSkill(serverId, skillName);
+      const result = await skillsService.deleteSkill(serverId, skillName);
+      await this.reloadSkillsServer(serverId, token);
+      return result;
     } catch (error) {
       logger.error({ error, serverId, skillName }, 'Failed to delete skill');
       throw new AdminError(
@@ -201,14 +203,16 @@ export class SkillsHandler {
    * Expected request.data:
    * - serverId: string - Skills Server ID
    */
-  async handleDeleteServerSkills(request: AdminRequest<any>): Promise<DeleteServerSkillsResult> {
+  async handleDeleteServerSkills(request: AdminRequest<any>, token: string): Promise<DeleteServerSkillsResult> {
     const serverId = this.validateServerId(request.data);
 
     logger.info({ serverId }, 'Deleting all skills for server');
 
     try {
       const skillsService = getSkillsService();
-      return await skillsService.deleteServerSkills(serverId);
+      const result = await skillsService.deleteServerSkills(serverId);
+      await this.reloadSkillsServer(serverId, token);
+      return result;
     } catch (error) {
       logger.error({ error, serverId }, 'Failed to delete server skills');
       throw new AdminError(
