@@ -1,6 +1,8 @@
 import { AdminRequest, AdminError, AdminErrorCode } from '../../types/admin.types.js';
 import { getSkillsService, SkillInfo, UploadSkillResult, DeleteSkillResult, DeleteServerSkillsResult } from '../../services/SkillsService.js';
 import { createLogger } from '../../logger/index.js';
+import { ServerRepository } from '../../repositories/ServerRepository.js';
+import { ServerManager } from '../../mcp/core/ServerManager.js';
 
 const logger = createLogger('SkillsHandler');
 
@@ -10,6 +12,20 @@ const logger = createLogger('SkillsHandler');
  */
 export class SkillsHandler {
   constructor() {}
+
+  /**
+   * Reload skills server connection so newly uploaded skills are scanned immediately.
+   */
+  private async reloadSkillsServer(serverId: string, token: string): Promise<void> {
+    const serverEntity = await ServerRepository.findByServerId(serverId);
+    if (!serverEntity || !serverEntity.enabled) {
+      logger.debug({ serverId }, 'Skip skills server reload: server not found or disabled');
+      return;
+    }
+
+    await ServerManager.instance.reconnectServer(serverEntity, token);
+    logger.info({ serverId }, 'Skills server reloaded after skill upload');
+  }
 
   /**
    * Validate serverId field in request
@@ -108,7 +124,7 @@ export class SkillsHandler {
    * - serverId: string - Skills Server ID
    * - data: Buffer - ZIP file content (entire skills directory)
    */
-  async handleUploadSkill(request: AdminRequest<any>): Promise<UploadSkillResult> {
+  async handleUploadSkill(request: AdminRequest<any>, token: string): Promise<UploadSkillResult> {
     const serverId = this.validateServerId(request.data);
     const { data } = request.data || {};
 
@@ -136,7 +152,9 @@ export class SkillsHandler {
 
     try {
       const skillsService = getSkillsService();
-      return await skillsService.uploadSkill(serverId, zipBuffer);
+      const result = await skillsService.uploadSkill(serverId, zipBuffer);
+      await this.reloadSkillsServer(serverId, token);
+      return result;
     } catch (error) {
       logger.error({ error, serverId }, 'Failed to upload skills');
       throw new AdminError(
