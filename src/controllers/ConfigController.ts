@@ -318,14 +318,14 @@ export class ConfigController {
           if (req.authContext?.role !== UserRole.Owner) {
             throw new AdminError('Only Owner role can delete skills.', AdminErrorCode.FORBIDDEN);
           }
-          result = await this.skillsHandler.handleDeleteSkill(adminRequest);
+          result = await this.skillsHandler.handleDeleteSkill(adminRequest, token!);
           break;
         case AdminActionType.DELETE_SERVER_SKILLS:
           // Only Owner role can delete server skills
           if (req.authContext?.role !== UserRole.Owner) {
             throw new AdminError('Only Owner role can delete server skills.', AdminErrorCode.FORBIDDEN);
           }
-          result = await this.skillsHandler.handleDeleteServerSkills(adminRequest);
+          result = await this.skillsHandler.handleDeleteServerSkills(adminRequest, token!);
           break;
 
         default:
