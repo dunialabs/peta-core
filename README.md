@@ -12,7 +12,7 @@ A control-plane runtime for MCP (Model Context Protocol). Gateway, vault, policy
 - **Credential vault.** Secrets stay encrypted at rest (PBKDF2 + AES-GCM) and are injected server-side at execution time. Clients never see raw credentials.
 - **Policy engine.** RBAC/ABAC with per-user, per-tool capability filtering. Optional human-in-the-loop approval for high-risk operations.
 - **Audit trail.** Every tool call is logged with caller identity, policy decision, and outcome. Secrets are never included in logs.
-- **Managed runtime.** Downstream MCP server lifecycle management with health checks, idle timeouts, and on-demand startup.
+- **Managed runtime.** Supervises downstream MCP servers with lifecycle controls and automated recovery.
 - **Protocol compatibility.** Standard MCP upstream and downstream. Existing clients and servers work without modification or custom extensions.
 - **Self-hosted.** On-premises deployment model. No hosted SaaS dependency.
 
@@ -42,9 +42,12 @@ Peta Core is one component of the Peta MCP stack:
 
 - Transparent MCP proxying. Acts as an MCP server upstream and an MCP client downstream. Routes tool calls via namespaced identifiers (`serverId::toolName`).
 - Built-in OAuth 2.0 authorization server. Authorization Code with PKCE, refresh tokens, dynamic client registration, token introspection, and revocation.
-- Downstream server lifecycle. Lazy start (servers initialize in sleeping state and start on first request), health checks, idle timeouts, and capability caching.
-- REST API to MCP converter. Register REST API endpoints as MCP servers — Peta Core translates tool calls to HTTP requests without writing a custom MCP server.
-- Skills MCP. Upload skill packages (ZIP with `SKILL.md` metadata) per server. Skills are served as MCP tools and isolated by server ID.
+
+### Runtime & Extensions
+
+- Downstream server runtime. Lazy start on first request, health checks, idle timeouts, and capability caching.
+- REST API adapter. Register HTTP endpoints as MCP servers. Peta Core translates tool calls to HTTP requests without writing a custom MCP server.
+- Skill packages. Upload per-server ZIP bundles with `SKILL.md` metadata. Served as namespaced MCP tools, isolated by server ID.
 
 ### Credential Vault
 
@@ -67,6 +70,8 @@ Peta Core is one component of the Peta MCP stack:
 
 - Stream resumption. Events are persisted to allow clients to resume via `Last-Event-ID` after disconnection.
 - Real-time notification channel. Socket.IO-based push for approval requests, capability updates, and server status changes.
+- Automatic server recovery. Consecutive downstream timeouts trigger a health ping and automatic reconnection.
+- Request-level retry. On downstream disconnection, the gateway reconnects and retries the call up to two times. Clients see a single request.
 
 ---
 
