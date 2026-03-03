@@ -42,7 +42,9 @@ Peta Core is one component of the Peta MCP stack:
 
 - Transparent MCP proxying. Acts as an MCP server upstream and an MCP client downstream. Routes tool calls via namespaced identifiers (`serverId::toolName`).
 - Built-in OAuth 2.0 authorization server. Authorization Code with PKCE, refresh tokens, dynamic client registration, token introspection, and revocation.
-- Downstream server lifecycle. On-demand startup, health checks, idle timeouts, and capability caching.
+- Downstream server lifecycle. Lazy start (servers initialize in sleeping state and start on first request), health checks, idle timeouts, and capability caching.
+- REST API to MCP converter. Register REST API endpoints as MCP servers — Peta Core translates tool calls to HTTP requests without writing a custom MCP server.
+- Skills MCP. Upload skill packages (ZIP with `SKILL.md` metadata) per server. Skills are served as MCP tools and isolated by server ID.
 
 ### Credential Vault
 
