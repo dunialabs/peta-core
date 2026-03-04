@@ -85,7 +85,7 @@ import { socketNotifier } from '../../socket/SocketNotifier.js';
 import { ProxyContext } from '../../types/mcp.types.js';
 import { createLogger } from '../../logger/index.js';
 import { policyEngine } from '../services/PolicyEngine.js';
-import { approvalService } from '../services/ApprovalService.js';
+import { approvalService, ApprovalRateLimitError } from '../services/ApprovalService.js';
 
 /**
  * MCP Proxy Session
@@ -364,6 +364,7 @@ export class ProxySession {
     const uniformRequestId = LogService.getInstance().generateUniformRequestId(this.sessionId);
     const originalRequestId = extra.requestId;
     let approvalRequestId: string | null = null;
+    let approvalHeartbeatTimer: NodeJS.Timeout | null = null;
 
     const result = this.clientSession.parseName(toolName);
 
@@ -464,14 +465,49 @@ export class ProxySession {
     }
 
     if (policyResult.decision === PolicyDecision.RequireApproval) {
-      const approvalCheck = await approvalService.checkOrCreateApproval({
-        userId: this.userId,
-        serverId: result.serverID,
-        toolName: result.originalName,
-        args: (request.params.arguments ?? {}) as Record<string, unknown>,
-        policyVersion: policyResult.policyVersion,
-        uniformRequestId,
-      });
+      let approvalCheck: Awaited<ReturnType<typeof approvalService.checkOrCreateApproval>>;
+      try {
+        approvalCheck = await approvalService.checkOrCreateApproval({
+          userId: this.userId,
+          serverId: result.serverID,
+          toolName: result.originalName,
+          args: (request.params.arguments ?? {}) as Record<string, unknown>,
+          policyVersion: policyResult.policyVersion,
+          uniformRequestId,
+        });
+      } catch (error) {
+        if (error instanceof ApprovalRateLimitError) {
+          const rateLimitMsg = this.buildApprovalOutcomeMessage({
+            approvalRequestId: null,
+            resumeToken: null,
+            requestHash: null,
+            toolName: result.originalName,
+            reason: policyResult.reason ?? 'Policy requires approval',
+            policyVersion: policyResult.policyVersion,
+            kind: 'approval_rate_limited',
+            status: 'rate_limited',
+            summary: error.message,
+          });
+
+          await this.sessionLogger.logClientRequest({
+            action: MCPEventLogType.RequestTool,
+            serverId: result.serverID,
+            upstreamRequestId: String(originalRequestId),
+            uniformRequestId,
+            requestParams: request.params,
+            error: `ApprovalRateLimited: ${error.message}`,
+            duration: Date.now() - startTime,
+            statusCode: 429,
+          });
+
+          return {
+            content: [{ type: 'text', text: rateLimitMsg.text }],
+            isError: false,
+            _meta: { approval: rateLimitMsg.meta, retryAfterSeconds: 60 },
+          };
+        }
+        throw error;
+      }
 
       if (approvalCheck.needsApproval) {
         if (approvalCheck.created) {
@@ -487,6 +523,7 @@ export class ProxySession {
             policyVersion: policyResult.policyVersion,
             matchedRuleId: policyResult.matchedRuleId,
             reason: policyResult.reason,
+            resumeToken: approvalCheck.request!.id,
           });
         }
 
@@ -495,7 +532,12 @@ export class ProxySession {
           'Waiting for approval decision'
         );
 
-        const waitResult = await this.waitForApproval(approvalCheck.request!.id, extra.signal);
+        const waitResult = await this.waitForApproval(
+          approvalCheck.request!.id,
+          extra.signal,
+          request.params?._meta?.progressToken,
+          originalRequestId
+        );
 
         if (waitResult.status === 'rejected') {
           const errorMsg = `Tool call rejected by administrator: ${waitResult.decisionReason ?? 'No reason provided'}`;
@@ -503,7 +545,7 @@ export class ProxySession {
             action: MCPEventLogType.RequestTool,
             serverId: result.serverID,
             upstreamRequestId: String(originalRequestId),
-            uniformRequestId: uniformRequestId,
+            uniformRequestId,
             requestParams: request.params,
             error: `Error: ApprovalRejected: ${errorMsg}`,
             duration: Date.now() - startTime,
@@ -516,22 +558,32 @@ export class ProxySession {
         }
 
         if (waitResult.status !== 'approved') {
-          // Timeout, expired, or aborted — return informational result (not error)
-          const pendingMsg = [
-            `[APPROVAL PENDING] This tool call requires human approval and is awaiting review.`,
-            ``,
-            `Approval Request ID: ${approvalCheck.request!.id}`,
-            `Tool: ${result.originalName}`,
-            `Reason: ${policyResult.reason ?? 'Policy requires approval'}`,
-            ``,
-            `The request has been sent to an administrator for review. You may retry this exact tool call with the same parameters once approval is granted.`,
-          ].join('\n');
+          const nonExecutedSummaryByStatus: Record<string, string> = {
+            timeout: 'Approval is still pending and this tool call timed out before execution.',
+            expired: 'Approval request expired before a decision. This tool call did not execute.',
+            aborted: 'Client cancelled while waiting for approval. This tool call did not execute.',
+            executing: 'Execution has started in another session. This call did not execute the tool.',
+            executed: 'This request already executed in another session. This call did not execute the tool.',
+            failed: `Execution failed in another session${waitResult.decisionReason ? `: ${waitResult.decisionReason}` : '.'}`,
+          };
+
+          const pendingMsg = this.buildApprovalOutcomeMessage({
+            approvalRequestId: approvalCheck.request!.id,
+            resumeToken: approvalCheck.request!.id,
+            requestHash: approvalCheck.requestHash,
+            toolName: result.originalName,
+            reason: policyResult.reason ?? 'Policy requires approval',
+            policyVersion: policyResult.policyVersion,
+            kind: 'approval_pending',
+            status: waitResult.status,
+            summary: nonExecutedSummaryByStatus[waitResult.status] ?? 'Tool was not executed.',
+          });
 
           await this.sessionLogger.logClientRequest({
             action: MCPEventLogType.RequestTool,
             serverId: result.serverID,
             upstreamRequestId: String(originalRequestId),
-            uniformRequestId: uniformRequestId,
+            uniformRequestId,
             requestParams: request.params,
             error: `ApprovalPending: Awaiting human approval (${waitResult.status}). Request ID: ${approvalCheck.request!.id}`,
             duration: Date.now() - startTime,
@@ -539,8 +591,9 @@ export class ProxySession {
           });
 
           return {
-            content: [{ type: 'text', text: pendingMsg }],
+            content: [{ type: 'text', text: pendingMsg.text }],
             isError: false,
+            _meta: { approval: pendingMsg.meta },
           };
         }
 
@@ -550,23 +603,38 @@ export class ProxySession {
         );
       }
 
-      const claimResult = await approvalService.claimForExecution(approvalCheck.requestHash);
+      const claimResult = await approvalService.claimForExecutionById(approvalCheck.request!.id);
       if (!claimResult.claimed) {
-        const errorTime = Date.now();
-        const errorMsg = 'Approval request could not be claimed for execution';
+        const latest = await approvalService.getById(approvalCheck.request!.id);
+        const waitStatus = this.mapApprovalStatusToWaitStatus(latest?.status);
+        const claimMsg = this.buildApprovalOutcomeMessage({
+          approvalRequestId: approvalCheck.request!.id,
+          resumeToken: approvalCheck.request!.id,
+          requestHash: approvalCheck.requestHash,
+          toolName: result.originalName,
+          reason: policyResult.reason ?? 'Policy requires approval',
+          policyVersion: policyResult.policyVersion,
+          kind: 'approval_pending',
+          status: waitStatus,
+          summary: 'Execution is already in progress or completed elsewhere. This call did not execute the tool.',
+        });
 
         await this.sessionLogger.logClientRequest({
           action: MCPEventLogType.RequestTool,
           serverId: result.serverID,
           upstreamRequestId: String(originalRequestId),
-          uniformRequestId: uniformRequestId,
+          uniformRequestId,
           requestParams: request.params,
-          error: `Error: ApprovalClaimFailed: ${errorMsg}`,
-          duration: errorTime - startTime,
-          statusCode: 409,
+          error: `ApprovalClaimLost: ${waitStatus}. Request ID: ${approvalCheck.request!.id}`,
+          duration: Date.now() - startTime,
+          statusCode: 202,
         });
 
-        throw new McpError(ErrorCode.InvalidRequest, errorMsg);
+        return {
+          content: [{ type: 'text', text: claimMsg.text }],
+          isError: false,
+          _meta: { approval: claimMsg.meta },
+        };
       }
 
       approvalRequestId = claimResult.request!.id;
@@ -606,6 +674,11 @@ export class ProxySession {
     let isReconnected: boolean | undefined;
 
     try {
+      if (approvalRequestId) {
+        approvalHeartbeatTimer = setInterval(() => {
+          void approvalService.touchExecuting(approvalRequestId!).catch(() => null);
+        }, 30_000);
+      }
 
       // Forward request to downstream server, passing signal and proxyRequestId
       const serverResult = (await client.callTool(
@@ -673,10 +746,6 @@ export class ProxySession {
         statusCode: 500,
       });
 
-      if (isReconnected === false && retryCount < 2) {
-        return await this.handleToolCall(request, extra, retryCount + 1);
-      }
-
       if (approvalRequestId) {
         const failedReq = await approvalService.markFailed(approvalRequestId, errorMsg).catch(() => null);
         if (failedReq) {
@@ -687,6 +756,11 @@ export class ProxySession {
           });
         }
         approvalRequestId = null;
+      }
+
+      const shouldRetry = approvalRequestId == null && isReconnected === false && retryCount < 2;
+      if (shouldRetry) {
+        return await this.handleToolCall(request, extra, retryCount + 1);
       }
 
       // Create error result
@@ -701,6 +775,9 @@ export class ProxySession {
       };
       return errorResult;
     } finally {
+      if (approvalHeartbeatTimer) {
+        clearInterval(approvalHeartbeatTimer);
+      }
       // Clean up request mapping
       this.requestIdMapper.removeMapping(proxyRequestId);
     }
@@ -717,47 +794,198 @@ export class ProxySession {
   private async waitForApproval(
     approvalRequestId: string,
     signal?: AbortSignal,
-  ): Promise<{ status: 'approved' | 'rejected' | 'timeout' | 'expired' | 'aborted'; decisionReason?: string | null }> {
+    progressToken?: string | number,
+    relatedRequestId?: string | number,
+  ): Promise<{
+    status: 'approved' | 'rejected' | 'timeout' | 'expired' | 'aborted' | 'executing' | 'executed' | 'failed';
+    decisionReason?: string | null;
+  }> {
     const deadline = Date.now() + ProxySession.APPROVAL_WAIT_TIMEOUT_MS;
+    let unknownStatusWarned = false;
+    let nextProgressAt = Date.now() + 15_000;
+    let progressSeq = 0;
+
+    if (signal?.aborted) {
+      return { status: 'aborted' };
+    }
 
     // Immediate check — admin may have already approved before we started waiting
-    const immediate = await approvalService.getById(approvalRequestId);
-    if (!immediate) return { status: 'expired' };
-    if (immediate.status === ApprovalStatus.Approved) return { status: 'approved' };
-    if (immediate.status === ApprovalStatus.Rejected) return { status: 'rejected', decisionReason: immediate.decisionReason };
-    if (immediate.status === ApprovalStatus.Expired) return { status: 'expired' };
+    const immediate = await this.pollApprovalStatus(approvalRequestId, unknownStatusWarned);
+    unknownStatusWarned = immediate.unknownStatusWarned;
+    if (immediate.result && immediate.result.status !== 'executing') {
+      return immediate.result;
+    }
 
     while (Date.now() < deadline) {
       if (signal?.aborted) return { status: 'aborted' };
 
+      if (progressToken !== undefined && Date.now() >= nextProgressAt) {
+        progressSeq += 1;
+        await this.sendApprovalProgressNotification(progressToken, relatedRequestId, progressSeq);
+        nextProgressAt = Date.now() + 15_000;
+      }
+
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        break;
+      }
+
       // Abortable sleep with proper listener cleanup
       await new Promise<void>(resolve => {
         const onTimeout = () => { signal?.removeEventListener('abort', onAbort); resolve(); };
-        const onAbort = () => { clearTimeout(timer); resolve(); };
-        const timer = setTimeout(onTimeout, ProxySession.APPROVAL_POLL_INTERVAL_MS);
+        const onAbort = () => { signal?.removeEventListener('abort', onAbort); clearTimeout(timer); resolve(); };
+        const timer = setTimeout(onTimeout, Math.min(ProxySession.APPROVAL_POLL_INTERVAL_MS, remainingMs));
         signal?.addEventListener('abort', onAbort, { once: true });
       });
 
       if (signal?.aborted) return { status: 'aborted' };
 
-      const request = await approvalService.getById(approvalRequestId);
-      if (!request) return { status: 'expired' };
-
-      switch (request.status) {
-        case ApprovalStatus.Approved:
-          return { status: 'approved' };
-        case ApprovalStatus.Rejected:
-          return { status: 'rejected', decisionReason: request.decisionReason };
-        case ApprovalStatus.Expired:
-          return { status: 'expired' };
-        case ApprovalStatus.Pending:
-          continue;
-        default:
-          return { status: 'expired' };
+      const poll = await this.pollApprovalStatus(approvalRequestId, unknownStatusWarned);
+      unknownStatusWarned = poll.unknownStatusWarned;
+      if (poll.result && poll.result.status !== 'executing') {
+        return poll.result;
       }
     }
 
     return { status: 'timeout' };
+  }
+
+  private async pollApprovalStatus(
+    approvalRequestId: string,
+    unknownStatusWarned: boolean,
+  ): Promise<{
+    result: { status: 'approved' | 'rejected' | 'expired' | 'executing' | 'executed' | 'failed'; decisionReason?: string | null } | null;
+    unknownStatusWarned: boolean;
+  }> {
+    try {
+      const request = await approvalService.getById(approvalRequestId);
+      if (!request) return { result: { status: 'expired' }, unknownStatusWarned };
+
+      switch (request.status) {
+        case ApprovalStatus.Approved:
+          return { result: { status: 'approved' }, unknownStatusWarned };
+        case ApprovalStatus.Rejected:
+          return { result: { status: 'rejected', decisionReason: request.decisionReason }, unknownStatusWarned };
+        case ApprovalStatus.Expired:
+          return { result: { status: 'expired' }, unknownStatusWarned };
+        case ApprovalStatus.Pending:
+        case ApprovalStatus.Executing:
+          return { result: { status: 'executing' }, unknownStatusWarned };
+        case ApprovalStatus.Executed:
+          return { result: { status: 'executed' }, unknownStatusWarned };
+        case ApprovalStatus.Failed:
+          return { result: { status: 'failed', decisionReason: request.executionError }, unknownStatusWarned };
+        default:
+          if (!unknownStatusWarned) {
+            this.logger.warn({ approvalRequestId, status: request.status }, 'Unknown approval status encountered');
+          }
+          return { result: { status: 'executing' }, unknownStatusWarned: true };
+      }
+    } catch (error) {
+      this.logger.warn({ error, approvalRequestId }, 'Failed to poll approval status, retrying');
+      return { result: { status: 'executing' }, unknownStatusWarned };
+    }
+  }
+
+  private async sendApprovalProgressNotification(
+    progressToken: string | number,
+    relatedRequestId?: string | number,
+    progress?: number,
+  ): Promise<void> {
+    try {
+      await this.upstreamServer.notification({
+        method: 'notifications/progress',
+        params: {
+          progressToken,
+          progress: progress ?? 0,
+        }
+      }, {
+        relatedRequestId,
+      });
+    } catch (error) {
+      this.logger.debug({ error, progressToken }, 'Failed to send approval progress notification');
+    }
+  }
+
+  private mapApprovalStatusToWaitStatus(status?: string): 'timeout' | 'expired' | 'aborted' | 'executing' | 'executed' | 'failed' {
+    switch (status) {
+      case ApprovalStatus.Expired:
+        return 'expired';
+      case ApprovalStatus.Executing:
+        return 'executing';
+      case ApprovalStatus.Executed:
+        return 'executed';
+      case ApprovalStatus.Failed:
+        return 'failed';
+      default:
+        return 'timeout';
+    }
+  }
+
+  private buildApprovalOutcomeMessage(input: {
+    approvalRequestId: string | null;
+    resumeToken: string | null;
+    requestHash: string | null;
+    toolName: string;
+    reason: string;
+    policyVersion: number;
+    kind: 'approval_pending' | 'approval_rate_limited';
+    status: string;
+    summary: string;
+  }): {
+    text: string;
+    meta: {
+      kind: 'approval_pending' | 'approval_rate_limited';
+      approvalRequestId: string | null;
+      resumeToken: string | null;
+      status: string;
+      requestHash: string | null;
+      toolName: string;
+      policyVersion: number;
+    };
+  } {
+    const meta = {
+      kind: input.kind,
+      approvalRequestId: input.approvalRequestId,
+      resumeToken: input.resumeToken,
+      status: input.status,
+      requestHash: input.requestHash,
+      toolName: input.toolName,
+      policyVersion: input.policyVersion,
+    };
+
+    const text = [
+      `TOOL NOT EXECUTED: ${input.summary}`,
+      '',
+      `Approval Request ID: ${input.approvalRequestId ?? 'N/A'}`,
+      `Resume Token: ${input.resumeToken ?? 'N/A'}`,
+      `Tool: ${input.toolName}`,
+      `Reason: ${input.reason}`,
+      '',
+      this.getApprovalGuidanceByStatus(input.status),
+    ].join('\n');
+
+    return { text, meta };
+  }
+
+  private getApprovalGuidanceByStatus(status: string): string {
+    switch (status) {
+      case 'timeout':
+      case 'executing':
+        return 'Retry this exact tool call after approval or execution completes.';
+      case 'expired':
+        return 'A new approval request is required. Retry the same tool call to create one.';
+      case 'aborted':
+        return 'Retry this exact tool call if you still want to request approval.';
+      case 'executed':
+        return 'No retry needed for this request. Check prior result logs if required.';
+      case 'failed':
+        return 'Retry the tool call if you want a fresh execution attempt.';
+      case 'rate_limited':
+        return 'Wait and retry after the rate-limit window.';
+      default:
+        return 'Retry this exact tool call once approval is granted.';
+    }
   }
 
   /**

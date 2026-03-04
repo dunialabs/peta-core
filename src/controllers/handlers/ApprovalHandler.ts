@@ -19,7 +19,12 @@ export class ApprovalHandler {
       userId && typeof userId === 'string' ? userId : null,
       { serverId, toolName }
     );
-    return { requests };
+    return {
+      requests: requests.map((item) => ({
+        ...item,
+        resumeToken: item.id,
+      }))
+    };
   }
 
   async handleGetApprovalRequest(request: AdminRequest<{
@@ -36,7 +41,10 @@ export class ApprovalHandler {
       throw new AdminError(`Approval request not found: ${id}`, AdminErrorCode.INVALID_REQUEST);
     }
 
-    return approvalRequest;
+    return {
+      ...approvalRequest,
+      resumeToken: approvalRequest.id,
+    };
   }
 
   async handleDecideApprovalRequest(request: AdminRequest<{
@@ -70,7 +78,10 @@ export class ApprovalHandler {
     });
 
     logger.info({ id, decision }, 'Approval request decided via admin API');
-    return result;
+    return {
+      ...result,
+      resumeToken: result.id,
+    };
   }
 
   async handleGetPendingApprovalsCount(request: AdminRequest<{

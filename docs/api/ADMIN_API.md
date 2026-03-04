@@ -1904,6 +1904,7 @@ The `dsl` object follows this structure:
       "canonicalArgs": {},
       "redactedArgs": {},
       "requestHash": "sha256-hex",
+      "resumeToken": "clxxx...",
       "status": "PENDING",
       "decidedAt": null,
       "decisionReason": null,
@@ -1939,6 +1940,7 @@ The `dsl` object follows this structure:
   "canonicalArgs": {},
   "redactedArgs": {},
   "requestHash": "sha256-hex",
+  "resumeToken": "clxxx...",
   "status": "PENDING",
   "decidedAt": null,
   "decisionReason": null,
@@ -1953,7 +1955,8 @@ The `dsl` object follows this structure:
 ```
 
 **Field Description**:
-- `status`: Current state — `"PENDING"`, `"APPROVED"`, `"REJECTED"`, or `"EXPIRED"`
+- `status`: Current state — `"PENDING"`, `"APPROVED"`, `"REJECTED"`, `"EXPIRED"`, `"EXECUTING"`, `"EXECUTED"`, or `"FAILED"`
+- `resumeToken`: Stable resume handle (currently same value as `id`) for client retries and correlation
 - `decidedAt`: Timestamp when the decision was made, or `null`
 - `decisionReason`: Optional reason provided when decided, or `null`
 - `canonicalArgs`: Normalized tool arguments used for hashing/comparison
@@ -1986,6 +1989,7 @@ The `dsl` object follows this structure:
   "canonicalArgs": {},
   "redactedArgs": {},
   "requestHash": "sha256-hex",
+  "resumeToken": "clxxx...",
   "status": "APPROVED",
   "decidedAt": "2026-01-01T00:05:00.000Z",
   "decisionReason": "Reviewed and approved",
