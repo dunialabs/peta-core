@@ -80,7 +80,7 @@ import { Request, Response } from 'express';
 import { PersistentEventStore } from './PersistentEventStore.js';
 import { RequestIdMapper } from './RequestIdMapper.js';
 import { APP_INFO } from '../../config/config.js';
-import { DangerLevel, MCPEventLogType, PolicyDecision } from '../../types/enums.js';
+import { ApprovalStatus, DangerLevel, MCPEventLogType, PolicyDecision } from '../../types/enums.js';
 import { socketNotifier } from '../../socket/SocketNotifier.js';
 import { ProxyContext } from '../../types/mcp.types.js';
 import { createLogger } from '../../logger/index.js';
@@ -114,6 +114,10 @@ export class ProxySession {
   // Logger for ProxySession
   private logger: ReturnType<typeof createLogger>;
   private closeTriggered: boolean = false;
+
+  // Approval wait configuration
+  private static readonly APPROVAL_POLL_INTERVAL_MS = 3_000;
+  private static readonly APPROVAL_WAIT_TIMEOUT_MS = 55_000;
 
   constructor(
     private sessionId: string,
@@ -486,21 +490,64 @@ export class ProxySession {
           });
         }
 
-        const errorTime = Date.now();
-        const errorMsg = `Approval required for tool: ${result.originalName}. Request ID: ${approvalCheck.request!.id}`;
+        this.logger.info(
+          { approvalRequestId: approvalCheck.request!.id, toolName: result.originalName },
+          'Waiting for approval decision'
+        );
 
-        await this.sessionLogger.logClientRequest({
-          action: MCPEventLogType.RequestTool,
-          serverId: result.serverID,
-          upstreamRequestId: String(originalRequestId),
-          uniformRequestId: uniformRequestId,
-          requestParams: request.params,
-          error: `Error: ApprovalRequired: ${errorMsg}`,
-          duration: errorTime - startTime,
-          statusCode: 202,
-        });
+        const waitResult = await this.waitForApproval(approvalCheck.request!.id, extra.signal);
 
-        throw new McpError(ErrorCode.InvalidRequest, errorMsg);
+        if (waitResult.status === 'rejected') {
+          const errorMsg = `Tool call rejected by administrator: ${waitResult.decisionReason ?? 'No reason provided'}`;
+          await this.sessionLogger.logClientRequest({
+            action: MCPEventLogType.RequestTool,
+            serverId: result.serverID,
+            upstreamRequestId: String(originalRequestId),
+            uniformRequestId: uniformRequestId,
+            requestParams: request.params,
+            error: `Error: ApprovalRejected: ${errorMsg}`,
+            duration: Date.now() - startTime,
+            statusCode: 403,
+          });
+          return {
+            content: [{ type: 'text', text: errorMsg }],
+            isError: true,
+          };
+        }
+
+        if (waitResult.status !== 'approved') {
+          // Timeout, expired, or aborted — return informational result (not error)
+          const pendingMsg = [
+            `[APPROVAL PENDING] This tool call requires human approval and is awaiting review.`,
+            ``,
+            `Approval Request ID: ${approvalCheck.request!.id}`,
+            `Tool: ${result.originalName}`,
+            `Reason: ${policyResult.reason ?? 'Policy requires approval'}`,
+            ``,
+            `The request has been sent to an administrator for review. You may retry this exact tool call with the same parameters once approval is granted.`,
+          ].join('\n');
+
+          await this.sessionLogger.logClientRequest({
+            action: MCPEventLogType.RequestTool,
+            serverId: result.serverID,
+            upstreamRequestId: String(originalRequestId),
+            uniformRequestId: uniformRequestId,
+            requestParams: request.params,
+            error: `ApprovalPending: Awaiting human approval (${waitResult.status}). Request ID: ${approvalCheck.request!.id}`,
+            duration: Date.now() - startTime,
+            statusCode: 202,
+          });
+
+          return {
+            content: [{ type: 'text', text: pendingMsg }],
+            isError: false,
+          };
+        }
+
+        this.logger.info(
+          { approvalRequestId: approvalCheck.request!.id, toolName: result.originalName },
+          'Approval granted, proceeding with execution'
+        );
       }
 
       const claimResult = await approvalService.claimForExecution(approvalCheck.requestHash);
@@ -657,6 +704,60 @@ export class ProxySession {
       // Clean up request mapping
       this.requestIdMapper.removeMapping(proxyRequestId);
     }
+  }
+
+  /**
+   * Wait for an approval request to be decided by polling.
+   *
+   * Polls approval status every APPROVAL_POLL_INTERVAL_MS until approved, rejected,
+   * expired, client-aborted, or timeout (APPROVAL_WAIT_TIMEOUT_MS).
+   * Performs an immediate check before entering the poll loop to minimize latency
+   * when admin has already approved.
+   */
+  private async waitForApproval(
+    approvalRequestId: string,
+    signal?: AbortSignal,
+  ): Promise<{ status: 'approved' | 'rejected' | 'timeout' | 'expired' | 'aborted'; decisionReason?: string | null }> {
+    const deadline = Date.now() + ProxySession.APPROVAL_WAIT_TIMEOUT_MS;
+
+    // Immediate check — admin may have already approved before we started waiting
+    const immediate = await approvalService.getById(approvalRequestId);
+    if (!immediate) return { status: 'expired' };
+    if (immediate.status === ApprovalStatus.Approved) return { status: 'approved' };
+    if (immediate.status === ApprovalStatus.Rejected) return { status: 'rejected', decisionReason: immediate.decisionReason };
+    if (immediate.status === ApprovalStatus.Expired) return { status: 'expired' };
+
+    while (Date.now() < deadline) {
+      if (signal?.aborted) return { status: 'aborted' };
+
+      // Abortable sleep with proper listener cleanup
+      await new Promise<void>(resolve => {
+        const onTimeout = () => { signal?.removeEventListener('abort', onAbort); resolve(); };
+        const onAbort = () => { clearTimeout(timer); resolve(); };
+        const timer = setTimeout(onTimeout, ProxySession.APPROVAL_POLL_INTERVAL_MS);
+        signal?.addEventListener('abort', onAbort, { once: true });
+      });
+
+      if (signal?.aborted) return { status: 'aborted' };
+
+      const request = await approvalService.getById(approvalRequestId);
+      if (!request) return { status: 'expired' };
+
+      switch (request.status) {
+        case ApprovalStatus.Approved:
+          return { status: 'approved' };
+        case ApprovalStatus.Rejected:
+          return { status: 'rejected', decisionReason: request.decisionReason };
+        case ApprovalStatus.Expired:
+          return { status: 'expired' };
+        case ApprovalStatus.Pending:
+          continue;
+        default:
+          return { status: 'expired' };
+      }
+    }
+
+    return { status: 'timeout' };
   }
 
   /**
