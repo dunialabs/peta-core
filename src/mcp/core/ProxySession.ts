@@ -605,7 +605,7 @@ export class ProxySession {
 
       const claimResult = await approvalService.claimForExecutionById(approvalCheck.request!.id);
       if (!claimResult.claimed) {
-        const latest = await approvalService.getById(approvalCheck.request!.id);
+        const latest = await approvalService.getById(approvalCheck.request!.id).catch(() => null);
         const waitStatus = this.mapApprovalStatusToWaitStatus(latest?.status);
         const claimMsg = this.buildApprovalOutcomeMessage({
           approvalRequestId: approvalCheck.request!.id,
@@ -804,6 +804,7 @@ export class ProxySession {
     let unknownStatusWarned = false;
     let nextProgressAt = Date.now() + 15_000;
     let progressSeq = 0;
+    let lastWaitState: 'pending' | 'executing' = 'pending';
 
     if (signal?.aborted) {
       return { status: 'aborted' };
@@ -812,7 +813,8 @@ export class ProxySession {
     // Immediate check — admin may have already approved before we started waiting
     const immediate = await this.pollApprovalStatus(approvalRequestId, unknownStatusWarned);
     unknownStatusWarned = immediate.unknownStatusWarned;
-    if (immediate.result && immediate.result.status !== 'executing') {
+    lastWaitState = immediate.waitState;
+    if (immediate.result) {
       return immediate.result;
     }
 
@@ -842,48 +844,51 @@ export class ProxySession {
 
       const poll = await this.pollApprovalStatus(approvalRequestId, unknownStatusWarned);
       unknownStatusWarned = poll.unknownStatusWarned;
-      if (poll.result && poll.result.status !== 'executing') {
+      lastWaitState = poll.waitState;
+      if (poll.result) {
         return poll.result;
       }
     }
 
-    return { status: 'timeout' };
+    return { status: lastWaitState === 'executing' ? 'executing' : 'timeout' };
   }
 
   private async pollApprovalStatus(
     approvalRequestId: string,
     unknownStatusWarned: boolean,
   ): Promise<{
-    result: { status: 'approved' | 'rejected' | 'expired' | 'executing' | 'executed' | 'failed'; decisionReason?: string | null } | null;
+    result: { status: 'approved' | 'rejected' | 'expired' | 'executed' | 'failed'; decisionReason?: string | null } | null;
+    waitState: 'pending' | 'executing';
     unknownStatusWarned: boolean;
   }> {
     try {
       const request = await approvalService.getById(approvalRequestId);
-      if (!request) return { result: { status: 'expired' }, unknownStatusWarned };
+      if (!request) return { result: { status: 'expired' }, waitState: 'pending', unknownStatusWarned };
 
       switch (request.status) {
         case ApprovalStatus.Approved:
-          return { result: { status: 'approved' }, unknownStatusWarned };
+          return { result: { status: 'approved' }, waitState: 'pending', unknownStatusWarned };
         case ApprovalStatus.Rejected:
-          return { result: { status: 'rejected', decisionReason: request.decisionReason }, unknownStatusWarned };
+          return { result: { status: 'rejected', decisionReason: request.decisionReason }, waitState: 'pending', unknownStatusWarned };
         case ApprovalStatus.Expired:
-          return { result: { status: 'expired' }, unknownStatusWarned };
+          return { result: { status: 'expired' }, waitState: 'pending', unknownStatusWarned };
         case ApprovalStatus.Pending:
+          return { result: null, waitState: 'pending', unknownStatusWarned };
         case ApprovalStatus.Executing:
-          return { result: { status: 'executing' }, unknownStatusWarned };
+          return { result: null, waitState: 'executing', unknownStatusWarned };
         case ApprovalStatus.Executed:
-          return { result: { status: 'executed' }, unknownStatusWarned };
+          return { result: { status: 'executed' }, waitState: 'executing', unknownStatusWarned };
         case ApprovalStatus.Failed:
-          return { result: { status: 'failed', decisionReason: request.executionError }, unknownStatusWarned };
+          return { result: { status: 'failed', decisionReason: request.executionError }, waitState: 'executing', unknownStatusWarned };
         default:
           if (!unknownStatusWarned) {
             this.logger.warn({ approvalRequestId, status: request.status }, 'Unknown approval status encountered');
           }
-          return { result: { status: 'executing' }, unknownStatusWarned: true };
+          return { result: null, waitState: 'pending', unknownStatusWarned: true };
       }
     } catch (error) {
       this.logger.warn({ error, approvalRequestId }, 'Failed to poll approval status, retrying');
-      return { result: { status: 'executing' }, unknownStatusWarned };
+      return { result: null, waitState: 'pending', unknownStatusWarned };
     }
   }
 

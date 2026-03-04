@@ -95,8 +95,15 @@ export class ApprovalRepository {
     const existing = await approvalRequestModel.approvalRequest.findFirst({
       where: {
         requestHash: params.requestHash,
-        status: { in: ['PENDING', 'APPROVED', 'EXECUTING'] },
-        expiresAt: { gt: now }
+        OR: [
+          {
+            status: { in: ['PENDING', 'APPROVED'] },
+            expiresAt: { gt: now }
+          },
+          {
+            status: 'EXECUTING'
+          }
+        ]
       },
       orderBy: {
         createdAt: 'desc'
@@ -118,7 +125,7 @@ export class ApprovalRepository {
           UPDATE approval_request
           SET status = 'EXPIRED', updated_at = NOW()
           WHERE request_hash = ${params.requestHash}
-            AND status IN ('PENDING', 'APPROVED', 'EXECUTING')
+            AND status IN ('PENDING', 'APPROVED')
             AND expires_at <= NOW()
         `
       );
@@ -331,8 +338,15 @@ export class ApprovalRepository {
     return await approvalRequestModel.approvalRequest.findFirst({
       where: {
         requestHash,
-        status: { in: ['PENDING', 'APPROVED', 'EXECUTING'] },
-        expiresAt: { gt: new Date() }
+        OR: [
+          {
+            status: { in: ['PENDING', 'APPROVED'] },
+            expiresAt: { gt: new Date() }
+          },
+          {
+            status: 'EXECUTING'
+          }
+        ]
       },
       orderBy: { createdAt: 'desc' }
     });
