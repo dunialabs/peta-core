@@ -491,6 +491,7 @@ export class SocketNotifier {
     policyVersion: number;
     matchedRuleId: string | null;
     reason: string | null;
+    resumeToken?: string;
   }): boolean {
     return this.notifyUser(userId, 'notification', {
       type: 'approval_created',

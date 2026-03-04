@@ -185,6 +185,31 @@ export class ApprovalRepository {
     return request;
   }
 
+  static async claimApprovedForExecutionById(id: string): Promise<ApprovalRequest | null> {
+    const rows = await prisma.$queryRaw<Record<string, unknown>[]>(
+      Prisma.sql`
+        UPDATE approval_request
+        SET status = 'EXECUTING', updated_at = NOW()
+        WHERE id = ${id}
+          AND status = 'APPROVED'
+          AND expires_at > NOW()
+        RETURNING *
+      `
+    );
+
+    if (rows.length === 0) {
+      logger.debug({ approvalRequestId: id }, 'No APPROVED request to claim for execution by id');
+      return null;
+    }
+
+    const request = this.mapSnakeToCamel(rows[0]);
+    logger.info(
+      { approvalRequestId: request.id, requestHash: request.requestHash },
+      'Claimed approval request for execution by id (APPROVED -> EXECUTING)'
+    );
+    return request;
+  }
+
   static async markExecuted(id: string): Promise<ApprovalRequest | null> {
     const now = new Date();
     const rows = await prisma.$queryRaw<Record<string, unknown>[]>(
@@ -227,6 +252,24 @@ export class ApprovalRepository {
     const request = this.mapSnakeToCamel(rows[0]);
     logger.info({ approvalRequestId: id, error }, 'Approval request failed (EXECUTING -> FAILED)');
     return request;
+  }
+
+  static async touchExecuting(id: string): Promise<ApprovalRequest | null> {
+    const rows = await prisma.$queryRaw<Record<string, unknown>[]>(
+      Prisma.sql`
+        UPDATE approval_request
+        SET updated_at = NOW()
+        WHERE id = ${id}
+          AND status = 'EXECUTING'
+        RETURNING *
+      `
+    );
+
+    if (rows.length === 0) {
+      return null;
+    }
+
+    return this.mapSnakeToCamel(rows[0]);
   }
 
   static async listPending(
@@ -284,6 +327,37 @@ export class ApprovalRepository {
     });
   }
 
+  static async findActiveByRequestHash(requestHash: string): Promise<ApprovalRequest | null> {
+    return await approvalRequestModel.approvalRequest.findFirst({
+      where: {
+        requestHash,
+        status: { in: ['PENDING', 'APPROVED', 'EXECUTING'] },
+        expiresAt: { gt: new Date() }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+  }
+
+  static async countRecentCreationsByTool(
+    userId: string,
+    serverId: string | null,
+    toolName: string,
+    since: Date
+  ): Promise<number> {
+    const rows = await prisma.$queryRaw<Array<{ count: bigint }>>(
+      Prisma.sql`
+        SELECT COUNT(*)::bigint AS count
+        FROM approval_request
+        WHERE user_id = ${userId}
+          AND tool_name = ${toolName}
+          AND (${serverId}::varchar IS NULL AND server_id IS NULL OR server_id = ${serverId})
+          AND created_at >= ${since}
+      `
+    );
+
+    return Number(rows[0]?.count ?? 0n);
+  }
+
   static async expireStale(): Promise<ApprovalRequest[]> {
     const rows = await prisma.$queryRaw<Record<string, unknown>[]>(
       Prisma.sql`
@@ -291,6 +365,22 @@ export class ApprovalRepository {
         SET status = 'EXPIRED', updated_at = NOW()
         WHERE status IN ('PENDING', 'APPROVED')
           AND expires_at <= NOW()
+        RETURNING *
+      `
+    );
+
+    return rows.map((row) => this.mapSnakeToCamel(row));
+  }
+
+  static async recoverStaleExecuting(staleBefore: Date): Promise<ApprovalRequest[]> {
+    const rows = await prisma.$queryRaw<Record<string, unknown>[]>(
+      Prisma.sql`
+        UPDATE approval_request
+        SET status = 'FAILED',
+            execution_error = 'Stale EXECUTING approval recovered by sweeper timeout',
+            updated_at = NOW()
+        WHERE status = 'EXECUTING'
+          AND updated_at <= ${staleBefore}
         RETURNING *
       `
     );

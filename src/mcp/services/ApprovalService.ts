@@ -24,6 +24,9 @@ const logger = createLogger('ApprovalService');
 
 /** Default approval expiry: 10 minutes */
 const DEFAULT_EXPIRY_MS = 10 * 60 * 1000;
+const APPROVAL_CREATE_RATE_LIMIT_COUNT = 10;
+const APPROVAL_CREATE_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const EXECUTING_STALE_TIMEOUT_MS = 10 * 60 * 1000;
 
 export interface CreateApprovalInput {
   userId: string;
@@ -50,6 +53,13 @@ export interface ApprovalClaimResult {
   claimed: boolean;
   /** The claimed approval request */
   request: ApprovalRequest | null;
+}
+
+export class ApprovalRateLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ApprovalRateLimitError';
+  }
 }
 
 export class ApprovalService {
@@ -92,6 +102,27 @@ export class ApprovalService {
     const canonicalArgsJson = approvalRequestHasher.canonicalizeArgs(toolName, args);
     const canonicalArgs = JSON.parse(canonicalArgsJson) as Record<string, unknown>;
     const redactedArgs = this.redactArgs(args);
+
+    const existing = await ApprovalRepository.findActiveByRequestHash(requestHash);
+    if (existing) {
+      if (existing.status === ApprovalStatus.Approved) {
+        return { needsApproval: false, created: false, request: existing, requestHash };
+      }
+      return { needsApproval: true, created: false, request: existing, requestHash };
+    }
+
+    const recentCreates = await ApprovalRepository.countRecentCreationsByTool(
+      userId,
+      serverId,
+      toolName,
+      new Date(Date.now() - APPROVAL_CREATE_RATE_LIMIT_WINDOW_MS)
+    );
+
+    if (recentCreates >= APPROVAL_CREATE_RATE_LIMIT_COUNT) {
+      throw new ApprovalRateLimitError(
+        `Too many approval requests for ${toolName}. Please retry after 60 seconds.`
+      );
+    }
 
     const expiresAt = new Date(Date.now() + (expiresInMs ?? DEFAULT_EXPIRY_MS));
 
@@ -149,6 +180,22 @@ export class ApprovalService {
     return { claimed: true, request };
   }
 
+  async claimForExecutionById(approvalRequestId: string): Promise<ApprovalClaimResult> {
+    const request = await ApprovalRepository.claimApprovedForExecutionById(approvalRequestId);
+
+    if (!request) {
+      logger.debug({ approvalRequestId }, 'No APPROVED request to claim by id');
+      return { claimed: false, request: null };
+    }
+
+    logger.info(
+      { approvalRequestId: request.id, requestHash: request.requestHash },
+      'Claimed approval request for execution by id'
+    );
+
+    return { claimed: true, request };
+  }
+
   async decide(
     approvalRequestId: string,
     decision: 'APPROVED' | 'REJECTED',
@@ -180,6 +227,10 @@ export class ApprovalService {
     return ApprovalRepository.markFailed(id, error);
   }
 
+  async touchExecuting(id: string): Promise<ApprovalRequest | null> {
+    return ApprovalRepository.touchExecuting(id);
+  }
+
   async listPending(
     userId?: string | null,
     filters?: { serverId?: string; toolName?: string }
@@ -203,7 +254,20 @@ export class ApprovalService {
     return requests;
   }
 
-  startExpirySweeper(notifier: { notifyApprovalExpired: (userId: string, data: { id: string; toolName: string }) => void }): void {
+  async recoverStaleExecuting(): Promise<ApprovalRequest[]> {
+    const requests = await ApprovalRepository.recoverStaleExecuting(
+      new Date(Date.now() - EXECUTING_STALE_TIMEOUT_MS)
+    );
+    if (requests.length > 0) {
+      logger.warn({ count: requests.length }, 'Recovered stale EXECUTING approval requests');
+    }
+    return requests;
+  }
+
+  startExpirySweeper(notifier: {
+    notifyApprovalExpired: (userId: string, data: { id: string; toolName: string }) => void;
+    notifyApprovalFailed?: (userId: string, data: { id: string; toolName: string; error: string }) => void;
+  }): void {
     if (this.expirySweeper) {
       return;
     }
@@ -220,6 +284,27 @@ export class ApprovalService {
         })
         .catch((error) => {
           logger.error({ error }, 'Failed to run approval expiry sweeper');
+        });
+
+      void this.recoverStaleExecuting()
+        .then((recoveredRequests) => {
+          for (const request of recoveredRequests) {
+            if (notifier.notifyApprovalFailed) {
+              notifier.notifyApprovalFailed(request.userId, {
+                id: request.id,
+                toolName: request.toolName,
+                error: request.executionError ?? 'Stale executing request recovered',
+              });
+            } else {
+              notifier.notifyApprovalExpired(request.userId, {
+                id: request.id,
+                toolName: request.toolName,
+              });
+            }
+          }
+        })
+        .catch((error) => {
+          logger.error({ error }, 'Failed to recover stale EXECUTING approvals');
         });
     }, 60_000);
   }
