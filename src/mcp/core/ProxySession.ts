@@ -1,7 +1,7 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { RequestHandlerExtra, RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { RequestHandlerExtra, RequestOptions } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import {
   CallToolRequestSchema,
   CallToolResultSchema,
@@ -69,12 +69,15 @@ import {
   type ClientNotificationSchema,
   ErrorCode,
   McpError,
-} from "@modelcontextprotocol/sdk/types.js";
+} from '@modelcontextprotocol/sdk/types.js';
 
 import { ClientSession } from './ClientSession.js';
 import { ServerManager } from './ServerManager.js';
 import { LogService } from '../../log/LogService.js';
-import { getReverseRequestTimeout, ReverseRequestTimeoutError } from '../../config/reverseRequestConfig.js';
+import {
+  getReverseRequestTimeout,
+  ReverseRequestTimeoutError,
+} from '../../config/reverseRequestConfig.js';
 import { SessionLogger } from '../../log/SessionLogger.js';
 import { Request, Response } from 'express';
 import { PersistentEventStore } from './PersistentEventStore.js';
@@ -97,17 +100,20 @@ export class ProxySession {
   private downstreamClients: Map<string, Client> = new Map();
   private isInitialized: boolean = false;
   private eventStore: PersistentEventStore;
-  
+
   // RequestId mapper
   private requestIdMapper: RequestIdMapper;
-  
+
   // Progress tracking
-  private progressTrackers = new Map<string, {
-    serverId: string;
-    total?: number;
-    current?: number;
-  }>();
-  
+  private progressTrackers = new Map<
+    string,
+    {
+      serverId: string;
+      total?: number;
+      current?: number;
+    }
+  >();
+
   // Notification subscription management
   private notificationSubscriptions = new Map<string, Set<string>>();
 
@@ -125,7 +131,7 @@ export class ProxySession {
     private clientSession: ClientSession,
     private sessionLogger: SessionLogger,
     eventStore: PersistentEventStore,
-    private onclose: (sessionId: string) => Promise<void>
+    private onclose: (sessionId: string) => Promise<void>,
   ) {
     // Initialize logger (needed in constructor because sessionId is required)
     this.logger = createLogger('ProxySession', { sessionId: this.sessionId });
@@ -134,19 +140,19 @@ export class ProxySession {
 
     // Initialize MCP Server instance
     this.upstreamServer = new Server(
-      { 
+      {
         name: APP_INFO.name,
-        version: APP_INFO.version
+        version: APP_INFO.version,
       },
       {
         capabilities: {
-          tools: {listChanged: true},
-          resources: {listChanged: true, subscribe: true},
-          prompts: {listChanged: true},
+          tools: { listChanged: true },
+          resources: { listChanged: true, subscribe: true },
+          prompts: { listChanged: true },
           completions: {},
-          logging: {}
-        }
-      }
+          logging: {},
+        },
+      },
     );
     // Set up request handlers
     this.setupRequestHandlers();
@@ -156,7 +162,6 @@ export class ProxySession {
    * Set up all MCP request handlers
    */
   private setupRequestHandlers(): void {
-
     this.upstreamServer.oninitialized = () => {
       this.logger.info({ userId: this.userId }, 'ProxySession initialized');
 
@@ -167,68 +172,80 @@ export class ProxySession {
     // Tools
     this.upstreamServer.setRequestHandler(
       ListToolsRequestSchema,
-      async (request: ListToolsRequest, extra: RequestHandlerExtra<any, any>) => this.handleToolsList(request, extra)
+      async (request: ListToolsRequest, extra: RequestHandlerExtra<any, any>) =>
+        this.handleToolsList(request, extra),
     );
 
     this.upstreamServer.setRequestHandler(
       CallToolRequestSchema,
-      async (request: CallToolRequest, extra: RequestHandlerExtra<any, any>) => this.handleToolCall(request, extra)
+      async (request: CallToolRequest, extra: RequestHandlerExtra<any, any>) =>
+        this.handleToolCall(request, extra),
     );
 
     // Resources
     this.upstreamServer.setRequestHandler(
       ListResourcesRequestSchema,
-      async (request: ListResourcesRequest, extra: RequestHandlerExtra<any, any>) => this.handleResourcesList(request, extra)
+      async (request: ListResourcesRequest, extra: RequestHandlerExtra<any, any>) =>
+        this.handleResourcesList(request, extra),
     );
 
     this.upstreamServer.setRequestHandler(
       ListResourceTemplatesRequestSchema,
-      async (request: ListResourceTemplatesRequest, extra: RequestHandlerExtra<any, any>) => this.handleResourcesTemplatesList(request, extra)
+      async (request: ListResourceTemplatesRequest, extra: RequestHandlerExtra<any, any>) =>
+        this.handleResourcesTemplatesList(request, extra),
     );
 
     this.upstreamServer.setRequestHandler(
       ReadResourceRequestSchema,
-      async (request: ReadResourceRequest, extra: RequestHandlerExtra<any, any>) => this.handleResourceRead(request, extra)
+      async (request: ReadResourceRequest, extra: RequestHandlerExtra<any, any>) =>
+        this.handleResourceRead(request, extra),
     );
 
     // Resource subscriptions
     this.upstreamServer.setRequestHandler(
       SubscribeRequestSchema,
-      async (request: SubscribeRequest, extra: RequestHandlerExtra<any, any>) => this.handleSubscribe(request, extra)
+      async (request: SubscribeRequest, extra: RequestHandlerExtra<any, any>) =>
+        this.handleSubscribe(request, extra),
     );
 
     this.upstreamServer.setRequestHandler(
       UnsubscribeRequestSchema,
-      async (request: UnsubscribeRequest, extra: RequestHandlerExtra<any, any>) => this.handleUnsubscribe(request, extra)
+      async (request: UnsubscribeRequest, extra: RequestHandlerExtra<any, any>) =>
+        this.handleUnsubscribe(request, extra),
     );
 
     // Prompts
     this.upstreamServer.setRequestHandler(
       ListPromptsRequestSchema,
-      async (request: ListPromptsRequest, extra: RequestHandlerExtra<any, any>) => this.handlePromptsList(request, extra)
+      async (request: ListPromptsRequest, extra: RequestHandlerExtra<any, any>) =>
+        this.handlePromptsList(request, extra),
     );
 
     this.upstreamServer.setRequestHandler(
       GetPromptRequestSchema,
-      async (request: GetPromptRequest, extra: RequestHandlerExtra<any, any>) => this.handlePromptGet(request, extra)
+      async (request: GetPromptRequest, extra: RequestHandlerExtra<any, any>) =>
+        this.handlePromptGet(request, extra),
     );
 
     // Completion
     this.upstreamServer.setRequestHandler(
       CompleteRequestSchema,
-      async (request: CompleteRequest, extra: RequestHandlerExtra<any, any>) => this.handleComplete(request, extra)
+      async (request: CompleteRequest, extra: RequestHandlerExtra<any, any>) =>
+        this.handleComplete(request, extra),
     );
 
     // Logging
     this.upstreamServer.setRequestHandler(
       SetLevelRequestSchema,
-      async (request: SetLevelRequest, extra: RequestHandlerExtra<any, any>) => this.handleSetLoggingLevel(request, extra)
+      async (request: SetLevelRequest, extra: RequestHandlerExtra<any, any>) =>
+        this.handleSetLoggingLevel(request, extra),
     );
 
     // Ping
     this.upstreamServer.setRequestHandler(
       PingRequestSchema,
-      async (request: PingRequest, extra: RequestHandlerExtra<any, any>) => this.handlePing(request, extra)
+      async (request: PingRequest, extra: RequestHandlerExtra<any, any>) =>
+        this.handlePing(request, extra),
     );
   }
 
@@ -236,13 +253,14 @@ export class ProxySession {
     if (this.clientSupportsRoots()) {
       this.upstreamServer.setNotificationHandler(
         RootsListChangedNotificationSchema,
-        async (notification: RootsListChangedNotification) => this.handleRootsListChanged(notification)
+        async (notification: RootsListChangedNotification) =>
+          this.handleRootsListChanged(notification),
       );
     }
 
     this.upstreamServer.setNotificationHandler(
       CancelledNotificationSchema,
-      async (notification: CancelledNotification) => this.handleCancelledNotification(notification)
+      async (notification: CancelledNotification) => this.handleCancelledNotification(notification),
     );
 
     // this.upstreamServer.setNotificationHandler(
@@ -267,15 +285,22 @@ export class ProxySession {
             this.clientSession.capabilities = this.upstreamServer.getClientCapabilities();
             this.clientSession.clientInfo = this.upstreamServer.getClientVersion();
 
-            this.logger.info({ sessionId:sessionId, clientInfo: this.clientSession.clientInfo, capabilities: this.clientSession.capabilities }, 'Session initialized');
+            this.logger.info(
+              {
+                sessionId: sessionId,
+                clientInfo: this.clientSession.clientInfo,
+                capabilities: this.clientSession.capabilities,
+              },
+              'Session initialized',
+            );
             this.isInitialized = true;
           },
           onsessionclosed: async (sessionId: string) => {
             this.logger.info({ sessionId }, 'Session closed');
             this.triggerOnClose(sessionId);
-          }
+          },
         });
-        
+
         transport.onclose = () => {
           //TODO: Log event
           this.triggerOnClose(this.sessionId);
@@ -328,7 +353,7 @@ export class ProxySession {
    */
   private async handleToolsList(
     request: ListToolsRequest,
-    extra: RequestHandlerExtra<any, any>
+    extra: RequestHandlerExtra<any, any>,
   ): Promise<ListToolsResult> {
     this.logger.debug('Handling tools/list');
 
@@ -354,7 +379,7 @@ export class ProxySession {
   private async handleToolCall(
     request: CallToolRequest,
     extra: RequestHandlerExtra<any, any>,
-    retryCount: number = 0
+    retryCount: number = 0,
   ): Promise<CallToolResult> {
     const startTime = Date.now();
     const toolName = request.params.name;
@@ -410,7 +435,10 @@ export class ProxySession {
     // Ensure server is available (lazy start)
     await ServerManager.instance.ensureServerAvailable(result.serverID, this.clientSession.userId);
 
-    const targetServerContext = ServerManager.instance.getServerContext(result.serverID, this.clientSession.userId);
+    const targetServerContext = ServerManager.instance.getServerContext(
+      result.serverID,
+      this.clientSession.userId,
+    );
 
     // Get downstream connection
     const client = targetServerContext?.connection;
@@ -529,14 +557,14 @@ export class ProxySession {
 
         this.logger.info(
           { approvalRequestId: approvalCheck.request!.id, toolName: result.originalName },
-          'Waiting for approval decision'
+          'Waiting for approval decision',
         );
 
         const waitResult = await this.waitForApproval(
           approvalCheck.request!.id,
           extra.signal,
           request.params?._meta?.progressToken,
-          originalRequestId
+          originalRequestId,
         );
 
         if (waitResult.status === 'rejected') {
@@ -558,12 +586,29 @@ export class ProxySession {
         }
 
         if (waitResult.status !== 'approved') {
+          const replayResult = await this.tryBuildReplayToolResult(approvalCheck.request!.id);
+          if (replayResult) {
+            await this.sessionLogger.logClientRequest({
+              action: MCPEventLogType.RequestTool,
+              serverId: result.serverID,
+              upstreamRequestId: String(originalRequestId),
+              uniformRequestId,
+              requestParams: request.params,
+              responseResult: replayResult,
+              duration: Date.now() - startTime,
+              statusCode: replayResult.isError ? 500 : 200,
+            });
+            return replayResult;
+          }
+
           const nonExecutedSummaryByStatus: Record<string, string> = {
             timeout: 'Approval is still pending and this tool call timed out before execution.',
             expired: 'Approval request expired before a decision. This tool call did not execute.',
             aborted: 'Client cancelled while waiting for approval. This tool call did not execute.',
-            executing: 'Execution has started in another session. This call did not execute the tool.',
-            executed: 'This request already executed in another session. This call did not execute the tool.',
+            executing:
+              'Execution has started in another session. This call did not execute the tool.',
+            executed:
+              'This request already executed in another session. This call did not execute the tool.',
             failed: `Execution failed in another session${waitResult.decisionReason ? `: ${waitResult.decisionReason}` : '.'}`,
           };
 
@@ -599,7 +644,7 @@ export class ProxySession {
 
         this.logger.info(
           { approvalRequestId: approvalCheck.request!.id, toolName: result.originalName },
-          'Approval granted, proceeding with execution'
+          'Approval granted, proceeding with execution',
         );
       }
 
@@ -607,6 +652,21 @@ export class ProxySession {
       if (!claimResult.claimed) {
         const latest = await approvalService.getById(approvalCheck.request!.id).catch(() => null);
         const waitStatus = this.mapApprovalStatusToWaitStatus(latest?.status);
+        const replayResult = await this.tryBuildReplayToolResult(approvalCheck.request!.id);
+        if (replayResult) {
+          await this.sessionLogger.logClientRequest({
+            action: MCPEventLogType.RequestTool,
+            serverId: result.serverID,
+            upstreamRequestId: String(originalRequestId),
+            uniformRequestId,
+            requestParams: request.params,
+            responseResult: replayResult,
+            duration: Date.now() - startTime,
+            statusCode: replayResult.isError ? 500 : 200,
+          });
+          return replayResult;
+        }
+
         const claimMsg = this.buildApprovalOutcomeMessage({
           approvalRequestId: approvalCheck.request!.id,
           resumeToken: approvalCheck.request!.id,
@@ -616,7 +676,8 @@ export class ProxySession {
           policyVersion: policyResult.policyVersion,
           kind: 'approval_pending',
           status: waitStatus,
-          summary: 'Execution is already in progress or completed elsewhere. This call did not execute the tool.',
+          summary:
+            'Execution is already in progress or completed elsewhere. This call did not execute the tool.',
         });
 
         await this.sessionLogger.logClientRequest({
@@ -644,13 +705,13 @@ export class ProxySession {
     const proxyRequestId = this.requestIdMapper.registerClientRequest(
       originalRequestId,
       request.method,
-      result.serverID
+      result.serverID,
     );
 
     // Deep copy request and inject proxyContext for reverse request routing
     const proxyContext: ProxyContext = {
       proxyRequestId: proxyRequestId,
-      uniformRequestId: uniformRequestId
+      uniformRequestId: uniformRequestId,
     };
 
     const copyParams = {
@@ -658,18 +719,21 @@ export class ProxySession {
       name: result.originalName,
       _meta: {
         ...request.params._meta,
-        proxyContext: proxyContext
-      }
+        proxyContext: proxyContext,
+      },
     };
 
-    this.logger.debug({
-      originalRequestId,
-      proxyRequestId,
-      uniformRequestId,
-      toolName,
-      serverId: result.serverID,
-      method: request.method
-    }, 'Registering tool call request');
+    this.logger.debug(
+      {
+        originalRequestId,
+        proxyRequestId,
+        uniformRequestId,
+        toolName,
+        serverId: result.serverID,
+        method: request.method,
+      },
+      'Registering tool call request',
+    );
 
     let isReconnected: boolean | undefined;
 
@@ -681,14 +745,10 @@ export class ProxySession {
       }
 
       // Forward request to downstream server, passing signal and proxyRequestId
-      const serverResult = (await client.callTool(
-        copyParams,
-        CallToolResultSchema,
-        {
-          signal: extra.signal,  // Pass cancellation signal
-          relatedRequestId: proxyRequestId  // Use proxyRequestId as related ID
-        }
-      )) as CallToolResult;
+      const serverResult = (await client.callTool(copyParams, CallToolResultSchema, {
+        signal: extra.signal, // Pass cancellation signal
+        relatedRequestId: proxyRequestId, // Use proxyRequestId as related ID
+      })) as CallToolResult;
 
       targetServerContext.clearTimeout();
 
@@ -704,23 +764,34 @@ export class ProxySession {
         statusCode: serverResult.isError ? 500 : 200,
       });
 
-
       if (approvalRequestId) {
         if (serverResult.isError === true) {
-          const failedReq = await approvalService.markFailed(approvalRequestId, 'Tool returned error').catch(() => null);
+          const failedReq = await approvalService
+            .markFailed(approvalRequestId, 'Tool returned error')
+            .catch(() => null);
           if (failedReq) {
             socketNotifier.notifyApprovalFailed(this.userId, {
               id: failedReq.id,
               toolName: result.originalName,
               error: 'Tool returned error',
+              resumeToken: failedReq.id,
+              executionResultAvailable: false,
             });
           }
         } else {
-          const executedReq = await approvalService.markExecuted(approvalRequestId).catch(() => null);
+          const executedReq = await approvalService
+            .markExecuted(approvalRequestId, serverResult)
+            .catch(() => null);
           if (executedReq) {
+            const replayPayload = this.extractReplayCallToolResult(executedReq.executionResult);
             socketNotifier.notifyApprovalExecuted(this.userId, {
               id: executedReq.id,
               toolName: result.originalName,
+              resumeToken: executedReq.id,
+              executionResultAvailable: replayPayload !== null,
+              executionResultPreview: replayPayload
+                ? this.buildExecutionResultPreview(replayPayload)
+                : null,
             });
           }
         }
@@ -747,12 +818,16 @@ export class ProxySession {
       });
 
       if (approvalRequestId) {
-        const failedReq = await approvalService.markFailed(approvalRequestId, errorMsg).catch(() => null);
+        const failedReq = await approvalService
+          .markFailed(approvalRequestId, errorMsg)
+          .catch(() => null);
         if (failedReq) {
           socketNotifier.notifyApprovalFailed(this.userId, {
             id: failedReq.id,
             toolName: result.originalName,
             error: errorMsg,
+            resumeToken: failedReq.id,
+            executionResultAvailable: false,
           });
         }
         approvalRequestId = null;
@@ -767,7 +842,7 @@ export class ProxySession {
       const errorResult: CallToolResult = {
         content: [
           {
-            type: "text",
+            type: 'text',
             text: errorMsg,
           },
         ],
@@ -797,7 +872,15 @@ export class ProxySession {
     progressToken?: string | number,
     relatedRequestId?: string | number,
   ): Promise<{
-    status: 'approved' | 'rejected' | 'timeout' | 'expired' | 'aborted' | 'executing' | 'executed' | 'failed';
+    status:
+      | 'approved'
+      | 'rejected'
+      | 'timeout'
+      | 'expired'
+      | 'aborted'
+      | 'executing'
+      | 'executed'
+      | 'failed';
     decisionReason?: string | null;
   }> {
     const deadline = Date.now() + ProxySession.APPROVAL_WAIT_TIMEOUT_MS;
@@ -833,10 +916,20 @@ export class ProxySession {
       }
 
       // Abortable sleep with proper listener cleanup
-      await new Promise<void>(resolve => {
-        const onTimeout = () => { signal?.removeEventListener('abort', onAbort); resolve(); };
-        const onAbort = () => { signal?.removeEventListener('abort', onAbort); clearTimeout(timer); resolve(); };
-        const timer = setTimeout(onTimeout, Math.min(ProxySession.APPROVAL_POLL_INTERVAL_MS, remainingMs));
+      await new Promise<void>((resolve) => {
+        const onTimeout = () => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve();
+        };
+        const onAbort = () => {
+          signal?.removeEventListener('abort', onAbort);
+          clearTimeout(timer);
+          resolve();
+        };
+        const timer = setTimeout(
+          onTimeout,
+          Math.min(ProxySession.APPROVAL_POLL_INTERVAL_MS, remainingMs),
+        );
         signal?.addEventListener('abort', onAbort, { once: true });
       });
 
@@ -857,19 +950,27 @@ export class ProxySession {
     approvalRequestId: string,
     unknownStatusWarned: boolean,
   ): Promise<{
-    result: { status: 'approved' | 'rejected' | 'expired' | 'executed' | 'failed'; decisionReason?: string | null } | null;
+    result: {
+      status: 'approved' | 'rejected' | 'expired' | 'executed' | 'failed';
+      decisionReason?: string | null;
+    } | null;
     waitState: 'pending' | 'executing';
     unknownStatusWarned: boolean;
   }> {
     try {
       const request = await approvalService.getById(approvalRequestId);
-      if (!request) return { result: { status: 'expired' }, waitState: 'pending', unknownStatusWarned };
+      if (!request)
+        return { result: { status: 'expired' }, waitState: 'pending', unknownStatusWarned };
 
       switch (request.status) {
         case ApprovalStatus.Approved:
           return { result: { status: 'approved' }, waitState: 'pending', unknownStatusWarned };
         case ApprovalStatus.Rejected:
-          return { result: { status: 'rejected', decisionReason: request.decisionReason }, waitState: 'pending', unknownStatusWarned };
+          return {
+            result: { status: 'rejected', decisionReason: request.decisionReason },
+            waitState: 'pending',
+            unknownStatusWarned,
+          };
         case ApprovalStatus.Expired:
           return { result: { status: 'expired' }, waitState: 'pending', unknownStatusWarned };
         case ApprovalStatus.Pending:
@@ -879,10 +980,17 @@ export class ProxySession {
         case ApprovalStatus.Executed:
           return { result: { status: 'executed' }, waitState: 'executing', unknownStatusWarned };
         case ApprovalStatus.Failed:
-          return { result: { status: 'failed', decisionReason: request.executionError }, waitState: 'executing', unknownStatusWarned };
+          return {
+            result: { status: 'failed', decisionReason: request.executionError },
+            waitState: 'executing',
+            unknownStatusWarned,
+          };
         default:
           if (!unknownStatusWarned) {
-            this.logger.warn({ approvalRequestId, status: request.status }, 'Unknown approval status encountered');
+            this.logger.warn(
+              { approvalRequestId, status: request.status },
+              'Unknown approval status encountered',
+            );
           }
           return { result: null, waitState: 'pending', unknownStatusWarned: true };
       }
@@ -898,21 +1006,26 @@ export class ProxySession {
     progress?: number,
   ): Promise<void> {
     try {
-      await this.upstreamServer.notification({
-        method: 'notifications/progress',
-        params: {
-          progressToken,
-          progress: progress ?? 0,
-        }
-      }, {
-        relatedRequestId,
-      });
+      await this.upstreamServer.notification(
+        {
+          method: 'notifications/progress',
+          params: {
+            progressToken,
+            progress: progress ?? 0,
+          },
+        },
+        {
+          relatedRequestId,
+        },
+      );
     } catch (error) {
       this.logger.debug({ error, progressToken }, 'Failed to send approval progress notification');
     }
   }
 
-  private mapApprovalStatusToWaitStatus(status?: string): 'timeout' | 'expired' | 'aborted' | 'executing' | 'executed' | 'failed' {
+  private mapApprovalStatusToWaitStatus(
+    status?: string,
+  ): 'timeout' | 'expired' | 'aborted' | 'executing' | 'executed' | 'failed' {
     switch (status) {
       case ApprovalStatus.Expired:
         return 'expired';
@@ -993,12 +1106,83 @@ export class ProxySession {
     }
   }
 
+  private async tryBuildReplayToolResult(
+    approvalRequestId: string,
+  ): Promise<CallToolResult | null> {
+    const resultRequest = await approvalService.getResultById(approvalRequestId).catch(() => null);
+    if (!resultRequest) {
+      return null;
+    }
+
+    const replayPayload = this.extractReplayCallToolResult(resultRequest.executionResult);
+    if (resultRequest.status === ApprovalStatus.Executed && replayPayload) {
+      return replayPayload;
+    }
+
+    if (
+      resultRequest.status === ApprovalStatus.Failed &&
+      replayPayload &&
+      replayPayload.isError === true
+    ) {
+      return replayPayload;
+    }
+
+    if (resultRequest.status === ApprovalStatus.Failed) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: resultRequest.executionError ?? 'Execution failed in another request.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    return null;
+  }
+
+  private extractReplayCallToolResult(executionResult: unknown): CallToolResult | null {
+    if (!executionResult || typeof executionResult !== 'object' || Array.isArray(executionResult)) {
+      return null;
+    }
+
+    const candidate = executionResult as Partial<CallToolResult>;
+    if (!Array.isArray(candidate.content)) {
+      return null;
+    }
+
+    const hasInvalidContentItem = candidate.content.some(
+      (item) =>
+        !item || typeof item !== 'object' || typeof (item as { type?: unknown }).type !== 'string',
+    );
+    if (hasInvalidContentItem) {
+      return null;
+    }
+
+    return {
+      content: candidate.content,
+      isError: candidate.isError === true,
+      _meta: candidate._meta,
+      structuredContent: candidate.structuredContent,
+    };
+  }
+
+  private buildExecutionResultPreview(result: CallToolResult): string | null {
+    const firstText = result.content.find((item) => item.type === 'text');
+    if (!firstText || typeof firstText.text !== 'string') {
+      return null;
+    }
+
+    return firstText.text.slice(0, 180);
+  }
+
   /**
    * Handle resources/list request - aggregate resources from all servers
    */
   private async handleResourcesList(
     request: ListResourcesRequest,
-    _extra: RequestHandlerExtra<any, any>
+    _extra: RequestHandlerExtra<any, any>,
   ): Promise<ListResourcesResult> {
     this.logger.debug('Handling resources/list');
 
@@ -1010,7 +1194,9 @@ export class ProxySession {
       upstreamRequestId: String(_extra.requestId),
       uniformRequestId: LogService.getInstance().generateUniformRequestId(this.sessionId),
       requestParams: request.params,
-      responseResult: { resources: allResources.resources.map((resource: Resource) => resource.uri) },
+      responseResult: {
+        resources: allResources.resources.map((resource: Resource) => resource.uri),
+      },
       duration: Date.now() - startTime,
       statusCode: 200,
     });
@@ -1020,7 +1206,7 @@ export class ProxySession {
 
   private async handleResourcesTemplatesList(
     request: ListResourceTemplatesRequest,
-    _extra: RequestHandlerExtra<any, any>
+    _extra: RequestHandlerExtra<any, any>,
   ): Promise<ListResourceTemplatesResult> {
     this.logger.debug('Handling resources/templates/list');
 
@@ -1032,7 +1218,11 @@ export class ProxySession {
       upstreamRequestId: String(_extra.requestId),
       uniformRequestId: LogService.getInstance().generateUniformRequestId(this.sessionId),
       requestParams: request.params,
-      responseResult: { resourceTemplates: allResourceTemplates.resourceTemplates.map((resourceTemplate: ResourceTemplate) => resourceTemplate.name) },
+      responseResult: {
+        resourceTemplates: allResourceTemplates.resourceTemplates.map(
+          (resourceTemplate: ResourceTemplate) => resourceTemplate.name,
+        ),
+      },
       duration: Date.now() - startTime,
       statusCode: 200,
     });
@@ -1046,7 +1236,7 @@ export class ProxySession {
   private async handleResourceRead(
     request: ReadResourceRequest,
     extra: RequestHandlerExtra<any, any>,
-    retryCount: number = 0
+    retryCount: number = 0,
   ): Promise<ReadResourceResult> {
     const startTime = Date.now();
     const resourceUri = request.params.uri;
@@ -1099,7 +1289,10 @@ export class ProxySession {
     await ServerManager.instance.ensureServerAvailable(result.serverID, this.clientSession.userId);
 
     // Routing decision
-    const targetServer = ServerManager.instance.getServerContext(result.serverID, this.clientSession.userId);
+    const targetServer = ServerManager.instance.getServerContext(
+      result.serverID,
+      this.clientSession.userId,
+    );
 
     if (!targetServer) {
       const errorTime = Date.now();
@@ -1144,30 +1337,29 @@ export class ProxySession {
     const proxyRequestId = this.requestIdMapper.registerClientRequest(
       originalRequestId,
       request.method,
-      result.serverID
+      result.serverID,
     );
 
     // Deep copy request and inject proxyContext for reverse request routing
     const proxyContext: ProxyContext = {
       proxyRequestId: proxyRequestId,
-      uniformRequestId: uniformRequestId
+      uniformRequestId: uniformRequestId,
     };
 
     const requestCopy = JSON.parse(JSON.stringify(request));
     requestCopy.params.uri = result.originalName;
     requestCopy.params._meta = {
       ...requestCopy.params._meta,
-      proxyContext: proxyContext
+      proxyContext: proxyContext,
     };
 
     let isReconnected: boolean | undefined;
 
     try {
-
       // Forward request, passing signal and proxyRequestId
       const serverResult = await client.readResource(requestCopy.params, {
-        signal: extra.signal,  // Pass cancellation signal
-        relatedRequestId: proxyRequestId  // Use proxyRequestId as related ID
+        signal: extra.signal, // Pass cancellation signal
+        relatedRequestId: proxyRequestId, // Use proxyRequestId as related ID
       });
 
       targetServer.clearTimeout();
@@ -1196,8 +1388,8 @@ export class ProxySession {
 
       // Log error response to client
       await this.sessionLogger.logClientRequest({
-        action: MCPEventLogType.ResponseResource,        
-        serverId: targetServer.serverEntity.serverId,        
+        action: MCPEventLogType.ResponseResource,
+        serverId: targetServer.serverEntity.serverId,
         upstreamRequestId: String(originalRequestId),
         uniformRequestId: uniformRequestId,
         requestParams: request.params,
@@ -1222,7 +1414,7 @@ export class ProxySession {
    */
   private async handleSubscribe(
     request: SubscribeRequest,
-    extra: RequestHandlerExtra<any, any>
+    extra: RequestHandlerExtra<any, any>,
   ): Promise<EmptyResult> {
     const startTime = Date.now();
     const resourceUri = request.params.uri;
@@ -1277,7 +1469,7 @@ export class ProxySession {
         result.serverID,
         result.originalName,
         this.sessionId,
-        this.userId
+        this.userId,
       );
 
       // Log successful subscription
@@ -1317,7 +1509,7 @@ export class ProxySession {
    */
   private async handleUnsubscribe(
     request: UnsubscribeRequest,
-    extra: RequestHandlerExtra<any, any>
+    extra: RequestHandlerExtra<any, any>,
   ): Promise<EmptyResult> {
     const startTime = Date.now();
     const resourceUri = request.params.uri;
@@ -1353,7 +1545,7 @@ export class ProxySession {
         result.serverID,
         result.originalName,
         this.sessionId,
-        this.userId
+        this.userId,
       );
 
       // Log successful unsubscription
@@ -1393,15 +1585,15 @@ export class ProxySession {
    */
   private async handlePromptsList(
     request: ListPromptsRequest,
-    _extra: RequestHandlerExtra<any, any>
+    _extra: RequestHandlerExtra<any, any>,
   ): Promise<ListPromptsResult> {
     this.logger.debug('Handling prompts/list');
 
     const startTime = Date.now();
     const allPrompts = this.clientSession.listPrompts();
-    
+
     await this.sessionLogger.logClientRequest({
-      action: MCPEventLogType.ResponsePromptList,      
+      action: MCPEventLogType.ResponsePromptList,
       upstreamRequestId: String(_extra.requestId),
       uniformRequestId: LogService.getInstance().generateUniformRequestId(this.sessionId),
       requestParams: request.params,
@@ -1419,7 +1611,7 @@ export class ProxySession {
   private async handlePromptGet(
     request: GetPromptRequest,
     extra: RequestHandlerExtra<any, any>,
-    retryCount: number = 0
+    retryCount: number = 0,
   ): Promise<GetPromptResult> {
     const promptName = request.params.name;
     this.logger.debug({ promptName }, 'Handling prompt get');
@@ -1439,10 +1631,7 @@ export class ProxySession {
         statusCode: 404,
       });
 
-      throw new McpError(
-        ErrorCode.InvalidParams,
-        `Invalid prompt name: ${promptName}`
-      );
+      throw new McpError(ErrorCode.InvalidParams, `Invalid prompt name: ${promptName}`);
     }
 
     // Permission check
@@ -1456,17 +1645,20 @@ export class ProxySession {
         duration: Date.now() - startTime,
         statusCode: 403,
       });
-      throw new McpError(
-        ErrorCode.InvalidParams,
-        `Permission denied for prompt: ${promptName}`
-      );
+      throw new McpError(ErrorCode.InvalidParams, `Permission denied for prompt: ${promptName}`);
     }
 
     // Ensure server is available (lazy start)
-    await ServerManager.instance.ensureServerAvailable(parseResult.serverID, this.clientSession.userId);
+    await ServerManager.instance.ensureServerAvailable(
+      parseResult.serverID,
+      this.clientSession.userId,
+    );
 
     // Routing decision
-    const targetServerContext = ServerManager.instance.getServerContext(parseResult.serverID, this.clientSession.userId);
+    const targetServerContext = ServerManager.instance.getServerContext(
+      parseResult.serverID,
+      this.clientSession.userId,
+    );
 
     if (!targetServerContext) {
       this.sessionLogger.logClientRequest({
@@ -1478,10 +1670,7 @@ export class ProxySession {
         duration: Date.now() - startTime,
         statusCode: 503,
       });
-      throw new McpError(
-        ErrorCode.InternalError,
-        `No server available for prompt: ${promptName}`
-      );
+      throw new McpError(ErrorCode.InternalError, `No server available for prompt: ${promptName}`);
     }
 
     // Get downstream connection
@@ -1497,24 +1686,21 @@ export class ProxySession {
         duration: Date.now() - startTime,
         statusCode: 503,
       });
-      throw new McpError(
-        ErrorCode.InternalError,
-        `No client available for prompt: ${promptName}`
-      );
+      throw new McpError(ErrorCode.InternalError, `No client available for prompt: ${promptName}`);
     }
-    
+
     // Use RequestIdMapper to generate unique proxy request ID
     const originalRequestId = extra.requestId;
     const proxyRequestId = this.requestIdMapper.registerClientRequest(
       originalRequestId,
       request.method,
-      parseResult.serverID
+      parseResult.serverID,
     );
 
     // Deep copy request and inject proxyContext for reverse request routing
     const proxyContext: ProxyContext = {
       proxyRequestId: proxyRequestId,
-      uniformRequestId: uniformRequestId
+      uniformRequestId: uniformRequestId,
     };
 
     let isReconnected: boolean | undefined;
@@ -1524,12 +1710,12 @@ export class ProxySession {
       requestCopy.params.name = parseResult.originalName;
       requestCopy.params._meta = {
         ...requestCopy.params._meta,
-        proxyContext: proxyContext
+        proxyContext: proxyContext,
       };
       // Forward request, passing signal and proxyRequestId
       const result = await client.getPrompt(requestCopy.params, {
-        signal: extra.signal,  // Pass cancellation signal
-        relatedRequestId: proxyRequestId  // Use proxyRequestId as related ID
+        signal: extra.signal, // Pass cancellation signal
+        relatedRequestId: proxyRequestId, // Use proxyRequestId as related ID
       });
       targetServerContext.clearTimeout();
 
@@ -1581,7 +1767,7 @@ export class ProxySession {
   private async handleComplete(
     request: CompleteRequest,
     extra: RequestHandlerExtra<any, any>,
-    retryCount: number = 0
+    retryCount: number = 0,
   ): Promise<CompleteResult> {
     this.logger.debug('Handling completion');
     const startTime = Date.now();
@@ -1591,11 +1777,11 @@ export class ProxySession {
     let promptName: string;
     let action: MCPEventLogType;
     switch (request.params.ref.type) {
-      case "ref/prompt":
+      case 'ref/prompt':
         promptName = request.params.ref.name;
         action = MCPEventLogType.RequestPrompt;
         break;
-      case "ref/resource":
+      case 'ref/resource':
         promptName = request.params.ref.uri;
         action = MCPEventLogType.RequestResource;
         break;
@@ -1634,7 +1820,10 @@ export class ProxySession {
     await ServerManager.instance.ensureServerAvailable(result.serverID, this.clientSession.userId);
 
     // Routing decision
-    const targetServerContext = ServerManager.instance.getServerContext(result.serverID, this.clientSession.userId);
+    const targetServerContext = ServerManager.instance.getServerContext(
+      result.serverID,
+      this.clientSession.userId,
+    );
 
     if (!targetServerContext) {
       const errorTime = Date.now();
@@ -1649,10 +1838,7 @@ export class ProxySession {
         duration: errorTime - startTime,
         statusCode: 503,
       });
-      throw new McpError(
-        ErrorCode.InvalidParams,
-        `No server available for prompt: ${promptName}`,
-      );
+      throw new McpError(ErrorCode.InvalidParams, `No server available for prompt: ${promptName}`);
     }
 
     // Get downstream connection
@@ -1671,21 +1857,18 @@ export class ProxySession {
         duration: errorTime - startTime,
         statusCode: 503,
       });
-      throw new McpError(
-        ErrorCode.InvalidParams,
-        `No client available for prompt: ${promptName}`,
-      );
+      throw new McpError(ErrorCode.InvalidParams, `No client available for prompt: ${promptName}`);
     }
 
     // Deep copy request
     const requestCopy = JSON.parse(JSON.stringify(request)) as CompleteRequest;
     switch (request.params.ref.type) {
-      case "ref/prompt":
+      case 'ref/prompt':
         if ('name' in requestCopy.params.ref) {
           requestCopy.params.ref.name = result.originalName;
         }
         break;
-      case "ref/resource":
+      case 'ref/resource':
         if ('uri' in requestCopy.params.ref) {
           requestCopy.params.ref.uri = result.originalName;
         }
@@ -1695,7 +1878,7 @@ export class ProxySession {
     const proxyRequestId = this.requestIdMapper.registerClientRequest(
       originalRequestId,
       request.method,
-      result.serverID
+      result.serverID,
     );
 
     let isReconnected: boolean | undefined;
@@ -1754,7 +1937,7 @@ export class ProxySession {
    */
   private async handleSetLoggingLevel(
     request: SetLevelRequest,
-    extra: RequestHandlerExtra<any, any>
+    extra: RequestHandlerExtra<any, any>,
   ): Promise<EmptyResult> {
     this.logger.debug({ level: request.params.level }, 'Setting logging level');
 
@@ -1775,7 +1958,7 @@ export class ProxySession {
    */
   private async handlePing(
     request: PingRequest,
-    extra: RequestHandlerExtra<any, any>
+    extra: RequestHandlerExtra<any, any>,
   ): Promise<EmptyResult> {
     this.logger.debug('Ping received');
     return await this.upstreamServer.ping();
@@ -1796,14 +1979,14 @@ export class ProxySession {
 
       // Set SSE response headers
       const headers: Record<string, string> = {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
       };
 
       if (this.sessionId) {
-        headers["Mcp-Session-Id"] = this.sessionId;
-        headers["mcp-session-id"] = this.sessionId;
+        headers['Mcp-Session-Id'] = this.sessionId;
+        headers['mcp-session-id'] = this.sessionId;
       }
 
       res.writeHead(200, headers).flushHeaders();
@@ -1815,7 +1998,7 @@ export class ProxySession {
           if (!res.write(eventData)) {
             throw new Error('Failed to write SSE event');
           }
-        }
+        },
       });
 
       this.logger.info('Reconnection completed');
@@ -1823,7 +2006,7 @@ export class ProxySession {
       this.logger.error({ error }, 'Failed to handle reconnection');
       // Log error
       await this.sessionLogger.logError({
-        action: MCPEventLogType.ErrorInternal,        
+        action: MCPEventLogType.ErrorInternal,
         upstreamRequestId: lastEventId,
         uniformRequestId: LogService.getInstance().generateUniformRequestId(this.sessionId),
         error: String(error),
@@ -1888,7 +2071,7 @@ export class ProxySession {
       this.logger.error({ error, sessionId }, 'onclose callback failed');
     });
   }
-  
+
   /**
    * Generate unique request ID
    */
@@ -1915,7 +2098,10 @@ export class ProxySession {
   /**
    * Forward Sampling request to client
    */
-  public async forwardSamplingToClient(request: CreateMessageRequest, options?: RequestOptions): Promise<CreateMessageResult> {
+  public async forwardSamplingToClient(
+    request: CreateMessageRequest,
+    options?: RequestOptions,
+  ): Promise<CreateMessageResult> {
     this.logger.debug({
       relatedRequestId: options?.relatedRequestId,
       messageRole: request.params.messages?.[0]?.role,
@@ -1927,7 +2113,7 @@ export class ProxySession {
           return content.slice(0, 100);
         }
         return JSON.stringify(content).slice(0, 100);
-      })()
+      })(),
     });
 
     // Handle relatedRequestId mapping
@@ -1939,11 +2125,17 @@ export class ProxySession {
         // Replace with original requestId
         options = {
           ...options,
-          relatedRequestId: originalRequestId
+          relatedRequestId: originalRequestId,
         };
-        this.logger.debug({ proxyRequestId, originalRequestId }, '[Sampling] Successfully mapped relatedRequestId');
+        this.logger.debug(
+          { proxyRequestId, originalRequestId },
+          '[Sampling] Successfully mapped relatedRequestId',
+        );
       } else {
-        this.logger.warn({ proxyRequestId, stats: this.requestIdMapper.getStats() }, '[Sampling] CRITICAL: No original requestId found');
+        this.logger.warn(
+          { proxyRequestId, stats: this.requestIdMapper.getStats() },
+          '[Sampling] CRITICAL: No original requestId found',
+        );
       }
     } else {
       this.logger.warn('[Sampling] WARNING: No relatedRequestId provided in options');
@@ -1961,7 +2153,7 @@ export class ProxySession {
     try {
       return await Promise.race([
         this.upstreamServer.createMessage(request.params, options),
-        timeoutPromise
+        timeoutPromise,
       ]);
     } catch (error) {
       if (error instanceof ReverseRequestTimeoutError) {
@@ -1976,8 +2168,14 @@ export class ProxySession {
   /**
    * Forward Roots List request to client
    */
-  public async forwardRootsListToClient(request: ListRootsRequest, options?: RequestOptions): Promise<ListRootsResult> {
-    this.logger.debug({ relatedRequestId: options?.relatedRequestId }, 'Forwarding roots list request to client');
+  public async forwardRootsListToClient(
+    request: ListRootsRequest,
+    options?: RequestOptions,
+  ): Promise<ListRootsResult> {
+    this.logger.debug(
+      { relatedRequestId: options?.relatedRequestId },
+      'Forwarding roots list request to client',
+    );
 
     // Handle relatedRequestId mapping
     if (options?.relatedRequestId) {
@@ -1988,11 +2186,17 @@ export class ProxySession {
         // Replace with original requestId
         options = {
           ...options,
-          relatedRequestId: originalRequestId
+          relatedRequestId: originalRequestId,
         };
-        this.logger.debug({ proxyRequestId, originalRequestId }, '[ListRoots] Successfully mapped relatedRequestId');
+        this.logger.debug(
+          { proxyRequestId, originalRequestId },
+          '[ListRoots] Successfully mapped relatedRequestId',
+        );
       } else {
-        this.logger.warn({ proxyRequestId, stats: this.requestIdMapper.getStats() }, '[ListRoots] CRITICAL: No original requestId found');
+        this.logger.warn(
+          { proxyRequestId, stats: this.requestIdMapper.getStats() },
+          '[ListRoots] CRITICAL: No original requestId found',
+        );
       }
     } else {
       this.logger.warn('[ListRoots] WARNING: No relatedRequestId provided in options');
@@ -2010,7 +2214,7 @@ export class ProxySession {
     try {
       return await Promise.race([
         this.upstreamServer.listRoots(request.params, options),
-        timeoutPromise
+        timeoutPromise,
       ]);
     } catch (error) {
       if (error instanceof ReverseRequestTimeoutError) {
@@ -2025,9 +2229,13 @@ export class ProxySession {
   /**
    * Forward Elicitation request to client
    */
-  public async forwardElicitationToClient(request: ElicitRequest, options?: RequestOptions): Promise<ElicitResult> {
-    this.logger.debug({ relatedRequestId: options?.relatedRequestId,
-      requestedSchema: request.params
+  public async forwardElicitationToClient(
+    request: ElicitRequest,
+    options?: RequestOptions,
+  ): Promise<ElicitResult> {
+    this.logger.debug({
+      relatedRequestId: options?.relatedRequestId,
+      requestedSchema: request.params,
     });
 
     // Handle relatedRequestId mapping
@@ -2039,11 +2247,17 @@ export class ProxySession {
         // Replace with original requestId
         options = {
           ...options,
-          relatedRequestId: originalRequestId
+          relatedRequestId: originalRequestId,
         };
-        this.logger.debug({ proxyRequestId, originalRequestId }, '[Elicitation] Successfully mapped relatedRequestId');
+        this.logger.debug(
+          { proxyRequestId, originalRequestId },
+          '[Elicitation] Successfully mapped relatedRequestId',
+        );
       } else {
-        this.logger.warn({ proxyRequestId, stats: this.requestIdMapper.getStats() }, '[Elicitation] CRITICAL: No original requestId found');
+        this.logger.warn(
+          { proxyRequestId, stats: this.requestIdMapper.getStats() },
+          '[Elicitation] CRITICAL: No original requestId found',
+        );
       }
     } else {
       this.logger.warn('[Elicitation] WARNING: No relatedRequestId provided in options');
@@ -2061,7 +2275,7 @@ export class ProxySession {
     try {
       return await Promise.race([
         this.upstreamServer.elicitInput(request.params, options),
-        timeoutPromise
+        timeoutPromise,
       ]);
     } catch (error) {
       if (error instanceof ReverseRequestTimeoutError) {
@@ -2087,7 +2301,6 @@ export class ProxySession {
     this.clientSession.sendPromptListChanged();
   }
 
-
   /**
    * Check if client supports Roots
    */
@@ -2099,7 +2312,6 @@ export class ProxySession {
    * Handle Roots list changed notification
    */
   private async handleRootsListChanged(notification: RootsListChangedNotification): Promise<void> {
-    
     for (const server of this.clientSession.getAvailableServers()) {
       server.connection?.sendRootsListChanged();
     }
@@ -2111,7 +2323,6 @@ export class ProxySession {
   private async handleCancelledNotification(notification: CancelledNotification): Promise<void> {
     const requestId = notification.params.requestId;
     this.logger.debug({ requestId }, 'Handling cancellation');
-    
 
     // Get original requestId
     const proxyRequestId = this.requestIdMapper.getProxyRequestId(String(requestId));
@@ -2129,9 +2340,12 @@ export class ProxySession {
     }
 
     // Get target server connection
-    const serverContext = ServerManager.instance.getServerContext(mappingEntry.serverId, this.clientSession.userId);
+    const serverContext = ServerManager.instance.getServerContext(
+      mappingEntry.serverId,
+      this.clientSession.userId,
+    );
     const client = serverContext?.connection;
-    
+
     if (client) {
       try {
         // Deep copy notification
@@ -2140,11 +2354,17 @@ export class ProxySession {
 
         // Forward cancellation notification to downstream server
         await client.notification(notificationCopy, {
-          relatedRequestId: proxyRequestId
+          relatedRequestId: proxyRequestId,
         });
-        this.logger.debug({ requestId, serverId: mappingEntry.serverId }, 'Forwarded cancellation to server');
+        this.logger.debug(
+          { requestId, serverId: mappingEntry.serverId },
+          'Forwarded cancellation to server',
+        );
       } catch (error) {
-        this.logger.error({ error, serverId: mappingEntry.serverId }, 'Failed to forward cancellation to server');
+        this.logger.error(
+          { error, serverId: mappingEntry.serverId },
+          'Failed to forward cancellation to server',
+        );
       }
     }
   }
@@ -2155,7 +2375,7 @@ export class ProxySession {
   private async handleProgressNotification(notification: ProgressNotification): Promise<void> {
     const { progressToken, progress, total } = notification.params;
     this.logger.debug({ progress, total, progressToken }, 'Handling progress notification');
-    
+
     // Progress notifications are usually sent from server to client
     // If this comes from client (unlikely), it needs to be forwarded to the corresponding server
     // If this comes from server (via reverse channel), it's already in the correct position
@@ -2172,23 +2392,23 @@ export class ProxySession {
       // Convert proxyRequestId back to original requestId
       const proxyRequestId = String(notification.params.requestId);
       const originalRequestId = this.requestIdMapper.getOriginalRequestId(proxyRequestId);
-      
+
       if (!originalRequestId) {
         this.logger.warn({ proxyRequestId }, 'No original requestId found for proxy requestId');
         return;
       }
-      
+
       // Modify requestId in notification to original value
       const modifiedNotification = {
         ...notification,
         params: {
           ...notification.params,
-          requestId: originalRequestId
-        }
+          requestId: originalRequestId,
+        },
       };
-      
+
       await this.upstreamServer.notification(modifiedNotification, {
-        relatedRequestId: originalRequestId
+        relatedRequestId: originalRequestId,
       });
       this.logger.debug({ proxyRequestId, originalRequestId }, 'Forwarded cancellation to client');
     } catch (error) {
@@ -2205,23 +2425,23 @@ export class ProxySession {
       // progressToken is actually the proxyRequestId
       const proxyRequestId = String(notification.params.progressToken);
       const originalRequestId = this.requestIdMapper.getOriginalRequestId(proxyRequestId);
-      
+
       if (!originalRequestId) {
         this.logger.warn({ proxyRequestId }, 'No original requestId found for progress token');
         return;
       }
-      
+
       // Modify progressToken in notification to original value
       const modifiedNotification = {
         ...notification,
         params: {
           ...notification.params,
-          progressToken: originalRequestId
-        }
+          progressToken: originalRequestId,
+        },
       };
-      
+
       await this.upstreamServer.notification(modifiedNotification, {
-        relatedRequestId: originalRequestId
+        relatedRequestId: originalRequestId,
       });
       this.logger.debug({ proxyRequestId, originalRequestId }, 'Forwarded progress to client');
     } catch (error) {

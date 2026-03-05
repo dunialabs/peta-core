@@ -26,7 +26,10 @@ const logger = createLogger('ApprovalService');
 const DEFAULT_EXPIRY_MS = 10 * 60 * 1000;
 const APPROVAL_CREATE_RATE_LIMIT_COUNT = 10;
 const APPROVAL_CREATE_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const APPROVAL_CREATE_RATE_LIMIT_PER_HASH_COUNT = 3;
 const EXECUTING_STALE_TIMEOUT_MS = 10 * 60 * 1000;
+const MAX_EXECUTION_RESULT_BYTES = 64 * 1024;
+const MAX_EXECUTION_RESULT_PREVIEW_CHARS = 280;
 
 export interface CreateApprovalInput {
   userId: string;
@@ -89,14 +92,15 @@ export class ApprovalService {
    * @returns ApprovalCheckResult indicating whether approval is still needed
    */
   async checkOrCreateApproval(input: CreateApprovalInput): Promise<ApprovalCheckResult> {
-    const { userId, serverId, toolName, args, policyVersion, uniformRequestId, expiresInMs } = input;
+    const { userId, serverId, toolName, args, policyVersion, uniformRequestId, expiresInMs } =
+      input;
 
     const requestHash = approvalRequestHasher.computeHash(
       userId,
       serverId,
       toolName,
       args,
-      policyVersion
+      policyVersion,
     );
 
     const canonicalArgsJson = approvalRequestHasher.canonicalizeArgs(toolName, args);
@@ -111,16 +115,30 @@ export class ApprovalService {
       return { needsApproval: true, created: false, request: existing, requestHash };
     }
 
+    const rateLimitWindowStart = new Date(Date.now() - APPROVAL_CREATE_RATE_LIMIT_WINDOW_MS);
+
+    const recentCreatesByHash = await ApprovalRepository.countRecentCreationsByRequestHash(
+      userId,
+      requestHash,
+      rateLimitWindowStart,
+    );
+
+    if (recentCreatesByHash >= APPROVAL_CREATE_RATE_LIMIT_PER_HASH_COUNT) {
+      throw new ApprovalRateLimitError(
+        `Too many retries for this exact approval request. Please retry after 60 seconds.`,
+      );
+    }
+
     const recentCreates = await ApprovalRepository.countRecentCreationsByTool(
       userId,
       serverId,
       toolName,
-      new Date(Date.now() - APPROVAL_CREATE_RATE_LIMIT_WINDOW_MS)
+      rateLimitWindowStart,
     );
 
     if (recentCreates >= APPROVAL_CREATE_RATE_LIMIT_COUNT) {
       throw new ApprovalRateLimitError(
-        `Too many approval requests for ${toolName}. Please retry after 60 seconds.`
+        `Too many approval requests for ${toolName}. Please retry after 60 seconds.`,
       );
     }
 
@@ -143,14 +161,14 @@ export class ApprovalService {
     if (created) {
       logger.info(
         { approvalRequestId: request.id, requestHash, toolName, userId },
-        'Created new pending approval request'
+        'Created new pending approval request',
       );
     }
 
     if (!created && request.status === ApprovalStatus.Approved) {
       logger.info(
         { approvalRequestId: request.id, requestHash },
-        'Found existing APPROVED request, ready to claim'
+        'Found existing APPROVED request, ready to claim',
       );
       return { needsApproval: false, created: false, request, requestHash };
     }
@@ -174,7 +192,7 @@ export class ApprovalService {
 
     logger.info(
       { approvalRequestId: request.id, requestHash },
-      'Claimed approval request for execution'
+      'Claimed approval request for execution',
     );
 
     return { claimed: true, request };
@@ -190,7 +208,7 @@ export class ApprovalService {
 
     logger.info(
       { approvalRequestId: request.id, requestHash: request.requestHash },
-      'Claimed approval request for execution by id'
+      'Claimed approval request for execution by id',
     );
 
     return { claimed: true, request };
@@ -199,28 +217,29 @@ export class ApprovalService {
   async decide(
     approvalRequestId: string,
     decision: 'APPROVED' | 'REJECTED',
-    reason?: string
+    reason?: string,
   ): Promise<ApprovalRequest | null> {
     const request = await ApprovalRepository.decide(approvalRequestId, decision, reason);
 
     if (!request) {
       logger.warn(
         { approvalRequestId, decision },
-        'Decision failed: request not found, not PENDING, or expired'
+        'Decision failed: request not found, not PENDING, or expired',
       );
       return null;
     }
 
     logger.info(
       { approvalRequestId, decision, requestHash: request.requestHash },
-      `Approval request ${decision.toLowerCase()}`
+      `Approval request ${decision.toLowerCase()}`,
     );
 
     return request;
   }
 
-  async markExecuted(id: string): Promise<ApprovalRequest | null> {
-    return ApprovalRepository.markExecuted(id);
+  async markExecuted(id: string, executionResult: unknown): Promise<ApprovalRequest | null> {
+    const safeExecutionResult = this.sanitizeExecutionResult(executionResult);
+    return ApprovalRepository.markExecuted(id, safeExecutionResult);
   }
 
   async markFailed(id: string, error: string): Promise<ApprovalRequest | null> {
@@ -233,7 +252,7 @@ export class ApprovalService {
 
   async listPending(
     userId?: string | null,
-    filters?: { serverId?: string; toolName?: string }
+    filters?: { serverId?: string; toolName?: string },
   ): Promise<ApprovalRequest[]> {
     return ApprovalRepository.listPending(userId ?? null, filters);
   }
@@ -246,6 +265,19 @@ export class ApprovalService {
     return ApprovalRepository.findById(id);
   }
 
+  async getResultById(id: string): Promise<ApprovalRequest | null> {
+    const request = await ApprovalRepository.findById(id);
+    if (!request) {
+      return null;
+    }
+
+    if (request.status !== ApprovalStatus.Executed && request.status !== ApprovalStatus.Failed) {
+      return null;
+    }
+
+    return request;
+  }
+
   async expireStale(): Promise<ApprovalRequest[]> {
     const requests = await ApprovalRepository.expireStale();
     if (requests.length > 0) {
@@ -256,7 +288,7 @@ export class ApprovalService {
 
   async recoverStaleExecuting(): Promise<ApprovalRequest[]> {
     const requests = await ApprovalRepository.recoverStaleExecuting(
-      new Date(Date.now() - EXECUTING_STALE_TIMEOUT_MS)
+      new Date(Date.now() - EXECUTING_STALE_TIMEOUT_MS),
     );
     if (requests.length > 0) {
       logger.warn({ count: requests.length }, 'Recovered stale EXECUTING approval requests');
@@ -266,7 +298,10 @@ export class ApprovalService {
 
   startExpirySweeper(notifier: {
     notifyApprovalExpired: (userId: string, data: { id: string; toolName: string }) => void;
-    notifyApprovalFailed?: (userId: string, data: { id: string; toolName: string; error: string }) => void;
+    notifyApprovalFailed?: (
+      userId: string,
+      data: { id: string; toolName: string; error: string },
+    ) => void;
   }): void {
     if (this.expirySweeper) {
       return;
@@ -336,9 +371,8 @@ export class ApprovalService {
       if (value === null || value === undefined) {
         redacted[key] = value;
       } else if (typeof value === 'string') {
-        redacted[key] = value.length > MAX_STRING_LENGTH
-          ? value.substring(0, MAX_STRING_LENGTH) + '...'
-          : value;
+        redacted[key] =
+          value.length > MAX_STRING_LENGTH ? value.substring(0, MAX_STRING_LENGTH) + '...' : value;
       } else if (typeof value === 'number' || typeof value === 'boolean') {
         redacted[key] = value;
       } else if (Array.isArray(value)) {
@@ -369,6 +403,65 @@ export class ApprovalService {
     }
 
     return redacted;
+  }
+
+  private sanitizeExecutionResult(executionResult: unknown): Record<string, unknown> {
+    if (!executionResult || typeof executionResult !== 'object' || Array.isArray(executionResult)) {
+      return {
+        kind: 'execution_result_unavailable',
+        preview: 'Execution result is unavailable for replay.',
+        truncated: false,
+      };
+    }
+
+    try {
+      const redactedResult = this.redactSensitiveExecutionFields(
+        executionResult as Record<string, unknown>,
+      );
+      const rawJson = JSON.stringify(redactedResult);
+      if (rawJson.length <= MAX_EXECUTION_RESULT_BYTES) {
+        return redactedResult;
+      }
+
+      return {
+        kind: 'execution_result_truncated',
+        preview: rawJson.slice(0, MAX_EXECUTION_RESULT_PREVIEW_CHARS),
+        truncated: true,
+        originalSizeBytes: rawJson.length,
+      };
+    } catch {
+      return {
+        kind: 'execution_result_unserializable',
+        preview: 'Execution result could not be serialized safely.',
+        truncated: false,
+      };
+    }
+  }
+
+  private redactSensitiveExecutionFields(input: Record<string, unknown>): Record<string, unknown> {
+    const sensitivePattern = /(password|secret|token|apikey|api_key|authorization|credential)/i;
+
+    const walk = (value: unknown, keyHint?: string): unknown => {
+      if (keyHint && sensitivePattern.test(keyHint)) {
+        return '[redacted]';
+      }
+
+      if (Array.isArray(value)) {
+        return value.map((item) => walk(item));
+      }
+
+      if (!value || typeof value !== 'object') {
+        return value;
+      }
+
+      const result: Record<string, unknown> = {};
+      for (const [nestedKey, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+        result[nestedKey] = walk(nestedValue, nestedKey);
+      }
+      return result;
+    };
+
+    return walk(input) as Record<string, unknown>;
   }
 }
 
