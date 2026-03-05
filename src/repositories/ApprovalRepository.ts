@@ -20,6 +20,7 @@ export interface ApprovalRequest {
   decisionReason: string | null;
   executedAt: Date | null;
   executionError: string | null;
+  executionResult: Prisma.JsonValue | null;
   uniformRequestId: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -55,7 +56,7 @@ export interface CreateApprovalParams {
 export class ApprovalRepository {
   static async createOrGetPending(
     params: CreateApprovalParams,
-    retryCount = 0
+    retryCount = 0,
   ): Promise<{ created: boolean; request: ApprovalRequest }> {
     const maxRetries = 3;
     const id = randomUUID();
@@ -80,14 +81,14 @@ export class ApprovalRepository {
         WHERE status IN ('PENDING', 'APPROVED', 'EXECUTING')
         DO NOTHING
         RETURNING *
-      `
+      `,
     );
 
     if (inserted.length > 0) {
       const request = this.mapSnakeToCamel(inserted[0]);
       logger.info(
         { approvalRequestId: request.id, requestHash: params.requestHash, status: 'PENDING' },
-        'Created new approval request'
+        'Created new approval request',
       );
       return { created: true, request };
     }
@@ -98,26 +99,28 @@ export class ApprovalRepository {
         OR: [
           {
             status: { in: ['PENDING', 'APPROVED'] },
-            expiresAt: { gt: now }
+            expiresAt: { gt: now },
           },
           {
-            status: 'EXECUTING'
-          }
-        ]
+            status: 'EXECUTING',
+          },
+        ],
       },
       orderBy: {
-        createdAt: 'desc'
-      }
+        createdAt: 'desc',
+      },
     });
 
     if (!existing) {
       if (retryCount >= maxRetries) {
-        throw new Error(`Failed to create or find approval request after ${maxRetries} retries: ${params.requestHash}`);
+        throw new Error(
+          `Failed to create or find approval request after ${maxRetries} retries: ${params.requestHash}`,
+        );
       }
 
       logger.warn(
         { requestHash: params.requestHash, retryCount },
-        'ON CONFLICT triggered but no active non-expired row found; retrying'
+        'ON CONFLICT triggered but no active non-expired row found; retrying',
       );
 
       await prisma.$queryRaw(
@@ -127,7 +130,7 @@ export class ApprovalRepository {
           WHERE request_hash = ${params.requestHash}
             AND status IN ('PENDING', 'APPROVED')
             AND expires_at <= NOW()
-        `
+        `,
       );
 
       return this.createOrGetPending(params, retryCount + 1);
@@ -135,13 +138,17 @@ export class ApprovalRepository {
 
     logger.info(
       { approvalRequestId: existing.id, requestHash: params.requestHash, status: existing.status },
-      'Returning existing active approval request'
+      'Returning existing active approval request',
     );
 
     return { created: false, request: existing };
   }
 
-  static async decide(id: string, decision: 'APPROVED' | 'REJECTED', reason?: string): Promise<ApprovalRequest | null> {
+  static async decide(
+    id: string,
+    decision: 'APPROVED' | 'REJECTED',
+    reason?: string,
+  ): Promise<ApprovalRequest | null> {
     const now = new Date();
     const rows = await prisma.$queryRaw<Record<string, unknown>[]>(
       Prisma.sql`
@@ -154,11 +161,14 @@ export class ApprovalRepository {
           AND status = 'PENDING'
           AND expires_at > ${now}
         RETURNING *
-      `
+      `,
     );
 
     if (rows.length === 0) {
-      logger.warn({ approvalRequestId: id, decision }, 'Decision failed: request not found, not PENDING, or expired');
+      logger.warn(
+        { approvalRequestId: id, decision },
+        'Decision failed: request not found, not PENDING, or expired',
+      );
       return null;
     }
 
@@ -176,7 +186,7 @@ export class ApprovalRepository {
           AND status = 'APPROVED'
           AND expires_at > NOW()
         RETURNING *
-      `
+      `,
     );
 
     if (rows.length === 0) {
@@ -187,7 +197,7 @@ export class ApprovalRepository {
     const request = this.mapSnakeToCamel(rows[0]);
     logger.info(
       { approvalRequestId: request.id, requestHash },
-      'Claimed approval request for execution (APPROVED -> EXECUTING)'
+      'Claimed approval request for execution (APPROVED -> EXECUTING)',
     );
     return request;
   }
@@ -201,7 +211,7 @@ export class ApprovalRepository {
           AND status = 'APPROVED'
           AND expires_at > NOW()
         RETURNING *
-      `
+      `,
     );
 
     if (rows.length === 0) {
@@ -212,21 +222,24 @@ export class ApprovalRepository {
     const request = this.mapSnakeToCamel(rows[0]);
     logger.info(
       { approvalRequestId: request.id, requestHash: request.requestHash },
-      'Claimed approval request for execution by id (APPROVED -> EXECUTING)'
+      'Claimed approval request for execution by id (APPROVED -> EXECUTING)',
     );
     return request;
   }
 
-  static async markExecuted(id: string): Promise<ApprovalRequest | null> {
+  static async markExecuted(id: string, executionResult: unknown): Promise<ApprovalRequest | null> {
     const now = new Date();
     const rows = await prisma.$queryRaw<Record<string, unknown>[]>(
       Prisma.sql`
         UPDATE approval_request
-        SET status = 'EXECUTED', executed_at = ${now}, updated_at = ${now}
+        SET status = 'EXECUTED',
+            executed_at = ${now},
+            execution_result = ${JSON.stringify(executionResult)}::jsonb,
+            updated_at = ${now}
         WHERE id = ${id}
           AND status = 'EXECUTING'
         RETURNING *
-      `
+      `,
     );
 
     if (rows.length === 0) {
@@ -248,7 +261,7 @@ export class ApprovalRepository {
         WHERE id = ${id}
           AND status = 'EXECUTING'
         RETURNING *
-      `
+      `,
     );
 
     if (rows.length === 0) {
@@ -269,7 +282,7 @@ export class ApprovalRepository {
         WHERE id = ${id}
           AND status = 'EXECUTING'
         RETURNING *
-      `
+      `,
     );
 
     if (rows.length === 0) {
@@ -281,11 +294,11 @@ export class ApprovalRepository {
 
   static async listPending(
     userId: string | null,
-    filters?: { serverId?: string; toolName?: string }
+    filters?: { serverId?: string; toolName?: string },
   ): Promise<ApprovalRequest[]> {
     const where: Record<string, unknown> = {
       status: 'PENDING',
-      expiresAt: { gt: new Date() }
+      expiresAt: { gt: new Date() },
     };
 
     if (userId) {
@@ -302,14 +315,14 @@ export class ApprovalRepository {
 
     return await approvalRequestModel.approvalRequest.findMany({
       where,
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
     });
   }
 
   static async countPending(userId: string | null): Promise<number> {
     const where: Record<string, unknown> = {
       status: 'PENDING',
-      expiresAt: { gt: new Date() }
+      expiresAt: { gt: new Date() },
     };
 
     if (userId) {
@@ -317,20 +330,20 @@ export class ApprovalRepository {
     }
 
     return await approvalRequestModel.approvalRequest.count({
-      where
+      where,
     });
   }
 
   static async findById(id: string): Promise<ApprovalRequest | null> {
     return await approvalRequestModel.approvalRequest.findUnique({
-      where: { id }
+      where: { id },
     });
   }
 
   static async findByRequestHash(requestHash: string): Promise<ApprovalRequest | null> {
     return await approvalRequestModel.approvalRequest.findFirst({
       where: { requestHash },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
     });
   }
 
@@ -341,14 +354,14 @@ export class ApprovalRepository {
         OR: [
           {
             status: { in: ['PENDING', 'APPROVED'] },
-            expiresAt: { gt: new Date() }
+            expiresAt: { gt: new Date() },
           },
           {
-            status: 'EXECUTING'
-          }
-        ]
+            status: 'EXECUTING',
+          },
+        ],
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
     });
   }
 
@@ -356,7 +369,7 @@ export class ApprovalRepository {
     userId: string,
     serverId: string | null,
     toolName: string,
-    since: Date
+    since: Date,
   ): Promise<number> {
     const rows = await prisma.$queryRaw<Array<{ count: bigint }>>(
       Prisma.sql`
@@ -366,7 +379,25 @@ export class ApprovalRepository {
           AND tool_name = ${toolName}
           AND (${serverId}::varchar IS NULL AND server_id IS NULL OR server_id = ${serverId})
           AND created_at >= ${since}
-      `
+      `,
+    );
+
+    return Number(rows[0]?.count ?? 0n);
+  }
+
+  static async countRecentCreationsByRequestHash(
+    userId: string,
+    requestHash: string,
+    since: Date,
+  ): Promise<number> {
+    const rows = await prisma.$queryRaw<Array<{ count: bigint }>>(
+      Prisma.sql`
+        SELECT COUNT(*)::bigint AS count
+        FROM approval_request
+        WHERE user_id = ${userId}
+          AND request_hash = ${requestHash}
+          AND created_at >= ${since}
+      `,
     );
 
     return Number(rows[0]?.count ?? 0n);
@@ -380,7 +411,7 @@ export class ApprovalRepository {
         WHERE status IN ('PENDING', 'APPROVED')
           AND expires_at <= NOW()
         RETURNING *
-      `
+      `,
     );
 
     return rows.map((row) => this.mapSnakeToCamel(row));
@@ -396,7 +427,7 @@ export class ApprovalRepository {
         WHERE status = 'EXECUTING'
           AND updated_at <= ${staleBefore}
         RETURNING *
-      `
+      `,
     );
 
     return rows.map((row) => this.mapSnakeToCamel(row));
@@ -409,7 +440,7 @@ export class ApprovalRepository {
         SET status = 'EXPIRED', updated_at = NOW()
         WHERE id = ${id}
           AND status IN ('PENDING', 'APPROVED', 'EXECUTING')
-      `
+      `,
     );
     logger.info({ approvalRequestId: id }, 'Force-expired approval request');
   }
@@ -426,13 +457,22 @@ export class ApprovalRepository {
       requestHash: (row.request_hash ?? row.requestHash) as string,
       status: row.status as string,
       expiresAt: new Date((row.expires_at ?? row.expiresAt) as string | number | Date),
-      decidedAt: row.decided_at ?? row.decidedAt ? new Date((row.decided_at ?? row.decidedAt) as string | number | Date) : null,
+      decidedAt:
+        (row.decided_at ?? row.decidedAt)
+          ? new Date((row.decided_at ?? row.decidedAt) as string | number | Date)
+          : null,
       decisionReason: (row.decision_reason ?? row.decisionReason ?? null) as string | null,
-      executedAt: row.executed_at ?? row.executedAt ? new Date((row.executed_at ?? row.executedAt) as string | number | Date) : null,
+      executedAt:
+        (row.executed_at ?? row.executedAt)
+          ? new Date((row.executed_at ?? row.executedAt) as string | number | Date)
+          : null,
       executionError: (row.execution_error ?? row.executionError ?? null) as string | null,
+      executionResult: (row.execution_result ??
+        row.executionResult ??
+        null) as Prisma.JsonValue | null,
       uniformRequestId: (row.uniform_request_id ?? row.uniformRequestId ?? null) as string | null,
       createdAt: new Date((row.created_at ?? row.createdAt) as string | number | Date),
-      updatedAt: new Date((row.updated_at ?? row.updatedAt) as string | number | Date)
+      updatedAt: new Date((row.updated_at ?? row.updatedAt) as string | number | Date),
     };
   }
 }

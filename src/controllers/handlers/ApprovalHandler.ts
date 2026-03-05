@@ -8,28 +8,33 @@ const logger = createLogger('ApprovalHandler');
 export class ApprovalHandler {
   constructor() {}
 
-  async handleListApprovalRequests(request: AdminRequest<{
-    userId?: string;
-    serverId?: string;
-    toolName?: string;
-  }>): Promise<unknown> {
+  async handleListApprovalRequests(
+    request: AdminRequest<{
+      userId?: string;
+      serverId?: string;
+      toolName?: string;
+    }>,
+  ): Promise<unknown> {
     const { userId, serverId, toolName } = request.data || {};
 
     const requests = await approvalService.listPending(
       userId && typeof userId === 'string' ? userId : null,
-      { serverId, toolName }
+      { serverId, toolName },
     );
     return {
       requests: requests.map((item) => ({
         ...item,
         resumeToken: item.id,
-      }))
+        executionResultAvailable: item.executionResult != null,
+      })),
     };
   }
 
-  async handleGetApprovalRequest(request: AdminRequest<{
-    id: string;
-  }>): Promise<unknown> {
+  async handleGetApprovalRequest(
+    request: AdminRequest<{
+      id: string;
+    }>,
+  ): Promise<unknown> {
     const { id } = request.data || {};
 
     if (!id || typeof id !== 'string') {
@@ -44,14 +49,17 @@ export class ApprovalHandler {
     return {
       ...approvalRequest,
       resumeToken: approvalRequest.id,
+      executionResultAvailable: approvalRequest.executionResult != null,
     };
   }
 
-  async handleDecideApprovalRequest(request: AdminRequest<{
-    id: string;
-    decision: 'APPROVED' | 'REJECTED';
-    reason?: string;
-  }>): Promise<unknown> {
+  async handleDecideApprovalRequest(
+    request: AdminRequest<{
+      id: string;
+      decision: 'APPROVED' | 'REJECTED';
+      reason?: string;
+    }>,
+  ): Promise<unknown> {
     const { id, decision, reason } = request.data || {};
 
     if (!id || typeof id !== 'string') {
@@ -59,14 +67,17 @@ export class ApprovalHandler {
     }
 
     if (decision !== 'APPROVED' && decision !== 'REJECTED') {
-      throw new AdminError('Invalid decision: must be APPROVED or REJECTED', AdminErrorCode.INVALID_REQUEST);
+      throw new AdminError(
+        'Invalid decision: must be APPROVED or REJECTED',
+        AdminErrorCode.INVALID_REQUEST,
+      );
     }
 
     const result = await approvalService.decide(id, decision, reason);
     if (!result) {
       throw new AdminError(
         'Decision failed: request not found, not PENDING, or expired',
-        AdminErrorCode.INVALID_REQUEST
+        AdminErrorCode.INVALID_REQUEST,
       );
     }
 
@@ -81,12 +92,15 @@ export class ApprovalHandler {
     return {
       ...result,
       resumeToken: result.id,
+      executionResultAvailable: result.executionResult != null,
     };
   }
 
-  async handleGetPendingApprovalsCount(request: AdminRequest<{
-    userId: string;
-  }>): Promise<unknown> {
+  async handleGetPendingApprovalsCount(
+    request: AdminRequest<{
+      userId: string;
+    }>,
+  ): Promise<unknown> {
     const { userId } = request.data || {};
 
     if (!userId || typeof userId !== 'string') {

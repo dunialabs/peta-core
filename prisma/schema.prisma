@@ -235,6 +235,7 @@ model ApprovalRequest {
   decisionReason   String?   @map("decision_reason") @db.Text
   executedAt       DateTime? @map("executed_at")
   executionError   String?   @map("execution_error") @db.Text
+  executionResult  Json?     @map("execution_result")
   uniformRequestId String?   @map("uniform_request_id") @db.VarChar
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")

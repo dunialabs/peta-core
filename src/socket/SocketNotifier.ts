@@ -30,7 +30,7 @@ import {
   SocketResponse,
   SocketActionType,
   SocketErrorCode,
-  actionToEventName
+  actionToEventName,
 } from './types/socket.types.js';
 import UserRepository from '../repositories/UserRepository.js';
 import { Permissions } from '../mcp/types/mcp.js';
@@ -195,7 +195,7 @@ export class SocketNotifier {
       type: 'user_disabled',
       message: reason || 'Your account has been disabled by administrator',
       timestamp: Date.now(),
-      severity: 'error'
+      severity: 'error',
     });
   }
 
@@ -205,7 +205,10 @@ export class SocketNotifier {
       const capabilities = await UserRequestHandler.instance.handleGetCapabilities(userId);
       return this.notifyPermissionChanged(userId, capabilities);
     } catch (error: any) {
-      this.logger.error({ error: error?.message ?? String(error), userId }, 'Failed to notify permission changed');
+      this.logger.error(
+        { error: error?.message ?? String(error), userId },
+        'Failed to notify permission changed',
+      );
       return false;
     }
   }
@@ -221,7 +224,7 @@ export class SocketNotifier {
       message: 'User permissions have been updated',
       data: { capabilities: capabilities },
       timestamp: Date.now(),
-      severity: 'warning'
+      severity: 'warning',
     });
   }
 
@@ -249,12 +252,14 @@ export class SocketNotifier {
           message: `You have ${sessionData.length} active session(s)`,
           data: { sessions: sessionData },
           timestamp: Date.now(),
-          severity: 'info'
+          severity: 'info',
         });
 
-        this.logger.debug({ userId, count: sessionData.length, success }, 'Online sessions notification sent');
+        this.logger.debug(
+          { userId, count: sessionData.length, success },
+          'Online sessions notification sent',
+        );
         return success;
-
       } catch (error: any) {
         this.logger.error({ error: error.message, userId }, 'Failed to notify online sessions');
         return false;
@@ -273,7 +278,7 @@ export class SocketNotifier {
     try {
       const users = await UserRepository.findAll();
       const onlineUserIds = this.getOnlineUserIds();
-      const onlineUsers = users.filter(user => onlineUserIds.includes(user.userId));
+      const onlineUsers = users.filter((user) => onlineUserIds.includes(user.userId));
       for (const user of onlineUsers) {
         try {
           const permissions = JSON.parse(user.permissions) as Permissions;
@@ -281,11 +286,17 @@ export class SocketNotifier {
             this.notifyPermissionChangedByUser(user.userId);
           }
         } catch (error) {
-          this.logger.error({ error, userId: user.userId }, 'Failed to notify user permission changed via Socket for user');
+          this.logger.error(
+            { error, userId: user.userId },
+            'Failed to notify user permission changed via Socket for user',
+          );
         }
       }
     } catch (error) {
-      this.logger.error({ error, serverId }, 'Failed to notify user permission changed via Socket for server');
+      this.logger.error(
+        { error, serverId },
+        'Failed to notify user permission changed via Socket for server',
+      );
     }
   }
 
@@ -295,12 +306,16 @@ export class SocketNotifier {
    * @param message Message content
    * @param severity Severity level
    */
-  sendSystemMessage(userId: string | null, message: string, severity: 'info' | 'warning' | 'error' | 'success' = 'info'): void {
+  sendSystemMessage(
+    userId: string | null,
+    message: string,
+    severity: 'info' | 'warning' | 'error' | 'success' = 'info',
+  ): void {
     const notification: NotificationData = {
       type: 'system_message',
       message,
       timestamp: Date.now(),
-      severity
+      severity,
     };
 
     if (userId) {
@@ -344,7 +359,7 @@ export class SocketNotifier {
     userId: string,
     action: SocketActionType,
     data: TReq,
-    timeout: number = 55000
+    timeout: number = 55000,
   ): Promise<SocketResponse<TRes>> {
     this.ensureInitialized();
 
@@ -356,9 +371,9 @@ export class SocketNotifier {
         success: false,
         error: {
           code: SocketErrorCode.USER_OFFLINE,
-          message: `User ${userId} is offline`
+          message: `User ${userId} is offline`,
         },
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
     }
 
@@ -370,7 +385,7 @@ export class SocketNotifier {
       requestId,
       action,
       data,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
 
     // 4. Create Promise and set timeout
@@ -385,9 +400,9 @@ export class SocketNotifier {
           success: false,
           error: {
             code: SocketErrorCode.TIMEOUT,
-            message: `Request timeout after ${timeout}ms`
+            message: `Request timeout after ${timeout}ms`,
           },
-          timestamp: Date.now()
+          timestamp: Date.now(),
         });
       }, timeout);
 
@@ -397,7 +412,7 @@ export class SocketNotifier {
         timer,
         userId,
         action,
-        createdAt: new Date()
+        createdAt: new Date(),
       });
 
       // 5. Send request (using dynamic event name)
@@ -406,7 +421,10 @@ export class SocketNotifier {
       io.to(userId).emit(eventName, request);
 
       const deviceCount = this.socketService!.getUserDeviceCount(userId);
-      this.logger.debug({ userId, action, requestId, event: eventName, deviceCount }, 'Request sent');
+      this.logger.debug(
+        { userId, action, requestId, event: eventName, deviceCount },
+        'Request sent',
+      );
     });
 
     return response;
@@ -443,18 +461,29 @@ export class SocketNotifier {
     toolName: string,
     toolDescription: string,
     toolParams: string,
-    timeout?: number
+    timeout?: number,
   ): Promise<boolean> {
     const response = await this.sendRequest<
-      { userAgent: string; ip: string; toolName: string; toolDescription: string; toolParams: string },
+      {
+        userAgent: string;
+        ip: string;
+        toolName: string;
+        toolDescription: string;
+        toolParams: string;
+      },
       { confirmed: boolean }
-    >(userId, SocketActionType.ASK_USER_CONFIRM, {
-      userAgent,
-      ip,
-      toolName,
-      toolDescription,
-      toolParams
-    }, timeout);
+    >(
+      userId,
+      SocketActionType.ASK_USER_CONFIRM,
+      {
+        userAgent,
+        ip,
+        toolName,
+        toolDescription,
+        toolParams,
+      },
+      timeout,
+    );
 
     return response.success && response.data?.confirmed === true;
   }
@@ -471,7 +500,7 @@ export class SocketNotifier {
       userId,
       SocketActionType.GET_CLIENT_STATUS,
       {},
-      timeout
+      timeout,
     );
 
     return response.success ? response.data : null;
@@ -479,20 +508,23 @@ export class SocketNotifier {
 
   // ==================== Approval Workflow Notifications ====================
 
-  notifyApprovalCreated(userId: string, approvalData: {
-    id: string;
-    toolName: string;
-    serverId: string | null;
-    redactedArgs: unknown;
-    expiresAt: Date;
-    createdAt: Date;
-    status: string;
-    uniformRequestId?: string | null;
-    policyVersion: number;
-    matchedRuleId: string | null;
-    reason: string | null;
-    resumeToken?: string;
-  }): boolean {
+  notifyApprovalCreated(
+    userId: string,
+    approvalData: {
+      id: string;
+      toolName: string;
+      serverId: string | null;
+      redactedArgs: unknown;
+      expiresAt: Date;
+      createdAt: Date;
+      status: string;
+      uniformRequestId?: string | null;
+      policyVersion: number;
+      matchedRuleId: string | null;
+      reason: string | null;
+      resumeToken?: string;
+    },
+  ): boolean {
     return this.notifyUser(userId, 'notification', {
       type: 'approval_created',
       message: `Approval required for tool: ${approvalData.toolName}`,
@@ -502,26 +534,32 @@ export class SocketNotifier {
     });
   }
 
-  notifyApprovalDecided(userId: string, decisionData: {
-    id: string;
-    toolName: string;
-    decision: string;
-    reason?: string | null;
-  }): boolean {
+  notifyApprovalDecided(
+    userId: string,
+    decisionData: {
+      id: string;
+      toolName: string;
+      decision: string;
+      reason?: string | null;
+    },
+  ): boolean {
     const verb = decisionData.decision === 'APPROVED' ? 'approved' : 'rejected';
     return this.notifyUser(userId, 'notification', {
       type: 'approval_decided',
       message: `Tool ${decisionData.toolName} has been ${verb}`,
       data: decisionData,
       timestamp: Date.now(),
-      severity: decisionData.decision === 'APPROVED' ? 'success' as const : 'warning' as const,
+      severity: decisionData.decision === 'APPROVED' ? ('success' as const) : ('warning' as const),
     });
   }
 
-  notifyApprovalExpired(userId: string, expirationData: {
-    id: string;
-    toolName: string;
-  }): boolean {
+  notifyApprovalExpired(
+    userId: string,
+    expirationData: {
+      id: string;
+      toolName: string;
+    },
+  ): boolean {
     return this.notifyUser(userId, 'notification', {
       type: 'approval_expired',
       message: `Approval for tool ${expirationData.toolName} has expired`,
@@ -531,10 +569,16 @@ export class SocketNotifier {
     });
   }
 
-  notifyApprovalExecuted(userId: string, executionData: {
-    id: string;
-    toolName: string;
-  }): boolean {
+  notifyApprovalExecuted(
+    userId: string,
+    executionData: {
+      id: string;
+      toolName: string;
+      resumeToken?: string;
+      executionResultAvailable?: boolean;
+      executionResultPreview?: string | null;
+    },
+  ): boolean {
     return this.notifyUser(userId, 'notification', {
       type: 'approval_executed',
       message: `Tool ${executionData.toolName} executed successfully`,
@@ -544,11 +588,17 @@ export class SocketNotifier {
     });
   }
 
-  notifyApprovalFailed(userId: string, failureData: {
-    id: string;
-    toolName: string;
-    error: string;
-  }): boolean {
+  notifyApprovalFailed(
+    userId: string,
+    failureData: {
+      id: string;
+      toolName: string;
+      error: string;
+      resumeToken?: string;
+      executionResultAvailable?: boolean;
+      executionResultPreview?: string | null;
+    },
+  ): boolean {
     return this.notifyUser(userId, 'notification', {
       type: 'approval_failed',
       message: `Tool ${failureData.toolName} execution failed`,
@@ -557,7 +607,6 @@ export class SocketNotifier {
       severity: 'error' as const,
     });
   }
-
 }
 
 // Export singleton instance
