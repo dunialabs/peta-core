@@ -103,10 +103,6 @@ export class ApprovalHandler {
   ): Promise<unknown> {
     const { userId } = request.data || {};
 
-    if (!userId || typeof userId !== 'string') {
-      throw new AdminError('Missing required field: userId', AdminErrorCode.INVALID_REQUEST);
-    }
-
     const count = await approvalService.countPending(userId);
     return { count };
   }
