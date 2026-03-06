@@ -28,6 +28,8 @@ export interface ExchangeContext {
   redirectUri: string;
   /** Optional code verifier for PKCE flow */
   codeVerifier?: string;
+  /** Optional scope for the OAuth request */
+  scope?: string;
 }
 
 /**

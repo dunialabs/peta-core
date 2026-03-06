@@ -4,6 +4,8 @@ import { GoogleAuthStrategy } from './GoogleAuthStrategy.js';
 import { NotionAuthStrategy } from './NotionAuthStrategy.js';
 import { FigmaAuthStrategy } from './FigmaAuthStrategy.js';
 import { GithubAuthStrategy } from './GithubAuthStrategy.js';
+import { CanvaAuthStrategy } from './CanvaAuthStrategy.js';
+import { ZendeskAuthStrategy } from './ZendeskAuthStrategy.js';
 import { createLogger } from '../../logger/index.js';
 
 // Logger for AuthStrategyFactory
@@ -58,6 +60,29 @@ export class AuthStrategyFactory {
           accessToken: config.accessToken,
           expiresAt: config.expiresAt,
           refreshTokenExpiresAt: config.refreshTokenExpiresAt,
+        });
+
+      case ServerAuthType.CanvaAuth:
+        return new CanvaAuthStrategy({
+          clientId: config.clientId,
+          clientSecret: config.clientSecret,
+          refreshToken: config.refreshToken,
+          accessToken: config.accessToken,
+          expiresAt: config.expiresAt,
+        });
+
+      case ServerAuthType.ZendeskAuth:
+        return new ZendeskAuthStrategy({
+          clientId: config.clientId,
+          clientSecret: config.clientSecret,
+          refreshToken: config.refreshToken,
+          tokenUrl: config.tokenUrl,
+          scope: config.scope,
+          accessToken: config.accessToken,
+          expiresAt: config.expiresAt,
+          refreshTokenExpiresAt: config.refreshTokenExpiresAt,
+          expiresInSeconds: config.expiresInSeconds,
+          refreshTokenExpiresInSeconds: config.refreshTokenExpiresInSeconds,
         });
 
       case ServerAuthType.ApiKey:

@@ -259,6 +259,8 @@ export class UserRequestHandler {
           }, {});
           const oauthCode = authConfValue.YOUR_OAUTH_CODE.value;
           const oauthRedirectUrl = authConfValue.YOUR_OAUTH_REDIRECT_URL.value;
+          const oauthCodeVerifier = authConfValue.YOUR_OAUTH_PKCE_VERIFIER.value;
+
           if (typeof oauthCode !== 'string' || oauthCode === '') {
             throw new UserError(`code is required and cannot be empty`, UserErrorCode.SERVER_CONFIG_INVALID);
           }
@@ -284,12 +286,16 @@ export class UserRequestHandler {
               code: string;
               redirectUri: string;
               tokenUrl?: string;
+              codeVerifier?: string;
+              scope?: string;
             } = {
               clientId: oauth.clientId,
               provider: provider,
               key: hashKey,
               code: oauthCode,
-              redirectUri: oauthRedirectUrl
+              redirectUri: oauthRedirectUrl,
+              codeVerifier: oauthCodeVerifier,
+              scope: [ServerAuthType.ZendeskAuth].includes(server.authType) ? oauthConfig.scope : undefined
             };
 
             if ((provider === 'zendesk' || provider === 'canvas') && oauthConfig?.tokenUrl) {
@@ -342,7 +348,11 @@ export class UserRequestHandler {
                 clientId: oauth.clientId,
                 clientSecret: oauth.clientSecret,
                 code: oauthCode,
-                redirectUri: oauthRedirectUrl
+                redirectUri: oauthRedirectUrl,
+                codeVerifier: oauthCodeVerifier,
+                scope: [ServerAuthType.ZendeskAuth].includes(server.authType)
+                  ? oauthConfig.scope
+                  : undefined
               });
 
               if (exchangeResult.accessToken && exchangeResult.refreshToken) {
@@ -354,6 +364,15 @@ export class UserRequestHandler {
                   refreshToken: exchangeResult.refreshToken,
                   expiresAt: expiresAt
                 };
+                if ([ServerAuthType.ZendeskAuth].includes(server.authType)) {
+                  decryptedLaunchConfigValue.oauth.tokenUrl = oauthConfig.tokenUrl;
+                }
+                if (server.authType === ServerAuthType.ZendeskAuth) {
+                  decryptedLaunchConfigValue.oauth.scope = oauthConfig.scope;
+                  if (exchangeResult.raw.refresh_token_expires_in && typeof exchangeResult.raw.refresh_token_expires_in === 'number') {
+                    decryptedLaunchConfigValue.oauth.refreshTokenExpiresAt = Date.now() + exchangeResult.raw.refresh_token_expires_in * 1000;
+                  }
+                }
                 launchConfig = decryptedLaunchConfigValue;
               } else {
                 throw new UserError('Failed to exchange OAuth code', UserErrorCode.SERVER_CONFIG_INVALID);

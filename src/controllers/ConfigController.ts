@@ -317,21 +317,21 @@ export class ConfigController {
           if (req.authContext?.role !== UserRole.Owner) {
             throw new AdminError('Only Owner role can upload skills.', AdminErrorCode.FORBIDDEN);
           }
-          result = await this.skillsHandler.handleUploadSkill(adminRequest);
+          result = await this.skillsHandler.handleUploadSkill(adminRequest, token!);
           break;
         case AdminActionType.DELETE_SKILL:
           // Only Owner role can delete skills
           if (req.authContext?.role !== UserRole.Owner) {
             throw new AdminError('Only Owner role can delete skills.', AdminErrorCode.FORBIDDEN);
           }
-          result = await this.skillsHandler.handleDeleteSkill(adminRequest);
+          result = await this.skillsHandler.handleDeleteSkill(adminRequest, token!);
           break;
         case AdminActionType.DELETE_SERVER_SKILLS:
           // Only Owner role can delete server skills
           if (req.authContext?.role !== UserRole.Owner) {
             throw new AdminError('Only Owner role can delete server skills.', AdminErrorCode.FORBIDDEN);
           }
-          result = await this.skillsHandler.handleDeleteServerSkills(adminRequest);
+          result = await this.skillsHandler.handleDeleteServerSkills(adminRequest, token!);
           break;
 
         // ==================== Policy Operations (9100-9199) ====================

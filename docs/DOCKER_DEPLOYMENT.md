@@ -167,6 +167,7 @@ services:
       CLOUDFLARED_CONTAINER_NAME: ${CLOUDFLARED_CONTAINER_NAME}
       PETA_AUTH_AUTOSTART: ${PETA_AUTH_AUTOSTART}
       PETA_CORE_IN_DOCKER: "true"
+      SKILLS_DIR: /data/skills
       # Skip database container startup (database is started via docker-compose)
       SKIP_DB_CONTAINER_START: "true"
     ports:
