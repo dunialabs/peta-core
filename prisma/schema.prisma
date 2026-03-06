@@ -233,6 +233,9 @@ model ApprovalRequest {
   expiresAt        DateTime  @map("expires_at")
   decidedAt        DateTime? @map("decided_at")
   decisionReason   String?   @map("decision_reason") @db.Text
+  decidedByUserId  String?   @map("decided_by_user_id") @db.VarChar(64)
+  decidedByRole    Int?      @map("decided_by_role")
+  decisionChannel  String?   @map("decision_channel") @db.VarChar(32)
   executedAt       DateTime? @map("executed_at")
   executionError   String?   @map("execution_error") @db.Text
   executionResult  Json?     @map("execution_result")

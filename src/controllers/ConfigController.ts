@@ -359,7 +359,10 @@ export class ConfigController {
           result = await this.approvalHandler.handleGetApprovalRequest(adminRequest);
           break;
         case AdminActionType.DECIDE_APPROVAL_REQUEST:
-          result = await this.approvalHandler.handleDecideApprovalRequest(adminRequest);
+          result = await this.approvalHandler.handleDecideApprovalRequest(
+            adminRequest,
+            req.authContext,
+          );
           break;
         case AdminActionType.GET_PENDING_APPROVALS_COUNT:
           result = await this.approvalHandler.handleGetPendingApprovalsCount(adminRequest);

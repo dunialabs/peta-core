@@ -391,7 +391,16 @@ export class SocketService {
             return;
           }
 
-          const decided = await approvalService.decide(payload.id, payload.decision, payload.reason);
+          const decided = await approvalService.decide(
+            payload.id,
+            payload.decision,
+            {
+              actorUserId: userId,
+              actorRole: socketData.authContext?.role ?? null,
+              channel: 'socket',
+            },
+            payload.reason,
+          );
           if (!decided) {
             sendAck({ success: false, id: payload.id, error: 'Decision failed: request not pending or already expired' });
             return;

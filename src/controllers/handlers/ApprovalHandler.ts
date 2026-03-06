@@ -2,8 +2,21 @@ import { AdminRequest, AdminError, AdminErrorCode } from '../../types/admin.type
 import { approvalService } from '../../mcp/services/ApprovalService.js';
 import { socketNotifier } from '../../socket/SocketNotifier.js';
 import { createLogger } from '../../logger/index.js';
+import type { AuthContext } from '../../types/auth.types.js';
+import { ApprovalStatus } from '../../types/enums.js';
 
 const logger = createLogger('ApprovalHandler');
+const VALID_APPROVAL_STATUSES = new Set<string>(Object.values(ApprovalStatus));
+
+function serializeApprovalRequest(item: {
+  id: string;
+  executionResult?: unknown;
+}): { resumeToken: string; executionResultAvailable: boolean } {
+  return {
+    resumeToken: item.id,
+    executionResultAvailable: item.executionResult != null,
+  };
+}
 
 export class ApprovalHandler {
   constructor() {}
@@ -13,20 +26,33 @@ export class ApprovalHandler {
       userId?: string;
       serverId?: string;
       toolName?: string;
+      status?: string;
+      page?: number;
+      pageSize?: number;
     }>,
   ): Promise<unknown> {
-    const { userId, serverId, toolName } = request.data || {};
+    const { userId, serverId, toolName, status, page, pageSize } = request.data || {};
 
-    const requests = await approvalService.listPending(
-      userId && typeof userId === 'string' ? userId : null,
-      { serverId, toolName },
-    );
+    if (status && !VALID_APPROVAL_STATUSES.has(status)) {
+      throw new AdminError(`Invalid status filter: ${status}`, AdminErrorCode.INVALID_REQUEST);
+    }
+
+    const result = await approvalService.listApprovals({
+      userId: userId && typeof userId === 'string' ? userId : null,
+      status,
+      page: typeof page === 'number' ? page : undefined,
+      pageSize: typeof pageSize === 'number' ? pageSize : undefined,
+      filters: { serverId, toolName },
+    });
+
     return {
-      requests: requests.map((item) => ({
+      requests: result.requests.map((item) => ({
         ...item,
-        resumeToken: item.id,
-        executionResultAvailable: item.executionResult != null,
+        ...serializeApprovalRequest(item),
       })),
+      page: result.page,
+      pageSize: result.pageSize,
+      hasMore: result.hasMore,
     };
   }
 
@@ -48,8 +74,7 @@ export class ApprovalHandler {
 
     return {
       ...approvalRequest,
-      resumeToken: approvalRequest.id,
-      executionResultAvailable: approvalRequest.executionResult != null,
+      ...serializeApprovalRequest(approvalRequest),
     };
   }
 
@@ -59,6 +84,7 @@ export class ApprovalHandler {
       decision: 'APPROVED' | 'REJECTED';
       reason?: string;
     }>,
+    authContext?: AuthContext,
   ): Promise<unknown> {
     const { id, decision, reason } = request.data || {};
 
@@ -73,7 +99,16 @@ export class ApprovalHandler {
       );
     }
 
-    const result = await approvalService.decide(id, decision, reason);
+    const result = await approvalService.decide(
+      id,
+      decision,
+      {
+        actorUserId: authContext?.userId ?? null,
+        actorRole: authContext?.role ?? null,
+        channel: 'admin_api',
+      },
+      reason,
+    );
     if (!result) {
       throw new AdminError(
         'Decision failed: request not found, not PENDING, or expired',
@@ -88,22 +123,31 @@ export class ApprovalHandler {
       reason: result.decisionReason,
     });
 
-    logger.info({ id, decision }, 'Approval request decided via admin API');
+    logger.info(
+      { id, decision, actorUserId: authContext?.userId ?? null },
+      'Approval request decided via admin API',
+    );
     return {
       ...result,
-      resumeToken: result.id,
-      executionResultAvailable: result.executionResult != null,
+      ...serializeApprovalRequest(result),
     };
   }
 
   async handleGetPendingApprovalsCount(
     request: AdminRequest<{
-      userId: string;
+      userId?: string;
     }>,
   ): Promise<unknown> {
     const { userId } = request.data || {};
 
-    const count = await approvalService.countPending(userId);
+    if (userId !== undefined && userId !== null && typeof userId !== 'string') {
+      throw new AdminError('Invalid field: userId must be a string', AdminErrorCode.INVALID_REQUEST);
+    }
+
+    const normalizedUserId =
+      typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : null;
+
+    const count = await approvalService.countPending(normalizedUserId);
     return { count };
   }
 }

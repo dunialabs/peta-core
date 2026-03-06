@@ -16,9 +16,14 @@
 
 import { createLogger } from '../../logger/index.js';
 import { ApprovalStatus } from '../../types/enums.js';
-import { ApprovalRepository, CreateApprovalParams } from '../../repositories/ApprovalRepository.js';
+import {
+  ApprovalDecisionActor,
+  ApprovalListResult,
+  ApprovalRepository,
+  ApprovalRequest,
+  CreateApprovalParams,
+} from '../../repositories/ApprovalRepository.js';
 import { approvalRequestHasher } from './ApprovalRequestHasher.js';
-import type { ApprovalRequest } from '@prisma/client';
 
 const logger = createLogger('ApprovalService');
 
@@ -56,6 +61,14 @@ export interface ApprovalClaimResult {
   claimed: boolean;
   /** The claimed approval request */
   request: ApprovalRequest | null;
+}
+
+export interface ApprovalListFilters {
+  userId?: string | null;
+  status?: string;
+  page?: number;
+  pageSize?: number;
+  filters?: { serverId?: string; toolName?: string };
 }
 
 export class ApprovalRateLimitError extends Error {
@@ -217,20 +230,28 @@ export class ApprovalService {
   async decide(
     approvalRequestId: string,
     decision: 'APPROVED' | 'REJECTED',
+    actor: ApprovalDecisionActor,
     reason?: string,
   ): Promise<ApprovalRequest | null> {
-    const request = await ApprovalRepository.decide(approvalRequestId, decision, reason);
+    const request = await ApprovalRepository.decide(approvalRequestId, decision, actor, reason);
 
     if (!request) {
       logger.warn(
-        { approvalRequestId, decision },
+        { approvalRequestId, decision, actorUserId: actor.actorUserId, channel: actor.channel },
         'Decision failed: request not found, not PENDING, or expired',
       );
       return null;
     }
 
     logger.info(
-      { approvalRequestId, decision, requestHash: request.requestHash },
+      {
+        approvalRequestId,
+        decision,
+        requestHash: request.requestHash,
+        actorUserId: actor.actorUserId,
+        actorRole: actor.actorRole,
+        channel: actor.channel,
+      },
       `Approval request ${decision.toLowerCase()}`,
     );
 
@@ -250,11 +271,15 @@ export class ApprovalService {
     return ApprovalRepository.touchExecuting(id);
   }
 
-  async listPending(
-    userId?: string | null,
-    filters?: { serverId?: string; toolName?: string },
-  ): Promise<ApprovalRequest[]> {
-    return ApprovalRepository.listPending(userId ?? null, filters);
+  async listApprovals(input: ApprovalListFilters = {}): Promise<ApprovalListResult> {
+    const pageSize = Math.min(Math.max(input.pageSize ?? 20, 1), 100);
+    return ApprovalRepository.list({
+      userId: input.userId ?? null,
+      status: input.status,
+      page: Math.max(input.page ?? 1, 1),
+      pageSize,
+      filters: input.filters,
+    });
   }
 
   async countPending(userId?: string | null): Promise<number> {
