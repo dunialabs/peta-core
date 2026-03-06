@@ -1054,6 +1054,13 @@ Predefined notification type constants (in `src/socket/types/socket.types.ts`):
 - `business_message` - Business message
 - `task_notification` - Task notification
 
+### Approval Lifecycle
+- `approval_created` - Approval request created and waiting for decision
+- `approval_decided` - Approval request approved or rejected
+- `approval_expired` - Approval request expired
+- `approval_executed` - Approved tool execution completed
+- `approval_failed` - Approved tool execution failed
+
 ### Session Management
 - `online_sessions` - Online session list changed
 
@@ -1075,6 +1082,24 @@ interface NotificationData {
   timestamp: number;        // Timestamp (milliseconds)
   data?: any;               // Additional data (optional)
   severity?: 'info' | 'warning' | 'error' | 'success';  // Severity (optional)
+}
+```
+
+For `approval_created`, `data` contains:
+
+```typescript
+{
+  id: string;
+  resumeToken: string; // Stable retry handle (currently same as id)
+  toolName: string;
+  serverId: string | null;
+  redactedArgs: unknown;
+  status: string;
+  policyVersion: number;
+  matchedRuleId: string | null;
+  reason: string | null;
+  createdAt: string;
+  expiresAt: string;
 }
 ```
 

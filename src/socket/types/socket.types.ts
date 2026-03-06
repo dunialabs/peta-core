@@ -136,6 +136,13 @@ export enum SocketActionType {
   // ========== 4000-4999: Server configuration category ==========
   CONFIGURE_SERVER = 4001,              // Configure server
   UNCONFIGURE_SERVER = 4002,            // Unconfigure server
+
+  // ========== 5000-5999: Approval workflow category ==========
+  APPROVAL_CREATED = 5001,               // Notify client of new pending approval
+  APPROVAL_DECIDED = 5002,               // Notify client of approval decision
+  APPROVAL_EXPIRED = 5003,               // Notify client of expired approval
+  GET_PENDING_APPROVALS = 5004,          // Client requests list of pending approvals
+
 }
 
 /**

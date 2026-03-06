@@ -23,6 +23,7 @@ import { OAuthRouter } from './oauth/OAuthRouter.js';
 import { MCPRouter } from './mcp/MCPRouter.js';
 import { SocketService } from './socket/SocketService.js';
 import { socketNotifier } from './socket/SocketNotifier.js';
+import { approvalService } from './mcp/services/ApprovalService.js';
 import { UserAuthMiddleware } from './user/UserAuthMiddleware.js';
 import { UserController } from './user/UserController.js';
 import { UserRequestHandler } from './user/UserRequestHandler.js';
@@ -518,6 +519,7 @@ export async function startApplication() {
 
     // Set SocketNotifier
     socketNotifier.setSocketService(socketService);
+    approvalService.startExpirySweeper(socketNotifier);
 
     // Update socketService reference in authModule
     authModule.socketService = socketService;
@@ -662,6 +664,8 @@ export async function startApplication() {
         } catch (error) {
           console.error('Error stopping event cleanup service:', error);
         }
+
+        approvalService.stopExpirySweeper();
 
         // 4. Shutdown log sync service (attempt to flush remaining logs)
         try {
