@@ -42,7 +42,6 @@ import { ProxyContext } from '../../types/mcp.types.js';
 import { createLogger } from '../../logger/index.js';
 import * as path from 'path';
 import { resolveHostPath } from '../../utils/DockerHostPathResolver.js';
-import { SKILLS_CONFIG } from '../../config/skillsConfig.js';
 
 /**
  * Subscription state structure
@@ -315,8 +314,23 @@ export class ServerManager {
       case ServerAuthType.GoogleCalendarAuth:
       case ServerAuthType.FigmaAuth:
       case ServerAuthType.GithubAuth:
+      case ServerAuthType.CanvaAuth:
         launchConfig.env = {
           ...launchConfig.env,
+          accessToken: accessToken,
+        };
+        break;
+
+      case ServerAuthType.ZendeskAuth:
+        let zendeskSubdomain = launchConfig.env?.zendeskSubdomain;
+        if (!zendeskSubdomain) {
+          throw new Error('[ServerManager] Missing zendeskSubdomain for server auth type ZendeskAuth');
+        }
+
+        zendeskSubdomain = zendeskSubdomain.replace('https://', '').replace('.zendesk.com', '');
+        launchConfig.env = {
+          ...launchConfig.env,
+          "zendeskSubdomain": zendeskSubdomain,
           accessToken: accessToken,
         };
         break;
@@ -1051,6 +1065,8 @@ export class ServerManager {
       case ServerAuthType.NotionAuth:
       case ServerAuthType.FigmaAuth:
       case ServerAuthType.GithubAuth:
+      case ServerAuthType.CanvaAuth:
+      case ServerAuthType.ZendeskAuth:
         serverContext.userToken = token;
         await this.initializeOAuthWithRefresh(serverContext, launchConfig);
         break;
@@ -1074,6 +1090,8 @@ export class ServerManager {
     serverContext: ServerContext,
     launchConfig: Record<string, any>
   ): Promise<void> {
+    const authType = serverContext.serverEntity.authType;
+
     // 1. Verify OAuth configuration exists
     if (
       !launchConfig.oauth?.clientId ||
@@ -1082,6 +1100,15 @@ export class ServerManager {
     ) {
       throw new Error(
         `[ServerManager] Missing OAuth configuration for server ${serverContext.serverID}. Required: clientId, clientSecret, refreshToken`
+      );
+    }
+
+    if (
+      [ServerAuthType.ZendeskAuth].includes(authType) &&
+      (!launchConfig.oauth.tokenUrl || typeof launchConfig.oauth.tokenUrl !== 'string')
+    ) {
+      throw new Error(
+        `[ServerManager] Missing OAuth tokenUrl for server ${serverContext.serverID} (ZendeskAuth)`
       );
     }
 
@@ -2104,8 +2131,13 @@ export class ServerManager {
    * inside the peta-core container will not be found by the daemon.
    *
    * We query the Docker socket to discover the host-side path that is mounted
-   * at SKILLS_DIR (/data/skills) inside the peta-core container, then substitute
-   * that path into any matching volume args before the child container is spawned.
+   * at /data/skills (the peta-core container mount point), then substitute that
+   * host path into any child-container volume args that target /app/skills.
+   *
+   * Note: We use the fixed mount point /data/skills for the Docker socket lookup,
+   * independent of SKILLS_CONFIG.SKILLS_DIR, because these are two separate
+   * concerns: the mount point is determined by docker-compose, while SKILLS_DIR
+   * controls where the application reads/writes files.
    *
    * This is a no-op on macOS/Windows native installs, or when the Docker socket
    * is not available.
@@ -2117,25 +2149,28 @@ export class ServerManager {
     }
 
     // Only needed when peta-core itself is running inside Docker
-    if (!process.env.PETA_CORE_IN_DOCKER) {
+    if (process.env.PETA_CORE_IN_DOCKER !== 'true') {
       return;
     }
 
-    const containerSkillsDir = SKILLS_CONFIG.SKILLS_DIR; // e.g. /data/skills
+    // peta-core container mount used to resolve host absolute path.
+    const CORE_CONTAINER_SKILLS_MOUNT = '/data/skills';
+    // Child skillsmcp container destination mount.
+    const CHILD_CONTAINER_SKILLS_MOUNT = '/app/skills';
 
-    const hostSkillsDir = await resolveHostPath(containerSkillsDir);
+    const hostSkillsDir = await resolveHostPath(CORE_CONTAINER_SKILLS_MOUNT);
     if (!hostSkillsDir) {
       // Not in Docker, socket unavailable, or mount not found – leave args unchanged
       return;
     }
 
     this.logger.debug(
-      { containerSkillsDir, hostSkillsDir },
+      { containerMount: CORE_CONTAINER_SKILLS_MOUNT, childMount: CHILD_CONTAINER_SKILLS_MOUNT, hostSkillsDir },
       'Rewriting skills volume mount paths to host-absolute paths'
     );
 
     launchConfig.args = (launchConfig.args as string[]).map((arg) =>
-      this.rewriteSkillsVolumeArg(arg, containerSkillsDir, hostSkillsDir)
+      this.rewriteSkillsVolumeArg(arg, CHILD_CONTAINER_SKILLS_MOUNT, hostSkillsDir)
     );
   }
 
@@ -2144,11 +2179,11 @@ export class ServerManager {
    * skills directory.
    *
    * Handles the standard bind-mount format:  <source>:<destination>[:<options>]
-   * Only rewrites when the source starts with "./skills/" (relative path).
+   * Rewrites recognized source prefixes to the resolved host skills path.
    */
   private rewriteSkillsVolumeArg(
     arg: string,
-    containerSkillsDir: string,
+    childContainerSkillsDir: string,
     hostSkillsDir: string
   ): string {
     // Volume specs always contain at least one colon
@@ -2160,22 +2195,26 @@ export class ServerManager {
     const source = arg.slice(0, colonIdx);
     const rest = arg.slice(colonIdx); // includes the leading ':'
 
-    // Only rewrite relative ./skills/* source paths
-    const relativePrefix = './skills/';
-    if (!source.startsWith(relativePrefix)) {
-      return arg;
-    }
-
-    // Verify the destination matches or is under SKILLS_DIR
+    // Verify the destination matches or is under child skills dir.
     const afterColon = rest.slice(1); // strip leading ':'
     const destAndOptions = afterColon.split(':');
     const dest = destAndOptions[0];
-    if (dest !== containerSkillsDir && !dest.startsWith(containerSkillsDir + '/')) {
+    if (dest !== childContainerSkillsDir && !dest.startsWith(childContainerSkillsDir + '/')) {
       return arg;
     }
 
-    // Rewrite: ./skills/<serverId>  →  <hostSkillsDir>/<serverId>
-    const serverId = source.slice(relativePrefix.length);
+    const sourcePrefixes = ['./skills/', '/app/skills/', '/data/skills/'];
+    const matchedPrefix = sourcePrefixes.find((prefix) => source.startsWith(prefix));
+    if (!matchedPrefix) {
+      return arg;
+    }
+
+    // Rewrite: <prefix><serverId> -> <hostSkillsDir>/<serverId>
+    const serverId = source.slice(matchedPrefix.length);
+    if (!serverId) {
+      return arg;
+    }
+
     const newSource = path.join(hostSkillsDir, serverId);
     return newSource + rest;
   }

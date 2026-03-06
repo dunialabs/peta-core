@@ -33,6 +33,7 @@ export enum ServerAuthType {
   GithubAuth = 6,   // Github OAuth authentication
   ZendeskAuth = 7,   // Zendesk OAuth authentication
   CanvasAuth = 8,   // Canvas OAuth authentication
+  CanvaAuth = 9,   // Canva OAuth authentication
 }
 
 export enum MCPEventLogType {
