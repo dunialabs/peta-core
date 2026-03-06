@@ -1885,16 +1885,22 @@ The `dsl` object follows this structure:
 #### 9201 LIST_APPROVAL_REQUESTS
 
 **Permission**: Owner + Admin
-**Function**: List pending, non-expired approval requests with optional filtering. All filter parameters are optional and combined with AND logic.
+**Function**: List approval requests with optional filtering and pagination. All filter parameters are optional and combined with AND logic.
 
 **Request Parameters** (data):
 - `userId` (string, optional): Filter by user ID.
 - `serverId` (string, optional): Filter by server ID.
 - `toolName` (string, optional): Filter by tool name.
+- `status` (string, optional): Filter by approval status.
+- `page` (number, optional): 1-based page number. Defaults to `1`.
+- `pageSize` (number, optional): Number of items per page. Defaults to `20`, max `100`.
 
 **Return Result** (data):
 ```json
 {
+  "page": 1,
+  "pageSize": 20,
+  "hasMore": true,
   "requests": [
     {
       "id": "clxxx...",
@@ -1908,6 +1914,9 @@ The `dsl` object follows this structure:
       "status": "PENDING",
       "decidedAt": null,
       "decisionReason": null,
+      "decidedByUserId": null,
+      "decidedByRole": null,
+      "decisionChannel": null,
       "executedAt": null,
       "executionError": null,
       "uniformRequestId": null,
@@ -1944,6 +1953,9 @@ The `dsl` object follows this structure:
   "status": "PENDING",
   "decidedAt": null,
   "decisionReason": null,
+  "decidedByUserId": null,
+  "decidedByRole": null,
+  "decisionChannel": null,
   "executedAt": null,
   "executionError": null,
   "uniformRequestId": null,
@@ -1959,6 +1971,9 @@ The `dsl` object follows this structure:
 - `resumeToken`: Stable resume handle (currently same value as `id`) for client retries and correlation
 - `decidedAt`: Timestamp when the decision was made, or `null`
 - `decisionReason`: Optional reason provided when decided, or `null`
+- `decidedByUserId`: User ID of the actor who approved/rejected the request, or `null`
+- `decidedByRole`: Numeric `UserRole` snapshot of the deciding actor, or `null`
+- `decisionChannel`: Decision source, currently `"admin_api"` or `"socket"`
 - `canonicalArgs`: Normalized tool arguments used for hashing/comparison
 - `redactedArgs`: Redacted arguments safe for logging/display
 - `requestHash`: Deterministic hash used for deduplication
@@ -1993,6 +2008,9 @@ The `dsl` object follows this structure:
   "status": "APPROVED",
   "decidedAt": "2026-01-01T00:05:00.000Z",
   "decisionReason": "Reviewed and approved",
+  "decidedByUserId": "owner-abc",
+  "decidedByRole": 1,
+  "decisionChannel": "admin_api",
   "executedAt": null,
   "executionError": null,
   "uniformRequestId": null,
@@ -2011,10 +2029,10 @@ The `dsl` object follows this structure:
 #### 9204 COUNT_PENDING_APPROVALS
 
 **Permission**: Owner + Admin
-**Function**: Count the number of pending approval requests for a specific user.
+**Function**: Count the number of pending approval requests, optionally scoped to a specific user.
 
 **Request Parameters** (data):
-- `userId` (string, required): User ID to count pending requests for.
+- `userId` (string, optional): User ID to scope the count to. If omitted, counts pending requests across all users.
 
 **Return Result** (data):
 ```json

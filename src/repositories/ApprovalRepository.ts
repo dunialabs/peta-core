@@ -2,6 +2,7 @@ import { prisma } from '../config/prisma.js';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { createLogger } from '../logger/index.js';
+import { UserRole } from '../types/enums.js';
 
 const logger = createLogger('ApprovalRepository');
 
@@ -18,12 +19,36 @@ export interface ApprovalRequest {
   expiresAt: Date;
   decidedAt: Date | null;
   decisionReason: string | null;
+  decidedByUserId: string | null;
+  decidedByRole: UserRole | null;
+  decisionChannel: string | null;
   executedAt: Date | null;
   executionError: string | null;
   executionResult: Prisma.JsonValue | null;
   uniformRequestId: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface ApprovalDecisionActor {
+  actorUserId: string | null;
+  actorRole: UserRole | null;
+  channel: 'admin_api' | 'socket';
+}
+
+export interface ApprovalListParams {
+  userId: string | null;
+  status?: string;
+  page: number;
+  pageSize: number;
+  filters?: { serverId?: string; toolName?: string };
+}
+
+export interface ApprovalListResult {
+  requests: ApprovalRequest[];
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
 }
 
 type ApprovalRequestDelegate = {
@@ -34,6 +59,8 @@ type ApprovalRequestDelegate = {
   findMany(args: {
     where: Record<string, unknown>;
     orderBy?: { createdAt: 'asc' | 'desc' };
+    skip?: number;
+    take?: number;
   }): Promise<ApprovalRequest[]>;
   count(args: { where: Record<string, unknown> }): Promise<number>;
   findUnique(args: { where: { id: string } }): Promise<ApprovalRequest | null>;
@@ -147,6 +174,7 @@ export class ApprovalRepository {
   static async decide(
     id: string,
     decision: 'APPROVED' | 'REJECTED',
+    actor: ApprovalDecisionActor,
     reason?: string,
   ): Promise<ApprovalRequest | null> {
     const now = new Date();
@@ -156,6 +184,9 @@ export class ApprovalRepository {
         SET status = ${decision},
             decided_at = ${now},
             decision_reason = ${reason ?? null},
+            decided_by_user_id = ${actor.actorUserId},
+            decided_by_role = ${actor.actorRole},
+            decision_channel = ${actor.channel},
             updated_at = ${now}
         WHERE id = ${id}
           AND status = 'PENDING'
@@ -166,14 +197,23 @@ export class ApprovalRepository {
 
     if (rows.length === 0) {
       logger.warn(
-        { approvalRequestId: id, decision },
+        { approvalRequestId: id, decision, actorUserId: actor.actorUserId, channel: actor.channel },
         'Decision failed: request not found, not PENDING, or expired',
       );
       return null;
     }
 
     const request = this.mapSnakeToCamel(rows[0]);
-    logger.info({ approvalRequestId: id, decision }, `Approval request ${decision.toLowerCase()}`);
+    logger.info(
+      {
+        approvalRequestId: id,
+        decision,
+        actorUserId: actor.actorUserId,
+        actorRole: actor.actorRole,
+        channel: actor.channel,
+      },
+      `Approval request ${decision.toLowerCase()}`,
+    );
     return request;
   }
 
@@ -292,17 +332,23 @@ export class ApprovalRepository {
     return this.mapSnakeToCamel(rows[0]);
   }
 
-  static async listPending(
-    userId: string | null,
-    filters?: { serverId?: string; toolName?: string },
-  ): Promise<ApprovalRequest[]> {
-    const where: Record<string, unknown> = {
-      status: 'PENDING',
-      expiresAt: { gt: new Date() },
-    };
+  static async list(params: ApprovalListParams): Promise<ApprovalListResult> {
+    const { userId, status, page, pageSize, filters } = params;
+    const safePage = Math.max(1, page);
+    const safePageSize = Math.max(1, pageSize);
+    const where: Record<string, unknown> = {};
 
     if (userId) {
       where.userId = userId;
+    }
+
+    if (status) {
+      if (status === 'PENDING') {
+        where.status = 'PENDING';
+        where.expiresAt = { gt: new Date() };
+      } else {
+        where.status = status;
+      }
     }
 
     if (filters?.serverId) {
@@ -313,10 +359,19 @@ export class ApprovalRepository {
       where.toolName = filters.toolName;
     }
 
-    return await approvalRequestModel.approvalRequest.findMany({
+    const requests = await approvalRequestModel.approvalRequest.findMany({
       where,
       orderBy: { createdAt: 'desc' },
+      skip: (safePage - 1) * safePageSize,
+      take: safePageSize + 1,
     });
+
+    return {
+      requests: requests.slice(0, safePageSize),
+      page: safePage,
+      pageSize: safePageSize,
+      hasMore: requests.length > safePageSize,
+    };
   }
 
   static async countPending(userId: string | null): Promise<number> {
@@ -462,6 +517,9 @@ export class ApprovalRepository {
           ? new Date((row.decided_at ?? row.decidedAt) as string | number | Date)
           : null,
       decisionReason: (row.decision_reason ?? row.decisionReason ?? null) as string | null,
+      decidedByUserId: (row.decided_by_user_id ?? row.decidedByUserId ?? null) as string | null,
+      decidedByRole: (row.decided_by_role ?? row.decidedByRole ?? null) as UserRole | null,
+      decisionChannel: (row.decision_channel ?? row.decisionChannel ?? null) as string | null,
       executedAt:
         (row.executed_at ?? row.executedAt)
           ? new Date((row.executed_at ?? row.executedAt) as string | number | Date)
