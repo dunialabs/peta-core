@@ -1,7 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
+import { createHash } from 'crypto';
 import { TokenValidator } from '../security/TokenValidator.js';
 import { AuthContext, AuthError, AuthErrorType, DisconnectReason } from '../types/auth.types.js';
-import { Permissions } from '../mcp/types/mcp.js';
+import { Permissions, ServerConfigWithEnabled } from '../mcp/types/mcp.js';
 import { SessionStore } from '../mcp/core/SessionStore.js';
 import { ClientSession } from '../mcp/core/ClientSession.js';
 import { UserRepository } from '../repositories/UserRepository.js';
@@ -9,9 +10,10 @@ import { AuthUtils } from '../utils/AuthUtils.js';
 import { isInitializeRequest, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { AUTH_CONFIG } from '../config/auth.config.js';
 import { OAuthTokenValidator } from '../security/OAuthTokenValidator.js';
-import { MCPEventLogType } from '../types/enums.js';
+import { UserRole, UserStatus, MCPEventLogType } from '../types/enums.js';
 import { LogService } from '../log/LogService.js';
 import { createLogger } from '../logger/index.js';
+import { prisma } from '../config/prisma.js';
 
 // Extend Express Request type
 declare global {
@@ -151,13 +153,36 @@ export class AuthMiddleware {
         token = req.query.api_key;
       }
 
-      if (!token) {
+      const hasAuthAttempt = !!(authHeader || req.query.token !== undefined || req.query.api_key !== undefined);
+      // NOTE: app.use() strips the mount path from req.path, so we must reconstruct
+      // the full path using req.baseUrl + req.path to correctly detect /mcp/public.
+      const fullPath = req.baseUrl + req.path;
+      const requestsAnonymous = fullPath === '/mcp/public' || fullPath === '/mcp/public/';
+
+      if (!token && hasAuthAttempt) {
         const authError = new AuthError(
           AuthErrorType.INVALID_TOKEN,
           'Authorization header with Bearer token is required'
         );
         return this.sendAuthError(req, res, authError, 'invalid_request');
       }
+
+      // Anonymous access is signaled by the /mcp/public path.
+      // The standard /mcp path always returns 401 + WWW-Authenticate to preserve
+      // the OAuth discovery flow (MCP SDK expects 401 to trigger authorization).
+      if (!token && !hasAuthAttempt && requestsAnonymous) {
+        return this.handleAnonymousAccess(req, res, next);
+      }
+
+      if (!token) {
+        // No token and not on /mcp/public path → standard 401 for OAuth discovery
+        const authError = new AuthError(
+          AuthErrorType.INVALID_TOKEN,
+          'Authorization header with Bearer token is required'
+        );
+        return this.sendAuthError(req, res, authError, 'invalid_request');
+      }
+
 
       // 3. Try to validate OAuth token
       let authContext: AuthContext;
@@ -330,9 +355,113 @@ export class AuthMiddleware {
   }
 
   /**
+   * Handle anonymous (token-less) access to MCP endpoint.
+   * Only called when the client connects via the /mcp/public endpoint path.
+   * Creates a synthetic session with permissions for all anonymously-enabled servers.
+   *
+   * IMPORTANT: Anonymous identity is derived from source IP (sha256 hash).
+   * This means rate limiting is per-source-IP, NOT per-user.
+   * Multiple users behind NAT/proxy/platform IPs share the same rate limit bucket.
+   */
+  private async handleAnonymousAccess(req: Request, res: Response, next: NextFunction): Promise<void> {
+    // 1. Origin validation (MCP spec — block non-HTTP(S) origins)
+    const origin = req.headers['origin'];
+    if (origin) {
+      try {
+        const url = new URL(origin);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+          const authError = new AuthError(AuthErrorType.PERMISSION_DENIED, 'Forbidden: invalid Origin header');
+          return this.sendAuthError(req, res, authError);
+        }
+      } catch {
+          const authError = new AuthError(AuthErrorType.PERMISSION_DENIED, 'Forbidden: invalid Origin header');
+        return this.sendAuthError(req, res, authError);
+      }
+    }
+
+    // 2. Query all anonymously-accessible servers
+    const servers = await prisma.server.findMany({
+      where: { anonymousAccess: true, enabled: true, allowUserInput: false },
+      select: { serverId: true, serverName: true, authType: true, anonymousRateLimit: true }
+    });
+
+    if (servers.length === 0) {
+      const authError = new AuthError(AuthErrorType.INVALID_TOKEN, 'No anonymous access available');
+      return this.sendAuthError(req, res, authError, 'invalid_request');
+    }
+
+    // 3. Build permissions for all anonymous servers
+    const permissions: Permissions = {};
+    let minRateLimit = Infinity;
+    for (const server of servers) {
+      permissions[server.serverId] = {
+        enabled: true,
+        serverName: server.serverName,
+        allowUserInput: false,
+        authType: server.authType,
+        tools: {}, resources: {}, prompts: {},
+        configured: false,
+        configTemplate: '{}',
+      } as ServerConfigWithEnabled;
+      minRateLimit = Math.min(minRateLimit, server.anonymousRateLimit);
+    }
+
+    // 4. Build synthetic AuthContext
+    // NOTE: userId is IP-derived — this is a per-source-IP identity, not a true user identity.
+    // Rate limiting applied downstream uses this userId as the bucket key.
+    const clientIp = req.clientIp || '0.0.0.0';
+    const ipHash = createHash('sha256').update(clientIp).digest('hex').substring(0, 12);
+    const authContext: AuthContext = {
+      kind: 'anonymous',
+      userId: `anon:${ipHash}`,
+      token: `anon-${ipHash}`,
+      role: UserRole.Guest,
+      status: UserStatus.Enabled,
+      permissions,
+      userPreferences: {} as Permissions,
+      launchConfigs: '{}',
+      authenticatedAt: new Date(),
+      expiresAt: null,
+      rateLimit: minRateLimit === Infinity ? 10 : minRateLimit,
+    };
+    authContext.userAgent = req.headers['user-agent'] as string || undefined;
+
+    // 5. Create session via existing SessionStore
+    const clientSession = await SessionStore.instance.createSession(
+      AuthUtils.generateSessionId(),
+      authContext.userId,
+      authContext.token,
+      authContext,
+      clientIp,
+      (req.headers['user-agent'] as string) || 'anonymous'
+    );
+
+    req.authContext = authContext;
+    req.clientSession = clientSession;
+    res.setHeader('Mcp-Session-Id', clientSession.sessionId);
+    res.setHeader('mcp-session-id', clientSession.sessionId);
+
+    // 6. Audit log
+    LogService.getInstance().enqueueLog({
+      action: MCPEventLogType.AuthTokenValidation,
+      userId: authContext.userId,
+      sessionId: clientSession.sessionId,
+      ip: clientIp,
+      userAgent: req.headers['user-agent'] as string,
+      tokenMask: 'anonymous',
+    });
+
+    this.logger.info({ ip: clientIp, sessionId: clientSession.sessionId, serverCount: servers.length }, 'Anonymous session created');
+
+    next();
+  }
+
+  /**
    * Check and refresh user info (every 5 minutes)
    */
   private async refreshUserInfoIfNeeded(session: ClientSession): Promise<void> {
+    // Skip refresh for anonymous sessions (no real user in DB)
+    if (session.authContext.kind === 'anonymous') return;
     const now = Date.now();
     const lastRefresh = session.getLastUserInfoRefresh();
     
@@ -369,6 +498,7 @@ export class AuthMiddleware {
     const tokenMask = session.token.substring(0, 8) + '...' + session.token.substring(session.token.length - 8);
 
     const updatedAuthContext: AuthContext = {
+      kind: session.authContext.kind,
       userId: user.userId,
       token: tokenMask,
       role: user.role,

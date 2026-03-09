@@ -66,6 +66,14 @@ model Server {
   cachedResourceTemplates String? @map("cached_resource_templates") @db.Text  // JSON: ListResourceTemplatesResult
   cachedPrompts        String?  @map("cached_prompts") @db.Text  // JSON: ListPromptsResult
 
+  // ========== Anonymous access ==========
+  // Anonymous access is available via the /mcp/public endpoint path.
+  anonymousAccess    Boolean  @default(false) @map("anonymous_access")
+  // NOTE: This is a per-source-IP rate limit, NOT a per-user rate limit.
+  // Multiple users behind the same NAT/proxy/platform IP share this bucket.
+  // See docs/api/API.md for semantic details.
+  anonymousRateLimit Int      @default(10)    @map("anonymous_rate_limit")  // per-source-IP, per-minute
+
   @@map("server")
 }
 
