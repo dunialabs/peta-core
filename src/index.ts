@@ -195,7 +195,7 @@ export async function startApplication() {
     };
     // ==================== Special request handlers - must be before all middleware ====================
 
-    app.put(['/mcp', '/mcp/'], (req, res) => {
+    app.put(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], (req, res) => {
       if (isDevelopment) {
         requestLogger.debug({
           headers: req.headers,
@@ -217,7 +217,7 @@ export async function startApplication() {
     );
     });
 
-    app.patch(['/mcp', '/mcp/'], (req, res) => {
+    app.patch(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], (req, res) => {
       if (isDevelopment) {
         requestLogger.debug({
           headers: req.headers,
@@ -240,7 +240,7 @@ export async function startApplication() {
     });
 
     // Handle HEAD requests - for health checks and availability probes
-    app.head(['/mcp', '/mcp/'], (req, res) => {
+    app.head(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], async (req, res) => {
       if (isDevelopment) {
         requestLogger.debug({
           headers: req.headers,
@@ -249,10 +249,14 @@ export async function startApplication() {
         }, 'Received HEAD request');
       }
       // Check if token is present (Authorization header or query parameter)
-      const hasAuthHeader = req.headers['authorization']?.startsWith('Bearer ');
-      const hasTokenParam = typeof req.query.token === 'string' && req.query.token.length > 0;
-      const hasApiKeyParam = typeof req.query.api_key === 'string' && req.query.api_key.length > 0;
+      const authHeaderValue = req.headers['authorization'];
+      const bearerToken = authHeaderValue?.startsWith('Bearer ') ? authHeaderValue.substring(7).trim() : '';
+      const hasAuthHeader = bearerToken.length > 0;
+      const hasTokenParam = typeof req.query.token === 'string' && req.query.token.trim().length > 0;
+      const hasApiKeyParam = typeof req.query.api_key === 'string' && req.query.api_key.trim().length > 0;
       const hasToken = hasAuthHeader || hasTokenParam || hasApiKeyParam;
+      // Mirror POST auth-intent logic: detect malformed auth attempts
+      const hasAuthAttempt = !!(req.headers['authorization'] || req.query.token !== undefined || req.query.api_key !== undefined);
 
       // Get base URL (supports local development and production environments)
       const protocol = req.headers['x-forwarded-proto'] as string || 'https';
@@ -268,9 +272,23 @@ export async function startApplication() {
           metadataUrl,
         }, 'HEAD request auth check');
       }
-      if (!hasToken) {
-        // Return 401 Unauthorized + WWW-Authenticate with resource_metadata (Smithery style)
-        // This is the response format expected by Claude Web
+      // Anonymous access is determined by path: /mcp/public signals anonymous intent
+      const requestsAnonymous = req.path === '/mcp/public' || req.path === '/mcp/public/';
+      if (!hasToken && hasAuthAttempt) {
+        // Malformed auth (empty Bearer, empty ?token=, empty ?api_key=) — reject before anything else
+        // Mirrors POST handler: malformed auth always returns 401 regardless of path
+        res.status(401).set({
+          'X-Powered-By': 'Express',
+          'Access-Control-Allow-Origin': CORS_CONFIG.ALLOW_ORIGIN,
+          'Access-Control-Expose-Headers': CORS_CONFIG.EXPOSE_HEADERS_BASIC,
+          'WWW-Authenticate': `Bearer error="invalid_request", error_description="Malformed authorization", resource_metadata="${metadataUrl}"`,
+          'Allow': CORS_CONFIG.ALLOW_METHODS,
+          'Content-Type': 'application/json',
+          'mcp-protocol-version': LATEST_PROTOCOL_VERSION,
+          connection: 'keep-alive',
+        }).end();
+      } else if (!hasToken && !requestsAnonymous) {
+        // No token, not on /mcp/public path — standard OAuth challenge (Smithery/Claude Web style)
         res.status(401).set({
           'X-Powered-By': 'Express',
           'Access-Control-Allow-Origin': CORS_CONFIG.ALLOW_ORIGIN,
@@ -290,6 +308,38 @@ export async function startApplication() {
               id: null
           })
       );
+      } else if (!hasToken && !hasAuthAttempt && requestsAnonymous) {
+        // Anonymous HEAD probe — verify anonymous servers actually exist before confirming availability
+        try {
+          const anonServerCount = await prisma.server.count({
+            where: { anonymousAccess: true, enabled: true, allowUserInput: false }
+          });
+          if (anonServerCount > 0) {
+            res.status(200).set({
+              'X-Powered-By': 'Express',
+              'Access-Control-Allow-Origin': CORS_CONFIG.ALLOW_ORIGIN,
+              'Access-Control-Expose-Headers': CORS_CONFIG.EXPOSE_HEADERS_BASIC,
+              'Allow': CORS_CONFIG.ALLOW_METHODS,
+              'Content-Type': 'application/json',
+              'mcp-protocol-version': LATEST_PROTOCOL_VERSION,
+              connection: 'keep-alive',
+            }).end();
+          } else {
+            // No anonymous servers configured — fall back to 401 OAuth challenge
+            res.status(401).set({
+              'X-Powered-By': 'Express',
+              'Access-Control-Allow-Origin': CORS_CONFIG.ALLOW_ORIGIN,
+              'Access-Control-Expose-Headers': CORS_CONFIG.EXPOSE_HEADERS_BASIC,
+              'WWW-Authenticate': `Bearer error="invalid_token", error_description="No anonymous access available", resource_metadata="${metadataUrl}"`,
+              'Allow': CORS_CONFIG.ALLOW_METHODS,
+              'Content-Type': 'application/json',
+              'mcp-protocol-version': LATEST_PROTOCOL_VERSION,
+              connection: 'keep-alive',
+            }).end();
+          }
+        } catch {
+          res.status(500).end();
+        }
       } else {
         res.status(405 ).set({
           'X-Powered-By': 'Express',
@@ -312,7 +362,7 @@ export async function startApplication() {
       }
     });
 
-    app.options(['/mcp', '/mcp/'], (req, res) => {
+    app.options(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], (req, res) => {
       if (isDevelopment) {
         requestLogger.debug({
           headers: req.headers,
@@ -330,6 +380,7 @@ export async function startApplication() {
         'X-Powered-By': 'Express',
       }).end();
     });
+
 
     // ==================== General middleware ====================
 
@@ -371,7 +422,7 @@ export async function startApplication() {
     mcpRouter.registerRoutes(app, {
       ipWhitelistMiddleware: authModule.ipWhitelistMiddleware,
       authMiddleware: authModule.authMiddleware,
-      rateLimitMiddleware: authModule.rateLimitMiddleware
+      rateLimitMiddleware: authModule.rateLimitMiddleware,
     });
 
     // ==================== Admin route registration ====================

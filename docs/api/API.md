@@ -42,6 +42,45 @@ After initialization, Peta Core returns `Mcp-Session-Id`; include it for subsequ
 
 **Get an OAuth token**: Obtain an OAuth 2.0 access token through the OAuth endpoints. See [OAuth 2.0 Authentication](#2-oauth-20-authentication) for details.
 
+### Anonymous Access
+
+Peta Core supports anonymous (token-less) access to MCP servers that have been explicitly configured with `anonymousAccess: true` by an administrator.
+
+To use anonymous access, clients connect to the **`/mcp/public`** endpoint path instead of `/mcp`:
+
+```
+POST /mcp/public
+```
+
+The standard `/mcp` endpoint always returns `401 + WWW-Authenticate` for tokenless requests, preserving the OAuth discovery flow.
+
+#### Anonymous Access Behavior
+
+| Request | Behavior |
+|---------|----------|
+| `POST /mcp` (no token) | `401 + WWW-Authenticate` — triggers OAuth flow |
+| `POST /mcp/public` (no token) | Anonymous session if anonymous servers exist, otherwise `401` |
+| `POST /mcp` (with valid token) | Normal authenticated session |
+| `POST /mcp/public` (with valid token) | Normal authenticated session (same as `/mcp`) |
+| `HEAD /mcp` (no token) | `401 + WWW-Authenticate` — OAuth discovery probe |
+| `HEAD /mcp/public` (no token) | `200` — indicates anonymous access is available |
+
+#### Anonymous Rate Limiting
+
+> **Important**: Anonymous rate limiting is **per-source-IP**, not per-user.
+>
+> Multiple users behind the same NAT, corporate proxy, or platform IP (e.g., Claude platform fixed IPs) share the same rate limit bucket. The `anonymousRateLimit` configured on each server defines the maximum requests per minute from a single source IP.
+>
+> Without a login state or trusted upstream identity header, the server cannot distinguish individual anonymous users. This is an inherent limitation of anonymous access.
+
+#### Configuration
+
+Anonymous access is configured per-server via the Admin API:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `anonymousAccess` | `boolean` | `false` | Enable anonymous access for this server |
+| `anonymousRateLimit` | `integer` | `10` | Per-source-IP requests per minute (1–1000) |
 ---
 
 ## API Categories
