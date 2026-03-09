@@ -396,7 +396,7 @@ export class ServerHandler {
   async handleGetServers(request: AdminRequest<any>): Promise<any> {
     const { proxyId, enabled, serverId } = request.data || {};
 
-    // Select fields to exclude: transportType, cachedTools, cachedResources, cachedResourceTemplates, cachedPrompts
+    // Select fields to exclude: cachedTools, cachedResources, cachedResourceTemplates, cachedPrompts
     const select = {
       serverId: true,
       serverName: true,
@@ -413,7 +413,8 @@ export class ServerHandler {
       category: true,
       lazyStartEnabled: true,
       publicAccess: true,
-      usePetaOauthConfig: true
+      usePetaOauthConfig: true,
+      transportType: true,
     };
 
     // Exact query for specific server
