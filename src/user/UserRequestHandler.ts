@@ -190,7 +190,7 @@ export class UserRequestHandler {
     userToken: string,
     data: ConfigureServerRequest,
   ): Promise<ConfigureServerResponseData> {
-    const { serverId, authConf, restfulApiAuth, remoteAuth } = data;
+    const { serverId, authConf, restfulApiAuth, remoteAuth, stdioEnv } = data;
     this.logger.debug({ userId, serverId }, 'Configuring server for user');
 
     // Import dependencies dynamically
@@ -483,6 +483,34 @@ export class UserRequestHandler {
             },
           };
         }
+        break;
+      }
+      case ServerCategory.CustomStdio: {
+        if (server.configTemplate === '' || server.configTemplate === '{}') {
+          throw new UserError(
+            `Server ${serverId} does not have a configuration template`,
+            UserErrorCode.SERVER_NO_CONFIG_TEMPLATE,
+          );
+        }
+        const stdioTemplate = JSON.parse(server.configTemplate);
+
+        if (!stdioTemplate.command) {
+          throw new UserError(
+            `Server ${serverId} has invalid stdio configuration: missing command`,
+            UserErrorCode.SERVER_CONFIG_INVALID,
+          );
+        }
+
+        // command and args are immutable (set by admin)
+        // env is merged: admin defaults + user overrides (user wins on key collision)
+        const adminEnv = stdioTemplate.env ?? {};
+        const userEnvOverrides = stdioEnv ?? {};
+
+        launchConfig = {
+          command: stdioTemplate.command,
+          args: stdioTemplate.args ?? [],
+          env: { ...adminEnv, ...userEnvOverrides },
+        };
         break;
       }
       case ServerCategory.RestApi:

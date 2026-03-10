@@ -819,7 +819,7 @@ export class ServerManager {
       // 6. Establish connection
       await client.connect(transport);
       this.logger.info({ serverName: serverEntity.serverName }, 'Connection established');
-      if (serverEntity.category === ServerCategory.CustomRemote) {
+      if (serverEntity.category === ServerCategory.CustomRemote || serverEntity.category === ServerCategory.CustomStdio) {
         const serverInfo = client.getServerVersion();
         if (serverInfo?.name && serverInfo.name !== serverEntity.serverName) {
           let name = serverInfo.name.trim();
