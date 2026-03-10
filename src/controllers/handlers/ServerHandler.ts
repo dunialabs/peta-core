@@ -591,6 +591,7 @@ export class ServerHandler {
       requestParams: JSON.stringify({ serverId: serverId })
     });
 
+    server = structuredClone(server);
     if (server.category !== ServerCategory.RestApi) {
       server.configTemplate = null;
     }

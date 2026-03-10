@@ -296,10 +296,11 @@ export class ClientSession {
     const isAnonymous = this.authContext.kind === 'anonymous';
     if (isAnonymous && !serverContext.serverEntity.anonymousAccess) return false;
     const serverPermsEnabled = this.permissions[serverID]?.enabled
-      ?? (isAnonymous ? false : serverContext.serverEntity.publicAccess);
+      ?? (isAnonymous ? serverContext.serverEntity.anonymousAccess : serverContext.serverEntity.publicAccess);
     const userPreferencesEnabled = this.userPreferences[serverID]?.enabled ?? true;
 
     if (serverContext.serverEntity.allowUserInput) {
+      if (isAnonymous) { return false; }
       if (serverContext.userId !== this.userId) return false;
       return serverPermsEnabled && userPreferencesEnabled;
     } else {
