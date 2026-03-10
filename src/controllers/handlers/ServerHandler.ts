@@ -470,8 +470,8 @@ export class ServerHandler {
         AdminErrorCode.INVALID_REQUEST
       );
     }
-    const isRestApiOrCustomRemote = existingServer.category === ServerCategory.RestApi || existingServer.category === ServerCategory.CustomRemote;
-    if (!isRestApiOrCustomRemote && configTemplate !== undefined) {
+    const hasEditableConfigTemplate = existingServer.category === ServerCategory.RestApi || existingServer.category === ServerCategory.CustomRemote || existingServer.category === ServerCategory.CustomStdio;
+    if (!hasEditableConfigTemplate && configTemplate !== undefined) {
       throw new AdminError(
         'configTemplate field is immutable after server creation',
         AdminErrorCode.INVALID_REQUEST
@@ -489,7 +489,7 @@ export class ServerHandler {
         }
       }
     }
-    if (isRestApiOrCustomRemote && configTemplate !== undefined && configTemplate !== null && configTemplate.trim() !== '' && configTemplate.trim() !== existingServer.configTemplate) {
+    if (hasEditableConfigTemplate && configTemplate !== undefined && configTemplate !== null && configTemplate.trim() !== '' && configTemplate.trim() !== existingServer.configTemplate) {
       updateData.configTemplate = configTemplate;
     }
     if (lazyStartEnabled !== undefined && lazyStartEnabled !== existingServer.lazyStartEnabled) {
@@ -818,7 +818,7 @@ export class ServerHandler {
       throw new AdminError(`Server ${targetId} not found`, AdminErrorCode.SERVER_NOT_FOUND);
     }
 
-    if (entity.allowUserInput && !(entity.category === ServerCategory.RestApi || entity.category === ServerCategory.CustomRemote)) {
+    if (entity.allowUserInput && !(entity.category === ServerCategory.RestApi || entity.category === ServerCategory.CustomRemote || entity.category === ServerCategory.CustomStdio)) {
       throw new AdminError(`Server ${targetId} is a template server and cannot be updated`, AdminErrorCode.INVALID_REQUEST);
     }
 
