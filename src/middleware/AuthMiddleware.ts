@@ -154,10 +154,10 @@ export class AuthMiddleware {
       }
 
       const hasAuthAttempt = !!(authHeader || req.query.token !== undefined || req.query.api_key !== undefined);
-      // NOTE: app.use() strips the mount path from req.path, so we must reconstruct
-      // the full path using req.baseUrl + req.path to correctly detect /mcp/public.
-      const fullPath = req.baseUrl + req.path;
-      const requestsAnonymous = fullPath === '/mcp/public' || fullPath === '/mcp/public/';
+      // Use the original request path so anonymous access detection does not depend
+      // on how Express strips mount prefixes for the current middleware layer.
+      const originalPath = new URL(req.originalUrl, 'http://localhost').pathname;
+      const requestsAnonymous = originalPath === '/mcp/public' || originalPath === '/mcp/public/';
 
       if (!token && hasAuthAttempt) {
         const authError = new AuthError(
