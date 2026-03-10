@@ -555,7 +555,7 @@ export class ServerHandler {
         serverContext = context;
         if (context) {
           context.serverEntity = server;
-          if (willHandlePublicAccessChange) {
+          if (willHandlePublicAccessChange || updateData.anonymousAccess) {
             serverContext = context;
           }
         }
