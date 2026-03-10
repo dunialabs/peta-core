@@ -830,8 +830,8 @@ export class ServerManager {
           await ServerRepository.update(serverEntity.serverId, {
             serverName: name
           });
+          serverEntity.serverName = name;
         }
-        serverEntity.serverName = serverInfo?.name ?? serverEntity.serverName;
       }
 
       // 7. Register global reverse request handlers
