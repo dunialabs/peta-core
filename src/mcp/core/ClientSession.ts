@@ -293,10 +293,14 @@ export class ClientSession {
     if (!serverContext.serverEntity.enabled) return false;
     if (serverContext.status !== ServerStatus.Online && serverContext.status !== ServerStatus.Sleeping) return false;
 
-    const serverPermsEnabled = this.permissions[serverID]?.enabled ?? serverContext.serverEntity.publicAccess;
+    const isAnonymous = this.authContext.kind === 'anonymous';
+    if (isAnonymous && !serverContext.serverEntity.anonymousAccess) return false;
+    const serverPermsEnabled = this.permissions[serverID]?.enabled
+      ?? (isAnonymous ? serverContext.serverEntity.anonymousAccess : serverContext.serverEntity.publicAccess);
     const userPreferencesEnabled = this.userPreferences[serverID]?.enabled ?? true;
 
     if (serverContext.serverEntity.allowUserInput) {
+      if (isAnonymous) { return false; }
       if (serverContext.userId !== this.userId) return false;
       return serverPermsEnabled && userPreferencesEnabled;
     } else {
@@ -305,6 +309,7 @@ export class ClientSession {
   }
 
   canAccessServerCapabilities(serverID: string, type: 'tool' | 'resource' | 'prompt', name: string): ServerContext | undefined {
+    if (!this.canAccessServer(serverID)) return undefined;
     const serverContext = ServerManager.instance.getServerContext(serverID, this.userId);
     if (!serverContext) return undefined;
     if (!serverContext.serverEntity.enabled) return undefined;
