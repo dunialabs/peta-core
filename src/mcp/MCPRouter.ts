@@ -39,27 +39,28 @@ export class MCPRouter {
   registerRoutes(app: Express, middlewares: MCPMiddlewares): void {
     const { ipWhitelistMiddleware, authMiddleware, rateLimitMiddleware } = middlewares;
 
-    // ==================== MCP Endpoint Middleware ====================
+    // ==================== MCP Endpoint Middleware (Authenticated + Anonymous) ====================
 
     // IP whitelist middleware - applied before authentication
-    app.use(['/mcp', '/mcp/'], ipWhitelistMiddleware.checkIpWhitelist);
+    app.use(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], ipWhitelistMiddleware.checkIpWhitelist);
 
     // Authentication middleware
-    app.use(['/mcp', '/mcp/'], authMiddleware.authenticate);
+    app.use(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], authMiddleware.authenticate);
 
     // Rate limit middleware - applied after authentication
-    app.use(['/mcp', '/mcp/'], rateLimitMiddleware.checkRateLimit);
+    app.use(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], rateLimitMiddleware.checkRateLimit);
 
-    // ==================== MCP Main Endpoints ====================
+    // ==================== MCP Main Endpoints (Authenticated + Anonymous) ====================
 
     // POST /mcp - Handle MCP request
-    app.post(['/mcp', '/mcp/'], this.mcpController.handlePost);
+    app.post(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], this.mcpController.handlePost);
 
     // GET /mcp - Handle SSE stream
-    app.get(['/mcp', '/mcp/'], this.mcpController.handleGet);
+    app.get(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], this.mcpController.handleGet);
 
     // DELETE /mcp - Handle session termination
-    app.delete(['/mcp', '/mcp/'], this.mcpController.handleDelete);
+    app.delete(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], this.mcpController.handleDelete);
+
 
     this.logger.info('MCP routes registered successfully');
   }
