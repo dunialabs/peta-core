@@ -484,7 +484,7 @@ export class ServerHandler {
     if (launchConfig !== undefined) {
       updateData.launchConfig = typeof launchConfig === 'string' ? launchConfig : JSON.stringify(launchConfig);
       if (updateData.launchConfig !== existingServer.launchConfig) {
-        if (!(existingServer.category === ServerCategory.Template && existingServer.allowUserInput === true && existingServer.authType === ServerAuthType.ApiKey)) {
+        if (existingServer.allowUserInput === true && !(existingServer.category === ServerCategory.RestApi || existingServer.category === ServerCategory.CustomRemote || existingServer.category === ServerCategory.CustomStdio)) {
           throw new AdminError('This type of server does not allow modification of the launch configuration.', AdminErrorCode.INVALID_REQUEST);
         }
       }
