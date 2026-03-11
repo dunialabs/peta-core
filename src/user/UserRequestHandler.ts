@@ -440,6 +440,16 @@ export class UserRequestHandler {
         }
         break;
       case ServerCategory.CustomRemote: {
+        if (
+          remoteAuth === undefined ||
+          remoteAuth === null ||
+          (remoteAuth.params.length === 0 && remoteAuth.headers.length === 0)
+        ) {
+          throw new UserError(
+            `remoteAuth is required and cannot be empty and must contain either params or headers`,
+            UserErrorCode.SERVER_CONFIG_INVALID,
+          );
+        }
         if (server.configTemplate === '' || server.configTemplate === '{}') {
           throw new UserError(
             `Server ${serverId} does not have a configuration template`,
@@ -447,42 +457,21 @@ export class UserRequestHandler {
           );
         }
         const configTemplate = JSON.parse(server.configTemplate);
-
-        if (configTemplate.command) {
-          launchConfig = {
-            command: configTemplate.command,
-            args: configTemplate.args ?? [],
-            env: configTemplate.env ?? {},
-          };
-        } else {
-          if (
-            remoteAuth === undefined ||
-            remoteAuth === null ||
-            (remoteAuth.params.length === 0 && remoteAuth.headers.length === 0)
-          ) {
-            throw new UserError(
-              `remoteAuth is required and cannot be empty and must contain either params or headers`,
-              UserErrorCode.SERVER_CONFIG_INVALID,
-            );
+        let url = configTemplate.url;
+        if (remoteAuth.params && Object.keys(remoteAuth.params).length > 0) {
+          if (url.includes('?')) {
+            const urlParts = url.split('?');
+            const urlParams = new URLSearchParams(remoteAuth.params);
+            url = urlParts[0];
+            url = `${url}?${urlParams.toString()}`;
+          } else {
+            url = `${url}?${new URLSearchParams(remoteAuth.params).toString()}`;
           }
-          let url = configTemplate.url;
-          if (remoteAuth.params && Object.keys(remoteAuth.params).length > 0) {
-            if (url.includes('?')) {
-              const urlParts = url.split('?');
-              const urlParams = new URLSearchParams(remoteAuth.params);
-              url = urlParts[0];
-              url = `${url}?${urlParams.toString()}`;
-            } else {
-              url = `${url}?${new URLSearchParams(remoteAuth.params).toString()}`;
-            }
-          }
-          launchConfig = {
-            url: url,
-            headers: {
-              ...remoteAuth.headers,
-            },
-          };
         }
+        launchConfig = {
+          url: url,
+          headers: { ...configTemplate.headers, ...remoteAuth.headers },
+        };
         break;
       }
       case ServerCategory.CustomStdio: {
