@@ -159,7 +159,7 @@ export class ServerHandler {
    * Create server (2010)
    */
   async handleCreateServer(request: AdminRequest<any>, token: string): Promise<any> {
-    const { serverId, serverName, enabled, launchConfig, capabilities, createdAt, updatedAt, allowUserInput, proxyId, toolTmplId, authType, configTemplate, category, lazyStartEnabled, publicAccess } = request.data;
+    const { serverId, serverName, enabled, launchConfig, capabilities, createdAt, updatedAt, allowUserInput, proxyId, toolTmplId, authType, configTemplate, category, lazyStartEnabled, publicAccess, anonymousAccess, anonymousRateLimit } = request.data;
 
     if (!serverId) {
       throw new AdminError('Missing required field: serverId', AdminErrorCode.INVALID_REQUEST);
@@ -189,6 +189,10 @@ export class ServerHandler {
 
     if (typeof category !== 'number' || !Object.values(ServerCategory).includes(category as ServerCategory)) {
       throw new AdminError('Invalid category', AdminErrorCode.INVALID_REQUEST);
+    }
+
+    if (anonymousRateLimit !== undefined && (typeof anonymousRateLimit !== 'number' || !Number.isInteger(anonymousRateLimit) || anonymousRateLimit < 1 || anonymousRateLimit > 1000)) {
+      throw new AdminError('Invalid anonymousRateLimit: must be an integer between 1 and 1000 (per-source-IP, per-minute)', AdminErrorCode.INVALID_REQUEST);
     }
 
     const configTemplateInvalid = !configTemplate || configTemplate.trim() === '' || configTemplate.trim() === '{}';
@@ -378,7 +382,9 @@ export class ServerHandler {
       category: category,
       lazyStartEnabled: lazyStartEnabled,
       publicAccess: publicAccess ?? false,
-      usePetaOauthConfig: usePetaOauthConfigValue
+      usePetaOauthConfig: usePetaOauthConfigValue,
+      anonymousAccess: anonymousAccess ?? false,
+      anonymousRateLimit: anonymousRateLimit ?? 10
     });
 
     // Log admin operation
@@ -415,6 +421,8 @@ export class ServerHandler {
       publicAccess: true,
       usePetaOauthConfig: true,
       transportType: true,
+      anonymousAccess: true,
+      anonymousRateLimit: true
     };
 
     // Exact query for specific server
@@ -451,7 +459,7 @@ export class ServerHandler {
    * Update server (2012)
    */
   async handleUpdateServer(request: AdminRequest<any>, token: string): Promise<any> {
-    const { serverId, serverName, launchConfig, capabilities, enabled, allowUserInput, configTemplate, lazyStartEnabled, publicAccess } = request.data;
+    const { serverId, serverName, launchConfig, capabilities, enabled, allowUserInput, configTemplate, lazyStartEnabled, publicAccess, anonymousAccess, anonymousRateLimit } = request.data;
 
     if (!serverId) {
       throw new AdminError('Missing required field: serverId', AdminErrorCode.INVALID_REQUEST);
@@ -498,6 +506,17 @@ export class ServerHandler {
     if (publicAccess !== undefined && publicAccess !== existingServer.publicAccess) {
       updateData.publicAccess = publicAccess;
     }
+    if (anonymousAccess !== undefined && anonymousAccess !== existingServer.anonymousAccess) {
+      updateData.anonymousAccess = anonymousAccess;
+    }
+    if (anonymousRateLimit !== undefined) {
+      if (typeof anonymousRateLimit !== 'number' || !Number.isInteger(anonymousRateLimit) || anonymousRateLimit < 1 || anonymousRateLimit > 1000) {
+        throw new AdminError('Invalid anonymousRateLimit: must be an integer between 1 and 1000 (per-source-IP, per-minute)', AdminErrorCode.INVALID_REQUEST);
+      }
+      if (anonymousRateLimit !== existingServer.anonymousRateLimit) {
+        updateData.anonymousRateLimit = anonymousRateLimit;
+      }
+    }
 
     const updatedCapabilities = await this.getUpdatedCapabilities(capabilities, existingServer.capabilities);
     if (updatedCapabilities) {
@@ -542,7 +561,7 @@ export class ServerHandler {
           if (!launchConfigReconnected) {
             context.serverEntity = server;
           }
-          if (willHandlePublicAccessChange) {
+          if (willHandlePublicAccessChange || updateData.anonymousAccess) {
             serverContext = context;
           }
         }
@@ -585,6 +604,7 @@ export class ServerHandler {
       requestParams: JSON.stringify({ serverId: serverId })
     });
 
+    server = structuredClone(server);
     if (server.category !== ServerCategory.RestApi) {
       server.configTemplate = null;
     }
