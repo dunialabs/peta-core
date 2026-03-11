@@ -535,7 +535,7 @@ export class ServerManager {
 
       if (serverContext.serverEntity.launchConfig !== serverEntity.launchConfig) {
         await this.removeServer(serverEntity.serverId);
-      }else if (serverContext.status === ServerStatus.Online) {
+      } else if (serverContext.status === ServerStatus.Online) {
         return serverContext;
       } else if (serverContext.status === ServerStatus.Connecting) {
         return serverContext;
