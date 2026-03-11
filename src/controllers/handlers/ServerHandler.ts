@@ -509,25 +509,28 @@ export class ServerHandler {
     const willHandlePublicAccessChange = publicAccess !== undefined && publicAccess !== existingServer.publicAccess;
 
     let server = await ServerRepository.update(serverId, updateData);
+    let launchConfigReconnected = false;
 
     let serverContext: ServerContext | undefined;
     const affectedSessions = SessionStore.instance.getSessionsUsingServer(serverId);
     if (existingServer.enabled === true && updateData.enabled === true) {
       // Server remains enabled
       if (updateData.capabilities !== undefined && updateData.launchConfig !== undefined) {
-        await this.updateServerLaunchConfig(serverId, updateData.launchConfig, token);
+        launchConfigReconnected = await this.updateServerLaunchConfig(serverId, updateData.launchConfig, token);
       } else if (updateData.capabilities !== undefined) {
         await this.updateServerCapabilities(serverId, updateData.capabilities);
         serverContext = await this.updateLazyStartEnabled(existingServer, server, updateData.lazyStartEnabled);
       } else if (updateData.launchConfig !== undefined) {
-        await this.updateServerLaunchConfig(serverId, updateData.launchConfig, token);
+        launchConfigReconnected = await this.updateServerLaunchConfig(serverId, updateData.launchConfig, token);
       } else if (updateData.lazyStartEnabled !== undefined) {
         serverContext = await this.updateLazyStartEnabled(existingServer, server, updateData.lazyStartEnabled);
       }
       if (existingServer.allowUserInput) {
         const temporaryServers = ServerManager.instance.getTemporaryServers(serverId);
         for (const temporaryServer of temporaryServers) {
-          temporaryServer.serverEntity = server;
+          if (!launchConfigReconnected) {
+            temporaryServer.serverEntity = server;
+          }
           if (willHandlePublicAccessChange) {
             serverContext = temporaryServer;
           }
@@ -536,7 +539,9 @@ export class ServerHandler {
         const context = ServerManager.instance.getServerContext(serverId);
         serverContext = context;
         if (context) {
-          context.serverEntity = server;
+          if (!launchConfigReconnected) {
+            context.serverEntity = server;
+          }
           if (willHandlePublicAccessChange) {
             serverContext = context;
           }
@@ -556,7 +561,14 @@ export class ServerHandler {
 
     } else if (existingServer.enabled === false && updateData.enabled === true) {
       // Server changed from disabled to enabled
-      serverContext = await ServerManager.instance.addServer(serverId, token);
+      serverContext = await ServerManager.instance.addServer(server, token);
+    }
+
+    if (launchConfigReconnected) {
+      const refreshed = await ServerRepository.findByServerId(serverId);
+      if (refreshed) {
+        server = refreshed;
+      }
     }
 
     if (serverContext) {
@@ -811,7 +823,7 @@ export class ServerHandler {
     this.notifyUsersOfServerChange(targetId, SessionStore.instance.getSessionsUsingServer(targetId), 'capabilities_updated', changed);
   }
 
-  private async updateServerLaunchConfig(targetId: string, launchConfig: string, token: string): Promise<void> {
+  private async updateServerLaunchConfig(targetId: string, launchConfig: string, token: string): Promise<boolean> {
     const entity = await ServerRepository.findByServerId(targetId);
 
     if (!entity) {
@@ -827,21 +839,22 @@ export class ServerHandler {
     const oldLaunchConfig = entity.launchConfig;
     if (launchConfig === oldLaunchConfig) {
       if (entity.category !== ServerCategory.RestApi) {
-        return;
+        return false;
       }
       
       if (entity.configTemplate === serverContext?.serverEntity.configTemplate) {
-        return;
+        return false;
       }
     }
 
     const newServer = await ServerRepository.updateLaunchConfig(targetId, launchConfig);
 
     if (!serverContext) {
-      return;
+      return false;
     }
     await ServerManager.instance.reconnectServer(newServer, token);
     await this.notifyUsersOfServerChangeByServerContext(serverContext, SessionStore.instance.getSessionsUsingServer(targetId), 'launch_cmd_updated');
+    return true;
   }
 
   private async updateLazyStartEnabled(existingServer: Server, newServer: Server, lazyStartEnabled?: boolean | undefined): Promise<ServerContext | undefined> {
