@@ -535,7 +535,7 @@ export class ServerManager {
 
       if (serverContext.serverEntity.launchConfig !== serverEntity.launchConfig) {
         await this.removeServer(serverEntity.serverId);
-      }else if (serverContext.status === ServerStatus.Online) {
+      } else if (serverContext.status === ServerStatus.Online) {
         return serverContext;
       } else if (serverContext.status === ServerStatus.Connecting) {
         return serverContext;
@@ -819,7 +819,7 @@ export class ServerManager {
       // 6. Establish connection
       await client.connect(transport);
       this.logger.info({ serverName: serverEntity.serverName }, 'Connection established');
-      if (serverEntity.category === ServerCategory.CustomRemote) {
+      if (serverEntity.category === ServerCategory.CustomRemote || serverEntity.category === ServerCategory.CustomStdio) {
         const serverInfo = client.getServerVersion();
         if (serverInfo?.name && serverInfo.name !== serverEntity.serverName) {
           let name = serverInfo.name.trim();
@@ -830,8 +830,8 @@ export class ServerManager {
           await ServerRepository.update(serverEntity.serverId, {
             serverName: name
           });
+          serverEntity.serverName = name;
         }
-        serverEntity.serverName = serverInfo?.name ?? serverEntity.serverName;
       }
 
       // 7. Register global reverse request handlers

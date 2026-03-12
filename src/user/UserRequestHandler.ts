@@ -24,7 +24,7 @@ import {
   ConfigureServerRequest,
   ConfigureServerResponseData,
   UnconfigureServerRequest,
-  UnconfigureServerResponseData
+  UnconfigureServerResponseData,
 } from './types.js';
 import { AuthUtils } from '../utils/AuthUtils.js';
 import { exchangeAuthorizationCode } from '../mcp/oauth/exchange.js';
@@ -69,7 +69,7 @@ export class UserRequestHandler {
    */
   async handleSetCapabilities(
     userId: string,
-    submittedCapabilities: McpServerCapabilities
+    submittedCapabilities: McpServerCapabilities,
   ): Promise<void> {
     this.logger.debug({ userId }, 'Setting user capabilities');
 
@@ -80,11 +80,14 @@ export class UserRequestHandler {
     const currentCapabilities = await this.handleGetCapabilities(userId);
 
     // 2. Extract and validate enabled fields (only save enabled for existing items)
-    const validatedPreferences = this.extractEnabledFields(submittedCapabilities, currentCapabilities);
+    const validatedPreferences = this.extractEnabledFields(
+      submittedCapabilities,
+      currentCapabilities,
+    );
 
     // 3. Update database
     await UserRepository.update(userId, {
-      userPreferences: JSON.stringify(validatedPreferences)
+      userPreferences: JSON.stringify(validatedPreferences),
     });
 
     this.logger.info({ userId }, 'User preferences updated');
@@ -106,7 +109,7 @@ export class UserRequestHandler {
    */
   private extractEnabledFields(
     submitted: McpServerCapabilities,
-    current: McpServerCapabilities
+    current: McpServerCapabilities,
   ): McpServerCapabilities {
     // Start with a deep copy of current so non-overridable fields stay intact
     const merged: McpServerCapabilities = JSON.parse(JSON.stringify(current));
@@ -137,7 +140,7 @@ export class UserRequestHandler {
           } else {
             this.logger.debug(
               { serverId, toolName, dangerLevel: submittedTool.dangerLevel },
-              'Skipping invalid dangerLevel'
+              'Skipping invalid dangerLevel',
             );
           }
         }
@@ -168,7 +171,9 @@ export class UserRequestHandler {
   }
 
   private isValidDangerLevel(value: any): value is DangerLevel {
-    return Object.values(DangerLevel).filter((v): v is number => typeof v === 'number').includes(value);
+    return Object.values(DangerLevel)
+      .filter((v): v is number => typeof v === 'number')
+      .includes(value);
   }
 
   /**
@@ -183,9 +188,9 @@ export class UserRequestHandler {
   async handleConfigureServer(
     userId: string,
     userToken: string,
-    data: ConfigureServerRequest
+    data: ConfigureServerRequest,
   ): Promise<ConfigureServerResponseData> {
-    const { serverId, authConf, restfulApiAuth, remoteAuth } = data;
+    const { serverId, authConf, restfulApiAuth, remoteAuth, stdioEnv } = data;
     this.logger.debug({ userId, serverId }, 'Configuring server for user');
 
     // Import dependencies dynamically
@@ -204,7 +209,7 @@ export class UserRequestHandler {
     if (!server.allowUserInput) {
       throw new UserError(
         `Server ${serverId} does not allow user input`,
-        UserErrorCode.SERVER_NOT_ALLOW_USER_INPUT
+        UserErrorCode.SERVER_NOT_ALLOW_USER_INPUT,
       );
     }
 
@@ -215,7 +220,7 @@ export class UserRequestHandler {
     if (!server.configTemplate) {
       throw new UserError(
         `Server ${serverId} does not have a configuration template`,
-        UserErrorCode.SERVER_NO_CONFIG_TEMPLATE
+        UserErrorCode.SERVER_NO_CONFIG_TEMPLATE,
       );
     }
 
@@ -230,7 +235,10 @@ export class UserRequestHandler {
     switch (server.category) {
       case ServerCategory.Template:
         if (authConf === undefined || authConf === null || authConf.length === 0) {
-          throw new UserError(`authConf is required and cannot be empty`, UserErrorCode.SERVER_CONFIG_INVALID);
+          throw new UserError(
+            `authConf is required and cannot be empty`,
+            UserErrorCode.SERVER_CONFIG_INVALID,
+          );
         }
         // 1. Parse configTemplate
         let template: Record<string, any>;
@@ -239,7 +247,7 @@ export class UserRequestHandler {
         } catch (error: any) {
           throw new UserError(
             `Invalid configTemplate JSON: ${error.message}`,
-            UserErrorCode.SERVER_CONFIG_INVALID
+            UserErrorCode.SERVER_CONFIG_INVALID,
           );
         }
 
@@ -247,25 +255,40 @@ export class UserRequestHandler {
         if (oauthConfig && oauthConfig.deskClientId) {
           const key = process.env.JWT_SECRET;
           if (!key) {
-            throw new UserError('JWT_SECRET environment variable is not configured', UserErrorCode.INTERNAL_ERROR);
+            throw new UserError(
+              'JWT_SECRET environment variable is not configured',
+              UserErrorCode.INTERNAL_ERROR,
+            );
           }
-          const decryptedLaunchConfig = await CryptoService.decryptDataFromString(server.launchConfig, key);
+          const decryptedLaunchConfig = await CryptoService.decryptDataFromString(
+            server.launchConfig,
+            key,
+          );
           const decryptedLaunchConfigValue = JSON.parse(decryptedLaunchConfig);
           const oauth = decryptedLaunchConfigValue.oauth;
           // 将 authConf 转换为 Record<string, any> key-value pairs key 是 item.key，value 是 item.value 和 item.dataType
-          const authConfValue: Record<string, any> = authConf.reduce((acc: Record<string, any>, item: any) => {
-            acc[item.key] = { value: item.value, dataType: item.dataType };
-            return acc;
-          }, {});
+          const authConfValue: Record<string, any> = authConf.reduce(
+            (acc: Record<string, any>, item: any) => {
+              acc[item.key] = { value: item.value, dataType: item.dataType };
+              return acc;
+            },
+            {},
+          );
           const oauthCode = authConfValue.YOUR_OAUTH_CODE.value;
           const oauthRedirectUrl = authConfValue.YOUR_OAUTH_REDIRECT_URL.value;
           const oauthCodeVerifier = authConfValue.YOUR_OAUTH_PKCE_VERIFIER.value;
 
           if (typeof oauthCode !== 'string' || oauthCode === '') {
-            throw new UserError(`code is required and cannot be empty`, UserErrorCode.SERVER_CONFIG_INVALID);
+            throw new UserError(
+              `code is required and cannot be empty`,
+              UserErrorCode.SERVER_CONFIG_INVALID,
+            );
           }
           if (typeof oauthRedirectUrl !== 'string' || oauthRedirectUrl === '') {
-            throw new UserError(`redirectUri is required and cannot be empty`, UserErrorCode.SERVER_CONFIG_INVALID);
+            throw new UserError(
+              `redirectUri is required and cannot be empty`,
+              UserErrorCode.SERVER_CONFIG_INVALID,
+            );
           }
           // Use the client ID provided by the owner
           const provider = AuthUtils.getOAuthProvider(server.authType);
@@ -295,7 +318,9 @@ export class UserRequestHandler {
               code: oauthCode,
               redirectUri: oauthRedirectUrl,
               codeVerifier: oauthCodeVerifier,
-              scope: [ServerAuthType.ZendeskAuth].includes(server.authType) ? oauthConfig.scope : undefined
+              scope: [ServerAuthType.ZendeskAuth].includes(server.authType)
+                ? oauthConfig.scope
+                : undefined,
             };
 
             if ((provider === 'zendesk' || provider === 'canvas') && oauthConfig?.tokenUrl) {
@@ -315,30 +340,48 @@ export class UserRequestHandler {
 
               const result = await response.json();
               if (!response.ok || !result?.accessToken || !result?.expiresAt) {
-                this.logger.warn({
-                  status: response.status,
-                  provider,
-                  clientId: oauth.clientId.substring(0, 10) + '...' + oauth.clientId.substring(oauth.clientId.length - 10)
-                }, 'Peta OAuth exchange failed');
-                throw new UserError('Failed to exchange OAuth code', UserErrorCode.SERVER_CONFIG_INVALID);
+                this.logger.warn(
+                  {
+                    status: response.status,
+                    provider,
+                    clientId:
+                      oauth.clientId.substring(0, 10) +
+                      '...' +
+                      oauth.clientId.substring(oauth.clientId.length - 10),
+                  },
+                  'Peta OAuth exchange failed',
+                );
+                throw new UserError(
+                  'Failed to exchange OAuth code',
+                  UserErrorCode.SERVER_CONFIG_INVALID,
+                );
               }
 
               decryptedLaunchConfigValue.oauth = {
                 clientId: oauth.clientId,
                 key: hashKey,
                 accessToken: result.accessToken,
-                expiresAt: result.expiresAt
+                expiresAt: result.expiresAt,
               };
               launchConfig = decryptedLaunchConfigValue;
 
-              this.logger.info({
-                serverId,
-                provider,
-                clientId: oauth.clientId.substring(0, 10) + '...' + oauth.clientId.substring(oauth.clientId.length - 10)
-              }, 'Peta OAuth exchange succeeded');
+              this.logger.info(
+                {
+                  serverId,
+                  provider,
+                  clientId:
+                    oauth.clientId.substring(0, 10) +
+                    '...' +
+                    oauth.clientId.substring(oauth.clientId.length - 10),
+                },
+                'Peta OAuth exchange succeeded',
+              );
             } catch (error) {
               this.logger.error({ err: error }, 'Error exchanging authorization code');
-              throw new UserError('Failed to exchange OAuth code', UserErrorCode.SERVER_CONFIG_INVALID);
+              throw new UserError(
+                'Failed to exchange OAuth code',
+                UserErrorCode.SERVER_CONFIG_INVALID,
+              );
             }
           } else {
             try {
@@ -352,46 +395,66 @@ export class UserRequestHandler {
                 codeVerifier: oauthCodeVerifier,
                 scope: [ServerAuthType.ZendeskAuth].includes(server.authType)
                   ? oauthConfig.scope
-                  : undefined
+                  : undefined,
               });
 
               if (exchangeResult.accessToken && exchangeResult.refreshToken) {
-                const expiresAt = exchangeResult.expiresAt ?? (Date.now() + 30 * 24 * 60 * 60 * 1000);
+                const expiresAt = exchangeResult.expiresAt ?? Date.now() + 30 * 24 * 60 * 60 * 1000;
                 decryptedLaunchConfigValue.oauth = {
                   clientId: oauth.clientId,
                   clientSecret: oauth.clientSecret,
                   accessToken: exchangeResult.accessToken,
                   refreshToken: exchangeResult.refreshToken,
-                  expiresAt: expiresAt
+                  expiresAt: expiresAt,
                 };
                 if ([ServerAuthType.ZendeskAuth].includes(server.authType)) {
                   decryptedLaunchConfigValue.oauth.tokenUrl = oauthConfig.tokenUrl;
                 }
                 if (server.authType === ServerAuthType.ZendeskAuth) {
                   decryptedLaunchConfigValue.oauth.scope = oauthConfig.scope;
-                  if (exchangeResult.raw.refresh_token_expires_in && typeof exchangeResult.raw.refresh_token_expires_in === 'number') {
-                    decryptedLaunchConfigValue.oauth.refreshTokenExpiresAt = Date.now() + exchangeResult.raw.refresh_token_expires_in * 1000;
+                  if (
+                    exchangeResult.raw.refresh_token_expires_in &&
+                    typeof exchangeResult.raw.refresh_token_expires_in === 'number'
+                  ) {
+                    decryptedLaunchConfigValue.oauth.refreshTokenExpiresAt =
+                      Date.now() + exchangeResult.raw.refresh_token_expires_in * 1000;
                   }
                 }
                 launchConfig = decryptedLaunchConfigValue;
               } else {
-                throw new UserError('Failed to exchange OAuth code', UserErrorCode.SERVER_CONFIG_INVALID);
+                throw new UserError(
+                  'Failed to exchange OAuth code',
+                  UserErrorCode.SERVER_CONFIG_INVALID,
+                );
               }
             } catch (error) {
               this.logger.error({ err: error }, 'Error exchanging authorization code');
-              throw new UserError('Failed to exchange OAuth code', UserErrorCode.SERVER_CONFIG_INVALID);
+              throw new UserError(
+                'Failed to exchange OAuth code',
+                UserErrorCode.SERVER_CONFIG_INVALID,
+              );
             }
           }
         } else {
           launchConfig = this.assembleLaunchConfig(template, authConf);
         }
         break;
-      case ServerCategory.CustomRemote:
-        if (remoteAuth === undefined || remoteAuth === null || (remoteAuth.params.length === 0 && remoteAuth.headers.length === 0) ) {
-          throw new UserError(`remoteAuth is required and cannot be empty and must contain either params or headers`, UserErrorCode.SERVER_CONFIG_INVALID);
+      case ServerCategory.CustomRemote: {
+        if (
+          remoteAuth === undefined ||
+          remoteAuth === null ||
+          (remoteAuth.params.length === 0 && remoteAuth.headers.length === 0)
+        ) {
+          throw new UserError(
+            `remoteAuth is required and cannot be empty and must contain either params or headers`,
+            UserErrorCode.SERVER_CONFIG_INVALID,
+          );
         }
         if (server.configTemplate === '' || server.configTemplate === '{}') {
-          throw new UserError(`Server ${serverId} does not have a configuration template`, UserErrorCode.SERVER_NO_CONFIG_TEMPLATE);
+          throw new UserError(
+            `Server ${serverId} does not have a configuration template`,
+            UserErrorCode.SERVER_NO_CONFIG_TEMPLATE,
+          );
         }
         const configTemplate = JSON.parse(server.configTemplate);
         let url = configTemplate.url;
@@ -407,23 +470,59 @@ export class UserRequestHandler {
         }
         launchConfig = {
           url: url,
-          headers: {
-            ...remoteAuth.headers,
-          },
-        }
+          headers: { ...configTemplate.headers, ...remoteAuth.headers },
+        };
         break;
+      }
+      case ServerCategory.CustomStdio: {
+        if (server.configTemplate === '' || server.configTemplate === '{}') {
+          throw new UserError(
+            `Server ${serverId} does not have a configuration template`,
+            UserErrorCode.SERVER_NO_CONFIG_TEMPLATE,
+          );
+        }
+        const stdioTemplate = JSON.parse(server.configTemplate);
+
+        if (!stdioTemplate.command) {
+          throw new UserError(
+            `Server ${serverId} has invalid stdio configuration: missing command`,
+            UserErrorCode.SERVER_CONFIG_INVALID,
+          );
+        }
+
+        // command and args are immutable (set by admin)
+        // env is merged: admin defaults + user overrides (user wins on key collision)
+        const adminEnv = stdioTemplate.env ?? {};
+        const userEnvOverrides = stdioEnv ?? {};
+
+        launchConfig = {
+          command: stdioTemplate.command,
+          args: stdioTemplate.args ?? [],
+          env: { ...adminEnv, ...userEnvOverrides },
+        };
+        break;
+      }
       case ServerCategory.RestApi:
         if (restfulApiAuth === undefined || restfulApiAuth === null || restfulApiAuth.size === 0) {
-          throw new UserError(`restfulApiAuth is required and cannot be empty`, UserErrorCode.SERVER_CONFIG_INVALID);
+          throw new UserError(
+            `restfulApiAuth is required and cannot be empty`,
+            UserErrorCode.SERVER_CONFIG_INVALID,
+          );
         }
         launchConfig = JSON.parse(server.launchConfig);
         launchConfig.auth = restfulApiAuth;
         break;
       default:
-        throw new UserError(`Invalid server category: ${server.category}`, UserErrorCode.SERVER_CONFIG_INVALID);
+        throw new UserError(
+          `Invalid server category: ${server.category}`,
+          UserErrorCode.SERVER_CONFIG_INVALID,
+        );
     }
 
-    const encryptedLaunchConfig = await CryptoService.encryptData(JSON.stringify(launchConfig), userToken);
+    const encryptedLaunchConfig = await CryptoService.encryptData(
+      JSON.stringify(launchConfig),
+      userToken,
+    );
 
     const launchConfigs = JSON.parse(user.launchConfigs || '{}');
     launchConfigs[serverId] = encryptedLaunchConfig;
@@ -439,13 +538,13 @@ export class UserRequestHandler {
     // 4. Immediately start temporary server
     const tempServerEntity: any = {
       ...server,
-      launchConfig: JSON.stringify(encryptedLaunchConfig)
+      launchConfig: JSON.stringify(encryptedLaunchConfig),
     };
 
     const serverContext = await ServerManager.instance.createTemporaryServer(
       userId,
       tempServerEntity,
-      userToken
+      userToken,
     );
 
     // 5. Store capabilities to user.userPreferences
@@ -465,7 +564,7 @@ export class UserRequestHandler {
 
     return {
       serverId: serverId,
-      message: 'Server configured and started successfully'
+      message: 'Server configured and started successfully',
     };
   }
 
@@ -479,15 +578,13 @@ export class UserRequestHandler {
    */
   private assembleLaunchConfig(
     template: Record<string, any>,
-    authConf: Array<{ key: string; value: string; dataType: number }>
+    authConf: Array<{ key: string; value: string; dataType: number }>,
   ): any {
-
-
     // 2. Extract mcpJsonConf
     if (!template.mcpJsonConf) {
       throw new UserError(
         'configTemplate must contain mcpJsonConf field',
-        UserErrorCode.SERVER_CONFIG_INVALID
+        UserErrorCode.SERVER_CONFIG_INVALID,
       );
     }
 
@@ -501,7 +598,7 @@ export class UserRequestHandler {
     if (!authConf || authConf.length === 0) {
       throw new UserError(
         'authConf is required and cannot be empty',
-        UserErrorCode.SERVER_CONFIG_INVALID
+        UserErrorCode.SERVER_CONFIG_INVALID,
       );
     }
 
@@ -514,7 +611,7 @@ export class UserRequestHandler {
       if (auth.value === undefined || auth.value === null || typeof auth.value !== 'string') {
         throw new UserError(
           `Invalid auth.value for key: ${auth.key}`,
-          UserErrorCode.SERVER_CONFIG_INVALID
+          UserErrorCode.SERVER_CONFIG_INVALID,
         );
       }
 
@@ -536,7 +633,7 @@ export class UserRequestHandler {
         } catch (error: any) {
           throw new UserError(
             `Configuration became invalid after credential replacement: ${error.message}`,
-            UserErrorCode.SERVER_CONFIG_INVALID
+            UserErrorCode.SERVER_CONFIG_INVALID,
           );
         }
       }
@@ -547,7 +644,10 @@ export class UserRequestHandler {
     if (template.authType === ServerAuthType.NotionAuth && !processedConfig.oauth?.expiresAt) {
       processedConfig.oauth = processedConfig.oauth || {};
       processedConfig.oauth.expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
-    } else if (template.authType === ServerAuthType.FigmaAuth && !processedConfig.oauth?.expiresAt) {
+    } else if (
+      template.authType === ServerAuthType.FigmaAuth &&
+      !processedConfig.oauth?.expiresAt
+    ) {
       processedConfig.oauth = processedConfig.oauth || {};
       processedConfig.oauth.expiresAt = Date.now() + 90 * 24 * 60 * 60 * 1000;
     }
@@ -565,7 +665,7 @@ export class UserRequestHandler {
    */
   async handleUnconfigureServer(
     userId: string,
-    data: UnconfigureServerRequest
+    data: UnconfigureServerRequest,
   ): Promise<UnconfigureServerResponseData> {
     const { serverId } = data;
     this.logger.debug({ userId, serverId }, 'Unconfiguring server for user');
@@ -583,10 +683,13 @@ export class UserRequestHandler {
     // 2. Check if already configured (idempotency)
     const launchConfigs = JSON.parse(user.launchConfigs || '{}');
     if (!launchConfigs[serverId]) {
-      this.logger.debug({ serverId, userId }, 'Server not configured, returning success (idempotent)');
+      this.logger.debug(
+        { serverId, userId },
+        'Server not configured, returning success (idempotent)',
+      );
       return {
         serverId: serverId,
-        message: 'Server not configured (already unconfigured)'
+        message: 'Server not configured (already unconfigured)',
       };
     }
 
@@ -595,7 +698,10 @@ export class UserRequestHandler {
       await ServerManager.instance.closeTemporaryServer(serverId, userId);
       this.logger.info({ serverId, userId }, 'Closed temporary server for user');
     } catch (error: any) {
-      this.logger.warn({ error: error.message, serverId, userId }, 'Failed to close temporary server');
+      this.logger.warn(
+        { error: error.message, serverId, userId },
+        'Failed to close temporary server',
+      );
       // Continue execution, as server may already not exist or be closed
     }
 
@@ -622,7 +728,7 @@ export class UserRequestHandler {
 
     return {
       serverId: serverId,
-      message: 'Server unconfigured successfully'
+      message: 'Server unconfigured successfully',
     };
   }
 
@@ -648,7 +754,7 @@ export class UserRequestHandler {
       sessionId: session.sessionId,
       clientName: session.clientInfo?.name || 'Unknown Client',
       userAgent: session.authContext.userAgent || 'Unknown',
-      lastActive: session.lastActive
+      lastActive: session.lastActive,
     }));
 
     this.logger.debug({ userId, count: sessionData.length }, 'Retrieved user online sessions');
