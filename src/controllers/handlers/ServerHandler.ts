@@ -402,7 +402,7 @@ export class ServerHandler {
   async handleGetServers(request: AdminRequest<any>): Promise<any> {
     const { proxyId, enabled, serverId } = request.data || {};
 
-    // Select fields to exclude: transportType, cachedTools, cachedResources, cachedResourceTemplates, cachedPrompts
+    // Select fields to exclude: cachedTools, cachedResources, cachedResourceTemplates, cachedPrompts
     const select = {
       serverId: true,
       serverName: true,
@@ -420,6 +420,7 @@ export class ServerHandler {
       lazyStartEnabled: true,
       publicAccess: true,
       usePetaOauthConfig: true,
+      transportType: true,
       anonymousAccess: true,
       anonymousRateLimit: true
     };
@@ -477,8 +478,8 @@ export class ServerHandler {
         AdminErrorCode.INVALID_REQUEST
       );
     }
-    const isRestApiOrCustomRemote = existingServer.category === ServerCategory.RestApi || existingServer.category === ServerCategory.CustomRemote;
-    if (!isRestApiOrCustomRemote && configTemplate !== undefined) {
+    const hasEditableConfigTemplate = existingServer.category === ServerCategory.RestApi || existingServer.category === ServerCategory.CustomRemote || existingServer.category === ServerCategory.CustomStdio;
+    if (!hasEditableConfigTemplate && configTemplate !== undefined) {
       throw new AdminError(
         'configTemplate field is immutable after server creation',
         AdminErrorCode.INVALID_REQUEST
@@ -491,12 +492,12 @@ export class ServerHandler {
     if (launchConfig !== undefined) {
       updateData.launchConfig = typeof launchConfig === 'string' ? launchConfig : JSON.stringify(launchConfig);
       if (updateData.launchConfig !== existingServer.launchConfig) {
-        if (!(existingServer.category === ServerCategory.Template && existingServer.allowUserInput === true && existingServer.authType === ServerAuthType.ApiKey)) {
+        if (existingServer.allowUserInput === true && !(existingServer.category === ServerCategory.RestApi || existingServer.category === ServerCategory.CustomRemote || existingServer.category === ServerCategory.CustomStdio)) {
           throw new AdminError('This type of server does not allow modification of the launch configuration.', AdminErrorCode.INVALID_REQUEST);
         }
       }
     }
-    if (isRestApiOrCustomRemote && configTemplate !== undefined && configTemplate !== null && configTemplate.trim() !== '' && configTemplate.trim() !== existingServer.configTemplate) {
+    if (hasEditableConfigTemplate && configTemplate !== undefined && configTemplate !== null && configTemplate.trim() !== '' && configTemplate.trim() !== existingServer.configTemplate) {
       updateData.configTemplate = configTemplate;
     }
     if (lazyStartEnabled !== undefined && lazyStartEnabled !== existingServer.lazyStartEnabled) {
@@ -527,25 +528,28 @@ export class ServerHandler {
     const willHandlePublicAccessChange = publicAccess !== undefined && publicAccess !== existingServer.publicAccess;
 
     let server = await ServerRepository.update(serverId, updateData);
+    let launchConfigReconnected = false;
 
     let serverContext: ServerContext | undefined;
     const affectedSessions = SessionStore.instance.getSessionsUsingServer(serverId);
     if (existingServer.enabled === true && updateData.enabled === true) {
       // Server remains enabled
       if (updateData.capabilities !== undefined && updateData.launchConfig !== undefined) {
-        await this.updateServerLaunchConfig(serverId, updateData.launchConfig, token);
+        launchConfigReconnected = await this.updateServerLaunchConfig(serverId, updateData.launchConfig, token);
       } else if (updateData.capabilities !== undefined) {
         await this.updateServerCapabilities(serverId, updateData.capabilities);
         serverContext = await this.updateLazyStartEnabled(existingServer, server, updateData.lazyStartEnabled);
       } else if (updateData.launchConfig !== undefined) {
-        await this.updateServerLaunchConfig(serverId, updateData.launchConfig, token);
+        launchConfigReconnected = await this.updateServerLaunchConfig(serverId, updateData.launchConfig, token);
       } else if (updateData.lazyStartEnabled !== undefined) {
         serverContext = await this.updateLazyStartEnabled(existingServer, server, updateData.lazyStartEnabled);
       }
       if (existingServer.allowUserInput) {
         const temporaryServers = ServerManager.instance.getTemporaryServers(serverId);
         for (const temporaryServer of temporaryServers) {
-          temporaryServer.serverEntity = server;
+          if (!launchConfigReconnected) {
+            temporaryServer.serverEntity = server;
+          }
           if (willHandlePublicAccessChange) {
             serverContext = temporaryServer;
           }
@@ -554,7 +558,9 @@ export class ServerHandler {
         const context = ServerManager.instance.getServerContext(serverId);
         serverContext = context;
         if (context) {
-          context.serverEntity = server;
+          if (!launchConfigReconnected) {
+            context.serverEntity = server;
+          }
           if (willHandlePublicAccessChange || updateData.anonymousAccess) {
             serverContext = context;
           }
@@ -574,7 +580,14 @@ export class ServerHandler {
 
     } else if (existingServer.enabled === false && updateData.enabled === true) {
       // Server changed from disabled to enabled
-      serverContext = await ServerManager.instance.addServer(serverId, token);
+      serverContext = await ServerManager.instance.addServer(server, token);
+    }
+
+    if (launchConfigReconnected) {
+      const refreshed = await ServerRepository.findByServerId(serverId);
+      if (refreshed) {
+        server = refreshed;
+      }
     }
 
     if (serverContext) {
@@ -830,14 +843,14 @@ export class ServerHandler {
     this.notifyUsersOfServerChange(targetId, SessionStore.instance.getSessionsUsingServer(targetId), 'capabilities_updated', changed);
   }
 
-  private async updateServerLaunchConfig(targetId: string, launchConfig: string, token: string): Promise<void> {
+  private async updateServerLaunchConfig(targetId: string, launchConfig: string, token: string): Promise<boolean> {
     const entity = await ServerRepository.findByServerId(targetId);
 
     if (!entity) {
       throw new AdminError(`Server ${targetId} not found`, AdminErrorCode.SERVER_NOT_FOUND);
     }
 
-    if (entity.allowUserInput && !(entity.category === ServerCategory.RestApi || entity.category === ServerCategory.CustomRemote)) {
+    if (entity.allowUserInput && !(entity.category === ServerCategory.RestApi || entity.category === ServerCategory.CustomRemote || entity.category === ServerCategory.CustomStdio)) {
       throw new AdminError(`Server ${targetId} is a template server and cannot be updated`, AdminErrorCode.INVALID_REQUEST);
     }
 
@@ -846,21 +859,22 @@ export class ServerHandler {
     const oldLaunchConfig = entity.launchConfig;
     if (launchConfig === oldLaunchConfig) {
       if (entity.category !== ServerCategory.RestApi) {
-        return;
+        return false;
       }
       
       if (entity.configTemplate === serverContext?.serverEntity.configTemplate) {
-        return;
+        return false;
       }
     }
 
     const newServer = await ServerRepository.updateLaunchConfig(targetId, launchConfig);
 
     if (!serverContext) {
-      return;
+      return false;
     }
     await ServerManager.instance.reconnectServer(newServer, token);
     await this.notifyUsersOfServerChangeByServerContext(serverContext, SessionStore.instance.getSessionsUsingServer(targetId), 'launch_cmd_updated');
+    return true;
   }
 
   private async updateLazyStartEnabled(existingServer: Server, newServer: Server, lazyStartEnabled?: boolean | undefined): Promise<ServerContext | undefined> {

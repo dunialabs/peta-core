@@ -22,6 +22,7 @@ export enum ServerCategory {
   CustomRemote = 2,   // custom remote server
   RestApi = 3,        // RESTful API server
   Skills = 4,         // skills server
+  CustomStdio = 5,    // custom stdio server (StdioClientTransport)
 }
 
 export enum ServerAuthType {

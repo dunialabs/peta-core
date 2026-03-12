@@ -100,6 +100,7 @@ export interface ConfigureServerRequest {
   }>;
   restfulApiAuth?: Map<any, any>;
   remoteAuth?: { params: Record<string, any>; headers: Record<string, any> };
+  stdioEnv?: Record<string, string>; // env overrides for CustomStdio (user credentials)
 }
 
 /**
