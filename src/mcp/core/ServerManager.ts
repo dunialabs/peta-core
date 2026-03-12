@@ -747,23 +747,29 @@ export class ServerManager {
 
       const launchConfig: Record<string, any> = JSON.parse(baseLaunchConfig);
 
-      // Rewrite ./skills/<serverId> volume paths to host-absolute paths when running inside Docker
-      await this.resolveSkillsVolumeMounts(launchConfig);
-
       // 2. Initialize authentication (handle OAuth token)
       await this.initializeAuthentication(serverContext, launchConfig, token);
 
-      if (serverEntity.category === ServerCategory.RestApi) {
-        if (!serverEntity.configTemplate || serverEntity.configTemplate.trim() === '' || serverEntity.configTemplate.trim() === '{}') {
-          throw new Error(`[ServerManager] Missing configTemplate for server ${serverEntity.serverId}`);
-        }
-        const config = JSON.parse(serverEntity.configTemplate);
-        config.apis[0].auth = launchConfig.auth;
-        delete launchConfig.auth;
-        launchConfig.env ??= {
-          type: "none"
-        };
-        launchConfig.env.GATEWAY_CONFIG = JSON.stringify(config);
+      const category = serverContext.serverEntity.category;
+      switch (category) {
+        case ServerCategory.RestApi:
+          if (!serverEntity.configTemplate || serverEntity.configTemplate.trim() === '' || serverEntity.configTemplate.trim() === '{}') {
+            throw new Error(`[ServerManager] Missing configTemplate for server ${serverEntity.serverId}`);
+          }
+          const config = JSON.parse(serverEntity.configTemplate);
+          config.apis[0].auth = launchConfig.auth;
+          delete launchConfig.auth;
+          launchConfig.env ??= {
+            type: "none"
+          };
+          launchConfig.env.GATEWAY_CONFIG = JSON.stringify(config);
+          break;
+        case ServerCategory.Skills:
+          // Rewrite ./skills/<serverId> volume paths to host-absolute paths when running inside Docker
+          await this.resolveSkillsVolumeMounts(launchConfig);
+          break;
+        default:
+          break;
       }
 
       // 4. Create transport using dynamic transport factory
@@ -1043,6 +1049,11 @@ export class ServerManager {
     launchConfig: Record<string, any>,
     token: string
   ): Promise<void> {
+    const category = serverContext.serverEntity.category;
+    if (category !== ServerCategory.Template) {
+      return;
+    }
+
     const authType = serverContext.serverEntity.authType;
     const usePetaOauthConfig = serverContext.serverEntity.usePetaOauthConfig;
 
