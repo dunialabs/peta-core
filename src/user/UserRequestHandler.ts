@@ -490,7 +490,7 @@ export class UserRequestHandler {
           );
         }
 
-        // command and args are immutable (set by admin)
+        // command, args, and cwd are immutable (set by admin)
         // env is merged: admin defaults + user overrides (user wins on key collision)
         const adminEnv = stdioTemplate.env ?? {};
         const userEnvOverrides = stdioEnv ?? {};
@@ -498,6 +498,7 @@ export class UserRequestHandler {
         launchConfig = {
           command: stdioTemplate.command,
           args: stdioTemplate.args ?? [],
+          cwd: stdioTemplate.cwd,
           env: { ...adminEnv, ...userEnvOverrides },
         };
         break;
