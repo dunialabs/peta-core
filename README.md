@@ -31,7 +31,7 @@ Peta Core sits between MCP clients (Claude, ChatGPT, Cursor, n8n, or any MCP-com
 Peta Core is one component of the Peta MCP stack:
 
 - **Peta Core** (this repository) — MCP gateway, credential vault, policy engine, and audit runtime.
-- **Peta Console** — Admin UI for users, servers, policies, approvals, and audit logs, including anonymous access controls and stdio custom-tool configuration.
+- **Peta Console** — Admin UI for users, servers, policies, approvals, and audit logs.
 - **Peta Desk** — Desktop client for approval workflows and per-user server configuration.
 
 > This repository contains only Peta Core. See [docs.peta.io](https://docs.peta.io) for the full stack.
