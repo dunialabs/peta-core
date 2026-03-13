@@ -5,6 +5,7 @@
 This document describes the complete protocol specification for Peta Core User API. All user operations are provided through a unified `/user` endpoint using an action-based request routing mechanism.
 
 **Architecture Note**: The User API is part of a transport-agnostic architecture where business logic (UserRequestHandler) is shared between two communication layers:
+
 - **HTTP API** (`POST /user`) - RESTful interface (this document)
 - **Socket.IO** (events) - Real-time bidirectional communication
 
@@ -24,33 +25,34 @@ All user requests use a unified `UserRequest` structure:
 
 ```typescript
 interface UserRequest<T = any> {
-  action: UserActionType;  // Operation type (numeric enum)
-  data?: T;                // Operation data (specific type depends on action)
+  action: UserActionType; // Operation type (numeric enum)
+  data?: T; // Operation data (specific type depends on action)
 }
 ```
 
 ### UserActionType Enum
 
-*User operation type enum - uses numeric values for performance*
+_User operation type enum - uses numeric values for performance_
 
 ```typescript
 export enum UserActionType {
   // ========== 1000-1999: Capability configuration operations ==========
-  GET_CAPABILITIES = 1001,           // Get user's capability configuration
-  SET_CAPABILITIES = 1002,           // Set user's capability configuration
+  GET_CAPABILITIES = 1001, // Get user's capability configuration
+  SET_CAPABILITIES = 1002, // Set user's capability configuration
 
   // ========== 2000-2999: Server configuration operations ==========
-  CONFIGURE_SERVER = 2001,           // Configure a server for user
-  UNCONFIGURE_SERVER = 2002,         // Unconfigure a server for user
+  CONFIGURE_SERVER = 2001, // Configure a server for user
+  UNCONFIGURE_SERVER = 2002, // Unconfigure a server for user
 
   // ========== 3000-3999: Session query operations ==========
-  GET_ONLINE_SESSIONS = 3001,        // Get user's online session list
+  GET_ONLINE_SESSIONS = 3001, // Get user's online session list
 }
 ```
 
 ### Request Examples
 
 **curl example:**
+
 ```bash
 curl -X POST http://localhost:3002/user \
   -H "Content-Type: application/json" \
@@ -61,16 +63,17 @@ curl -X POST http://localhost:3002/user \
 ```
 
 **TypeScript example:**
+
 ```typescript
 const response = await fetch('http://localhost:3002/user', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`
+    Authorization: `Bearer ${token}`,
   },
   body: JSON.stringify({
-    action: 1001,  // GET_CAPABILITIES
-  })
+    action: 1001, // GET_CAPABILITIES
+  }),
 });
 
 const result = await response.json();
@@ -85,16 +88,18 @@ All user requests return a unified `UserResponse` structure:
 
 ```typescript
 interface UserResponse<T = any> {
-  success: boolean;         // Whether operation succeeded
-  data?: T;                // Return data on success
-  error?: {                // Error information on failure
-    code: UserErrorCode;   // Error code (numeric)
-    message: string;       // Error message
+  success: boolean; // Whether operation succeeded
+  data?: T; // Return data on success
+  error?: {
+    // Error information on failure
+    code: UserErrorCode; // Error code (numeric)
+    message: string; // Error message
   };
 }
 ```
 
 **Success response example:**
+
 ```json
 {
   "success": true,
@@ -109,6 +114,7 @@ interface UserResponse<T = any> {
 ```
 
 **Error response example:**
+
 ```json
 {
   "success": false,
@@ -139,12 +145,15 @@ User API permissions are simple and straightforward:
 **Function**: Get user's complete capability configuration, including all accessible servers, tools, resources, and prompts
 
 **Request Parameters** (data):
+
 ```json
 {}
 ```
-*No parameters required - capabilities are retrieved for the authenticated user*
+
+_No parameters required - capabilities are retrieved for the authenticated user_
 
 **Return Result** (data):
+
 ```json
 {
   "filesystem": {
@@ -187,13 +196,14 @@ User API permissions are simple and straightforward:
 ```
 
 **Field Description**:
+
 - Each key is a `serverId`
 - `enabled`: Whether user has access to this server
 - `serverName`: Human-readable server name
 - `allowUserInput`: Whether this server supports user-provided configuration
 - `authType`: Authentication type (see ServerAuthType enum)
-- `category`: Server category (Template / CustomRemote / RestApi)
-- `configTemplate`: Configuration template as JSON string (Template/CustomRemote/RestApi); includes `credentials` and optionally `oAuthConfig` for Template servers
+- `category`: Server category (Template / CustomRemote / RestApi / Skills / CustomStdio)
+- `configTemplate`: Configuration template as JSON string (Template/CustomRemote/RestApi/CustomStdio); includes `credentials` and optionally `oAuthConfig` for Template servers. For CustomStdio, contains `command`, `args`, and `env`
 - `configured`: Whether this server has been configured by the user (for allowUserInput servers)
 - `status`: Current server status (enum number):
   - `0` = Online
@@ -212,6 +222,7 @@ User API permissions are simple and straightforward:
 - `prompts`: Object mapping prompt names to their configuration
 
 **Business Logic**:
+
 1. Calls `CapabilitiesService.getUserCapabilities(userId)`
 2. Merges admin-configured permissions with user-specific preferences
 3. Returns complete `McpServerCapabilities` object
@@ -225,6 +236,7 @@ User API permissions are simple and straightforward:
 **Function**: Update user's capability preferences (enable/disable servers, tools, resources, prompts)
 
 **Request Parameters** (data):
+
 ```json
 {
   "filesystem": {
@@ -241,9 +253,10 @@ User API permissions are simple and straightforward:
 }
 ```
 
-*User can submit partial configuration - only provided fields will be validated and saved*
+_User can submit partial configuration - only provided fields will be validated and saved_
 
 **Input Schema (effective fields)**:
+
 ```typescript
 type SetCapabilitiesInput = {
   [serverId: string]: {
@@ -265,12 +278,14 @@ type SetCapabilitiesInput = {
 ```
 
 **Important Behavior Notes**:
+
 - Only `enabled` fields (and `tools.*.dangerLevel`) are persisted; other fields are ignored.
 - Non-existent servers/tools/resources/prompts are ignored (no error).
 - Invalid `dangerLevel` values are ignored.
 - If `data` is missing or not an object, the request may fail with server error.
 
 **Return Result** (data):
+
 ```json
 {
   "message": "Capabilities updated successfully"
@@ -278,6 +293,7 @@ type SetCapabilitiesInput = {
 ```
 
 **Business Logic**:
+
 1. Get current complete capabilities via `handleGetCapabilities(userId)`
 2. Validate submitted configuration:
    - Only save `enabled` fields
@@ -288,13 +304,15 @@ type SetCapabilitiesInput = {
    - Sessions receive `tools/list_changed`, `resources/list_changed`, `prompts/list_changed` events
 
 **Important Notes**:
+
 - Cannot enable capabilities not granted by admin
 - Can only disable capabilities, not add new ones
 - Changes take effect immediately for all user's active sessions
 - User preferences are merged with admin permissions (admin takes precedence)
- - `dangerLevel` updates apply only to tools that exist in current capabilities
+- `dangerLevel` updates apply only to tools that exist in current capabilities
 
 **Error Cases**:
+
 - `INVALID_CAPABILITIES (3001)`: Reserved for malformed capability data (current implementation may return `INTERNAL_ERROR` if `data` is not a valid object)
 
 ---
@@ -303,19 +321,22 @@ type SetCapabilitiesInput = {
 
 #### 2001 CONFIGURE_SERVER
 
-**Function**: Configure a user-specific server with authentication credentials. Creates temporary server instance for this user. Supports three server categories with different authentication methods.
+**Function**: Configure a user-specific server with authentication credentials. Creates temporary server instance for this user. Supports four server categories with different authentication methods.
 
 **Server Category Types**:
+
 - **Template (1)**: Pre-configured servers requiring API key substitution (e.g., Notion, Figma, GitHub)
 - **CustomRemote (2)**: Custom MCP servers accessed via HTTP/SSE with dynamic authentication
 - **RestApi (3)**: RESTful API servers with standardized authentication methods
+- **CustomStdio (5)**: Custom MCP servers running via stdio transport with environment variable configuration
 
 **Important**: Only one authentication parameter should be provided based on the server's category. Providing the wrong auth parameter will result in `SERVER_CONFIG_INVALID` error.
 **Tip**: Call `GET_CAPABILITIES` first to read `category`, `authType`, and `configTemplate` (including `credentials` and `oAuthConfig`) before constructing this request.
 
 **Request Parameters** (data):
 
-*Example 1: Template Server (category=1)*
+_Example 1: Template Server (category=1)_
+
 ```json
 {
   "serverId": "notion",
@@ -329,7 +350,8 @@ type SetCapabilitiesInput = {
 }
 ```
 
-*Example 1b: Template OAuth Server (category=1, OAuth flow)*
+_Example 1b: Template OAuth Server (category=1, OAuth flow)_
+
 ```json
 {
   "serverId": "notion",
@@ -340,7 +362,8 @@ type SetCapabilitiesInput = {
 }
 ```
 
-*Example 2: CustomRemote Server (category=2)*
+_Example 2: CustomRemote Server (category=2)_
+
 ```json
 {
   "serverId": "custom-mcp-server",
@@ -357,7 +380,8 @@ type SetCapabilitiesInput = {
 }
 ```
 
-*Example 3a: RestApi Server with Bearer Auth (category=3)*
+_Example 3a: RestApi Server with Bearer Auth (category=3)_
+
 ```json
 {
   "serverId": "rest-api-server",
@@ -368,7 +392,8 @@ type SetCapabilitiesInput = {
 }
 ```
 
-*Example 3b: RestApi Server with Basic Auth*
+_Example 3b: RestApi Server with Basic Auth_
+
 ```json
 {
   "serverId": "rest-api-server",
@@ -380,7 +405,8 @@ type SetCapabilitiesInput = {
 }
 ```
 
-*Example 3c: RestApi Server with Custom Header Auth*
+_Example 3c: RestApi Server with Custom Header Auth_
+
 ```json
 {
   "serverId": "rest-api-server",
@@ -392,7 +418,8 @@ type SetCapabilitiesInput = {
 }
 ```
 
-*Example 3d: RestApi Server with Query Parameter Auth*
+_Example 3d: RestApi Server with Query Parameter Auth_
+
 ```json
 {
   "serverId": "rest-api-server",
@@ -404,21 +431,33 @@ type SetCapabilitiesInput = {
 }
 ```
 
+_Example 4: CustomStdio Server (category=5) — user provides env overrides_
+
+```json
+{
+  "serverId": "custom-stdio-server",
+  "stdioEnv": {
+    "API_KEY": "user-provided-secret-key",
+    "CUSTOM_VAR": "user-value"
+  }
+}
+```
+
 **Parameter Description**:
+
 - `serverId` (string, required): Server ID to configure
 
 **Authentication Parameters** (one required based on server category):
 
 **For Template Servers (category=1)**:
+
 - `authConf` (array, required for Template): Authentication configuration array
   - `key` (string): Placeholder key from `template.credentials` (must match the placeholder in `template.mcpJsonConf`)
   - `value` (string): Actual credential value to substitute into placeholder
   - `dataType` (number): Data type identifier (currently only `1` = string replacement is supported)
   - **Source of authConf**: `server.configTemplate` is a JSON string. After parsing, `template.credentials` is an array:
     ```json
-    [
-      { "name": "ApiKey", "description": "...", "dataType": 1, "key": "YOUR_API_KEY", "value": "" }
-    ]
+    [{ "name": "ApiKey", "description": "...", "dataType": 1, "key": "YOUR_API_KEY", "value": "" }]
     ```
     Client should submit `authConf` by copying `key` and `dataType` from `credentials`, and filling only `value`.
   - **How to decide input vs OAuth**:
@@ -435,6 +474,7 @@ type SetCapabilitiesInput = {
     - Other credential items (e.g., `YOUR_CLIENT_ID`, `YOUR_CLIENT_SECRET`) may exist in `template.credentials` for schema consistency, but **are ignored** in user configuration.
 
 **For CustomRemote Servers (category=2)**:
+
 - `remoteAuth` (object, required for CustomRemote): Remote server authentication configuration
   - `params` (object, optional): Key-value pairs to append as URL query parameters
     - Example: `{"api_key": "abc123", "user_id": "456"}` → `?api_key=abc123&user_id=456`
@@ -444,6 +484,7 @@ type SetCapabilitiesInput = {
     - At least one of `params` or `headers` must be non-empty
 
 **For RestApi Servers (category=3)**:
+
 - `restfulApiAuth` (object, required for RestApi): RESTful API authentication configuration
   - `type` (string, required): Authentication type - one of:
     - `"bearer"` - Bearer token authentication (requires `value`)
@@ -458,7 +499,17 @@ type SetCapabilitiesInput = {
   - **Implementation detail**: The backend forwards `restfulApiAuth` as-is into the REST gateway config. Client must ensure structure is correct.
   - **ConfigTemplate requirement**: RestApi servers must have a `configTemplate` with `apis[0].auth` (the backend injects `restfulApiAuth` into that field).
 
+**For CustomStdio Servers (category=5)**:
+
+- `stdioEnv` (object, optional for CustomStdio): Environment variable overrides as key-value pairs
+  - Each key is an environment variable name, each value is a string
+  - Example: `{"API_KEY": "user-secret", "CUSTOM_VAR": "value"}`
+  - **Merge behavior**: Admin-defined env (from `configTemplate.env`) is merged with user-provided `stdioEnv`. User values override admin defaults on key collision.
+  - **Immutable fields**: `command` and `args` are set by admin in `configTemplate` and cannot be changed by the user.
+  - **ConfigTemplate requirement**: CustomStdio servers must have a `configTemplate` with at least a `command` field. The `args` (array) and `env` (object) fields are optional.
+
 **Return Result** (data):
+
 ```json
 {
   "serverId": "notion",
@@ -467,6 +518,7 @@ type SetCapabilitiesInput = {
 ```
 
 **Business Logic**:
+
 1. **Validation**:
    - Check server exists in database
    - Verify `server.allowUserInput === true`
@@ -491,6 +543,12 @@ type SetCapabilitiesInput = {
    - Merge `remoteAuth.headers` into request headers (if provided)
    - Create launchConfig: `{ url: "...", headers: {...} }`
 
+   **For CustomStdio Servers (category=5)**:
+   - Parses server's `configTemplate` to extract `command`, `args`, and admin-defined `env`
+   - Validates `command` field exists (returns `SERVER_CONFIG_INVALID` if missing)
+   - Merges admin env defaults with user-provided `stdioEnv` overrides (user wins on key collision)
+   - Creates launchConfig: `{ command: "...", args: [...], env: { ...adminEnv, ...userEnv } }`
+
    **For RestApi Servers (category=3)**:
    - Requires `restfulApiAuth` parameter (must not be empty)
    - Parse server's existing `launchConfig`
@@ -510,6 +568,7 @@ type SetCapabilitiesInput = {
    - Notify all active MCP sessions to reload capabilities
 
 **Error Cases**:
+
 - `SERVER_NOT_FOUND (2001)`: Specified serverId doesn't exist
 - `SERVER_DISABLED (2002)`: Server is disabled by admin
 - `SERVER_NOT_ALLOW_USER_INPUT (2004)`: Server doesn't allow user configuration
@@ -520,6 +579,9 @@ type SetCapabilitiesInput = {
     - `remoteAuth` is required but missing
     - Both `params` and `headers` are empty (at least one required)
     - `configTemplate` is missing or empty
+  - **CustomStdio servers**:
+    - `configTemplate` is missing or empty
+    - `configTemplate.command` is missing (invalid stdio configuration)
   - **RestApi servers**:
     - `restfulApiAuth` is required but missing/empty
     - Missing required fields for auth type (e.g., `value` for bearer, `username`/`password` for basic)
@@ -527,6 +589,7 @@ type SetCapabilitiesInput = {
   - Invalid configTemplate JSON or credential replacement resulted in invalid JSON
 
 **Security Notes**:
+
 - Credentials are encrypted with user's token (AES-256-GCM)
 - Only the user who configured the server can decrypt the credentials
 - Temporary servers are isolated per-user (no cross-user access)
@@ -540,6 +603,7 @@ type SetCapabilitiesInput = {
 **Function**: Remove user's server configuration and stop temporary server instance. Idempotent operation.
 
 **Request Parameters** (data):
+
 ```json
 {
   "serverId": "notion"
@@ -547,6 +611,7 @@ type SetCapabilitiesInput = {
 ```
 
 **Return Result** (data):
+
 ```json
 {
   "serverId": "notion",
@@ -555,6 +620,7 @@ type SetCapabilitiesInput = {
 ```
 
 **If server not configured**:
+
 ```json
 {
   "serverId": "notion",
@@ -563,6 +629,7 @@ type SetCapabilitiesInput = {
 ```
 
 **Business Logic**:
+
 1. **Idempotency Check**:
    - Check if `launchConfigs[serverId]` exists
    - If not configured, return success immediately (idempotent)
@@ -578,6 +645,7 @@ type SetCapabilitiesInput = {
    - Notify all active MCP sessions to reload capabilities
 
 **Important Notes**:
+
 - Operation is idempotent - safe to call multiple times
 - Server close failures are logged but don't block cleanup
 - User's credentials are permanently deleted
@@ -593,12 +661,15 @@ type SetCapabilitiesInput = {
 **Function**: Get list of user's currently active MCP sessions across all devices
 
 **Request Parameters** (data):
+
 ```json
 {}
 ```
-*No parameters required - sessions are retrieved for the authenticated user*
+
+_No parameters required - sessions are retrieved for the authenticated user_
 
 **Return Result** (data):
+
 ```json
 [
   {
@@ -617,22 +688,26 @@ type SetCapabilitiesInput = {
 ```
 
 **Field Description**:
+
 - `sessionId` (string): Unique session identifier (UUID format)
 - `clientName` (string): Client application name (from MCP initialize request)
 - `userAgent` (string): HTTP User-Agent header from session creation
 - `lastActive` (Date): ISO 8601 timestamp of last activity
 
 **Business Logic**:
+
 1. Get all `ClientSession` instances for user via `SessionStore.getUserSessions(userId)`
 2. Map each session to `SessionData` format
 3. Return array (empty if user has no active sessions)
 
 **Important Notes**:
+
 - Sessions are created when client connects to `/mcp` endpoint
 - Sessions expire after 30 minutes of inactivity (configurable)
 - Closing browser/app doesn't immediately remove session (waits for timeout or explicit DELETE)
 
 **Use Case**:
+
 - User wants to see which devices are connected to their account
 - Security audit: check for unexpected sessions
 - Multi-device management: identify sessions to disconnect
@@ -643,33 +718,33 @@ type SetCapabilitiesInput = {
 
 ### General Errors (1000-1999)
 
-| Error Code | Name | Trigger Condition |
-|--------|------|----------|
-| 1001 | INVALID_REQUEST | Request format error, missing `action` field, invalid action value |
-| 1002 | UNAUTHORIZED | No valid authentication token provided or token expired |
-| 1003 | USER_DISABLED | User account has been disabled by administrator |
+| Error Code | Name            | Trigger Condition                                                  |
+| ---------- | --------------- | ------------------------------------------------------------------ |
+| 1001       | INVALID_REQUEST | Request format error, missing `action` field, invalid action value |
+| 1002       | UNAUTHORIZED    | No valid authentication token provided or token expired            |
+| 1003       | USER_DISABLED   | User account has been disabled by administrator                    |
 
 ### Server Configuration Errors (2000-2999)
 
-| Error Code | Name | Trigger Condition |
-|--------|------|----------|
-| 2001 | SERVER_NOT_FOUND | Specified serverId does not exist in database |
-| 2002 | SERVER_DISABLED | Server has been disabled by administrator (`enabled = false`) |
-| 2003 | SERVER_CONFIG_INVALID | Invalid configTemplate JSON or authConf format; credential replacement resulted in invalid JSON |
-| 2004 | SERVER_NOT_ALLOW_USER_INPUT | Server's `allowUserInput` field is `false` (only admin can configure) |
-| 2005 | SERVER_NO_CONFIG_TEMPLATE | Server is missing `configTemplate` field (required for user configuration) |
+| Error Code | Name                        | Trigger Condition                                                                               |
+| ---------- | --------------------------- | ----------------------------------------------------------------------------------------------- |
+| 2001       | SERVER_NOT_FOUND            | Specified serverId does not exist in database                                                   |
+| 2002       | SERVER_DISABLED             | Server has been disabled by administrator (`enabled = false`)                                   |
+| 2003       | SERVER_CONFIG_INVALID       | Invalid configTemplate JSON or authConf format; credential replacement resulted in invalid JSON |
+| 2004       | SERVER_NOT_ALLOW_USER_INPUT | Server's `allowUserInput` field is `false` (only admin can configure)                           |
+| 2005       | SERVER_NO_CONFIG_TEMPLATE   | Server is missing `configTemplate` field (required for user configuration)                      |
 
 ### Capability Errors (3000-3999)
 
-| Error Code | Name | Trigger Condition |
-|--------|------|----------|
-| 3001 | INVALID_CAPABILITIES | Submitted capabilities data structure is malformed or invalid |
+| Error Code | Name                 | Trigger Condition                                             |
+| ---------- | -------------------- | ------------------------------------------------------------- |
+| 3001       | INVALID_CAPABILITIES | Submitted capabilities data structure is malformed or invalid |
 
 ### Internal Errors (5000+)
 
-| Error Code | Name | Trigger Condition |
-|--------|------|----------|
-| 5001 | INTERNAL_ERROR | Unexpected server error (database failure, service unavailable, etc.) |
+| Error Code | Name           | Trigger Condition                                                     |
+| ---------- | -------------- | --------------------------------------------------------------------- |
+| 5001       | INTERNAL_ERROR | Unexpected server error (database failure, service unavailable, etc.) |
 
 ---
 
@@ -677,20 +752,27 @@ type SetCapabilitiesInput = {
 
 The User API uses standard HTTP status codes in addition to application-level error codes:
 
-| HTTP Status | Usage |
-|-------------|-------|
-| 200 OK | Request succeeded (check `success` field in response body) |
-| 400 Bad Request | Invalid request format, malformed JSON |
-| 401 Unauthorized | Missing or invalid authentication token |
-| 500 Internal Server Error | Server error occurred (check `error.code` for details) |
+| HTTP Status               | Usage                                                      |
+| ------------------------- | ---------------------------------------------------------- |
+| 200 OK                    | Request succeeded (check `success` field in response body) |
+| 400 Bad Request           | Invalid request format, malformed JSON                     |
+| 401 Unauthorized          | Missing or invalid authentication token                    |
+| 500 Internal Server Error | Server error occurred (check `error.code` for details)     |
 
 ---
 
 ## Version Information
 
-- **Protocol Version**: 1.0
-- **Last Updated**: January 15, 2026
+- **Protocol Version**: 1.1
+- **Last Updated**: March 13, 2026
 - **Release Notes**:
+  - Added CustomStdio (category=5) support to CONFIGURE_SERVER (2001)
+  - Added `stdioEnv` parameter documentation for CustomStdio servers
+  - Added CustomStdio-specific error cases and business logic description
+
+**Version History**:
+
+- **1.0** (January 15, 2026):
   - Initial release of User API
   - Support for 5 core operations: capabilities management, server configuration, session queries
   - Transport-agnostic architecture (HTTP + Socket.IO)
@@ -700,14 +782,14 @@ The User API uses standard HTTP status codes in addition to application-level er
 
 ## Comparison with Admin API
 
-| Feature | User API | Admin API |
-|---------|----------|-----------|
-| **Endpoint** | `POST /user` | `POST /admin` |
-| **Authentication** | Bearer Token | Bearer Token |
-| **Role Checking** | ❌ No (any valid user) | ✅ Yes (Owner/Admin only) |
-| **Operations** | 5 user-facing operations | 40+ admin operations |
-| **Scope** | User's own data and preferences | System-wide management |
-| **Transport** | HTTP + Socket.IO | HTTP only |
+| Feature            | User API                        | Admin API                 |
+| ------------------ | ------------------------------- | ------------------------- |
+| **Endpoint**       | `POST /user`                    | `POST /admin`             |
+| **Authentication** | Bearer Token                    | Bearer Token              |
+| **Role Checking**  | ❌ No (any valid user)          | ✅ Yes (Owner/Admin only) |
+| **Operations**     | 5 user-facing operations        | 40+ admin operations      |
+| **Scope**          | User's own data and preferences | System-wide management    |
+| **Transport**      | HTTP + Socket.IO                | HTTP only                 |
 
 ---
 
@@ -716,6 +798,7 @@ The User API uses standard HTTP status codes in addition to application-level er
 ### For Client Developers
 
 1. **Call GET_CAPABILITIES on Startup**:
+
    ```typescript
    const capabilities = await fetchUserCapabilities(token);
    // Use capabilities to show/hide UI features
@@ -725,6 +808,7 @@ The User API uses standard HTTP status codes in addition to application-level er
    ```
 
 2. **Handle Errors Gracefully**:
+
    ```typescript
    if (!response.success) {
      switch (response.error.code) {
@@ -780,5 +864,6 @@ The User API uses standard HTTP status codes in addition to application-level er
 ## Support
 
 For issues, questions, or feature requests:
+
 - GitHub Issues: [https://github.com/dunialabs/peta-core/issues](https://github.com/dunialabs/peta-core/issues)
 - Documentation: [https://github.com/dunialabs/peta-core](https://github.com/dunialabs/peta-core)
