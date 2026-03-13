@@ -2,6 +2,8 @@
 
 A control-plane runtime for MCP (Model Context Protocol). Gateway, vault, policy engine, and audit trail for every tool call between AI agents and downstream MCP servers.
 
+Supports the core infrastructure components required to run MCP in production: gateway routing, runtime supervision, policy enforcement, credential management, and audit logging.
+
 ![Node](https://img.shields.io/badge/node-%3E%3D18-green.svg)
 ![License](https://img.shields.io/badge/license-ELv2-blue.svg)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-blue.svg)
@@ -29,7 +31,7 @@ Peta Core sits between MCP clients (Claude, ChatGPT, Cursor, n8n, or any MCP-com
 Peta Core is one component of the Peta MCP stack:
 
 - **Peta Core** (this repository) — MCP gateway, credential vault, policy engine, and audit runtime.
-- **Peta Console** — Admin UI for users, servers, policies, and audit logs.
+- **Peta Console** — Admin UI for users, servers, policies, approvals, and audit logs, including anonymous access controls and stdio custom-tool configuration.
 - **Peta Desk** — Desktop client for approval workflows and per-user server configuration.
 
 > This repository contains only Peta Core. See [docs.peta.io](https://docs.peta.io) for the full stack.
@@ -42,10 +44,12 @@ Peta Core is one component of the Peta MCP stack:
 
 - Transparent MCP proxying. Acts as an MCP server upstream and an MCP client downstream. Routes tool calls via namespaced identifiers (`serverId::toolName`).
 - Built-in OAuth 2.0 authorization server. Authorization Code with PKCE, refresh tokens, dynamic client registration, token introspection, and revocation.
+- Anonymous public access mode. Optionally allow token-less access for selected public servers through `/mcp/public`, while authenticated traffic continues on the standard `/mcp` endpoint, with configurable anonymous rate limits.
 
 ### Runtime & Extensions
 
 - Downstream server runtime. Lazy start on first request, health checks, idle timeouts, and capability caching.
+- Custom MCP tools (HTTPS or stdio). HTTPS-based custom tools remain supported, with stdio transport added for process-based tools.
 - REST API adapter. Register HTTP endpoints as MCP servers. Peta Core translates tool calls to HTTP requests without writing a custom MCP server.
 - Skill packages. Upload per-server ZIP bundles with `SKILL.md` metadata. Served as namespaced MCP tools, isolated by server ID.
 
@@ -57,14 +61,15 @@ Peta Core is one component of the Peta MCP stack:
 
 ### Policy Engine
 
-- Per-user, per-tool policy evaluation. RBAC/ABAC rules with content-aware capability filtering.
-- Human-in-the-loop approvals. Execution pauses for flagged tools and resumes only after an explicit approval or rejection.
+- Per-user, per-tool policy evaluation. RBAC/ABAC rules with content-aware DSL conditions and capability filtering.
+- Human-in-the-loop approvals. Durable approval queue with explicit lifecycle states and replay-safe retries.
 - Rate limiting and network controls. Per-user quotas with sliding window enforcement. Optional IP allow-lists per workspace.
 
 ### Audit & Observability
 
 - Audit trail. Records caller identity, tool name, policy decision, approval status, and outcome for every tool call. Secrets are excluded from log payloads.
 - Structured logging. Pino-based JSON logs with per-module child loggers. Integrates with external log aggregation via webhook.
+- Observability workflows. Audit records and structured logs support log views, export workflows, and usage dashboards.
 
 ### Reliability
 
