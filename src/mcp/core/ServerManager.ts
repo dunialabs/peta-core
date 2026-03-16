@@ -43,6 +43,11 @@ import { createLogger } from '../../logger/index.js';
 import * as path from 'path';
 import { resolveHostPath } from '../../utils/DockerHostPathResolver.js';
 import { customStdioRunnerService } from './CustomStdioRunnerService.js';
+import {
+  createConnectionStartupDiagnostics,
+  formatConnectionDiagnosticError,
+  type ConnectionStartupDiagnostics
+} from './ConnectionStartupDiagnostics.js';
 
 /**
  * Subscription state structure
@@ -50,6 +55,12 @@ import { customStdioRunnerService } from './CustomStdioRunnerService.js';
 interface SubscriptionState {
   subscribedSessions: Set<string>;  // Session IDs subscribed to this resource
   downstreamSubscribed: boolean;     // Whether already subscribed to downstream
+}
+
+function createErrorWithCause(message: string, cause: unknown): Error {
+  const error = new Error(message);
+  (error as Error & { cause?: unknown }).cause = cause;
+  return error;
 }
 
 /**
@@ -252,7 +263,10 @@ export class ServerManager {
       }
 
       // Throw error to let caller handle
-      throw new McpError(ErrorCode.InternalError, String(error));
+      throw new McpError(
+        ErrorCode.InternalError,
+        error instanceof Error ? error.message : String(error)
+      );
     }
   }
 
@@ -738,6 +752,9 @@ export class ServerManager {
     }
 
     const serverEntity: Server = serverContext.serverEntity;
+    let startupDiagnostics: ConnectionStartupDiagnostics | undefined;
+    let runnerStartupFailureMessage: string | undefined;
+    let startupPhaseActive = true;
 
     try {
       serverContext.status = ServerStatus.Connecting;
@@ -761,7 +778,7 @@ export class ServerManager {
           config.apis[0].auth = launchConfig.auth;
           delete launchConfig.auth;
           launchConfig.env ??= {
-            type: "none"
+            type: 'none'
           };
           launchConfig.env.GATEWAY_CONFIG = JSON.stringify(config);
           break;
@@ -801,6 +818,16 @@ export class ServerManager {
         this.logger.info({ serverId: serverEntity.serverId, transportType }, 'Transport type detected and cached');
       }
 
+      // 5. Create MCP client
+      const client = new Client(
+        {
+          name: APP_INFO.name,
+          version: APP_INFO.version
+        },
+        this.clientOptions
+      );
+      startupDiagnostics = createConnectionStartupDiagnostics(transport, client);
+
       transport.onclose = () => {
         this.logger.warn({ serverName: serverEntity.serverName }, 'Transport closed');
 
@@ -812,6 +839,7 @@ export class ServerManager {
         
         serverContext.status = ServerStatus.Error;
         let closeErrorMessage = 'Transport closed by server';
+        let preferredCloseMessage: string | undefined;
         if (runnerMetadata && runnerExecutionTrace) {
           const runnerFailure = customStdioRunnerService.buildFailureDetails(
             serverEntity.serverId,
@@ -820,6 +848,7 @@ export class ServerManager {
           );
           if (runnerFailure) {
             closeErrorMessage = runnerFailure.message;
+            preferredCloseMessage = runnerFailure.message;
             this.logger.error({
               serverId: serverEntity.serverId,
               originalCommand: runnerMetadata.originalCommand,
@@ -832,7 +861,16 @@ export class ServerManager {
             }, 'CustomStdio runner process exited');
           }
         }
-        serverContext.recordError(closeErrorMessage);
+
+        if (startupPhaseActive) {
+          startupDiagnostics?.captureClose(closeErrorMessage);
+        }
+        this.recordServerStartupError(
+          serverContext,
+          closeErrorMessage,
+          preferredCloseMessage ??
+            (startupPhaseActive ? startupDiagnostics?.getPreferredMessage() : undefined)
+        );
 
         if (serverEntity.allowUserInput) {
           void this.closeTemporaryServer(serverEntity.serverId, serverContext.userId!).catch((error) => {
@@ -850,15 +888,6 @@ export class ServerManager {
           promptsChanged: (serverContext.prompts?.prompts?.length ?? 0) > 0
         });
       };
-      
-      // 5. Create MCP client
-      const client = new Client(
-        {
-          name: APP_INFO.name,
-          version: APP_INFO.version
-        },
-        this.clientOptions
-      );
       
       // 6. Establish connection
       try {
@@ -882,7 +911,8 @@ export class ServerManager {
               signal: runnerExecutionTrace.signal,
               stderrTail: runnerFailure.stderrSummary
             }, 'CustomStdio runner failed during startup');
-            throw new Error(runnerFailure.message);
+            runnerStartupFailureMessage = runnerFailure.message;
+            throw createErrorWithCause(runnerFailure.message, error);
           }
         }
         throw error;
@@ -916,6 +946,8 @@ export class ServerManager {
 
       // 8. Get server capabilities
       await this.updateServerCapabilities(serverContext);
+      startupPhaseActive = false;
+      startupDiagnostics.deactivate();
       this.logger.info({ serverName: serverEntity.serverName }, 'Server connection established');
 
       // 9. Log ServerInit event (1310)
@@ -926,12 +958,45 @@ export class ServerManager {
         });
       }
     } catch (error) {
-      this.logger.warn({ error, serverName: serverEntity.serverName }, 'Failed to get capabilities');
-      serverContext.status = ServerStatus.Error;
-      serverContext.recordError(String(error));
+      const formattedError = formatConnectionDiagnosticError(error);
+      const preferredErrorMessage =
+        runnerStartupFailureMessage ??
+        startupDiagnostics?.getPreferredMessage(error) ??
+        formattedError;
+      const errorToThrow =
+        error instanceof Error && error.message === preferredErrorMessage
+          ? error
+          : createErrorWithCause(preferredErrorMessage, error);
 
-      throw error;
+      this.logger.warn({
+        error: errorToThrow,
+        serverName: serverEntity.serverName,
+        diagnostics: startupDiagnostics?.getSnapshot(error)
+      }, 'Server startup failed');
+      serverContext.status = ServerStatus.Error;
+      this.recordServerStartupError(serverContext, preferredErrorMessage);
+      startupPhaseActive = false;
+      startupDiagnostics?.deactivate();
+
+      throw errorToThrow;
     }
+  }
+
+  private recordServerStartupError(
+    serverContext: ServerContext,
+    primaryMessage?: string,
+    preferredMessage?: string
+  ): void {
+    const nextMessage = preferredMessage ?? primaryMessage;
+    if (!nextMessage || nextMessage.trim() === '') {
+      return;
+    }
+
+    if (serverContext.lastError === nextMessage) {
+      return;
+    }
+
+    serverContext.recordError(nextMessage);
   }
 
   async updateServerCapabilities(serverContext: ServerContext): Promise<void> {

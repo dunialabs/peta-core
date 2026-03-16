@@ -1,4 +1,4 @@
-import { StdioClientTransport, StdioServerParameters } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -82,7 +82,8 @@ export class DownstreamTransportFactory {
       args: config.args || [],
       env: config.env,
       cwd: config.cwd,
-      stderr: config.stderr
+      // Always pipe stderr so peta-core can capture startup diagnostics itself.
+      stderr: 'pipe'
     });
   }
 
