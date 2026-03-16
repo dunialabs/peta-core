@@ -50,6 +50,7 @@ Peta Core is one component of the Peta MCP stack:
 
 - Downstream server runtime. Lazy start on first request, health checks, idle timeouts, and capability caching.
 - Custom MCP tools (HTTPS or stdio). HTTPS-based custom tools remain supported, with stdio transport added for process-based tools.
+- Docker-safe `CustomStdio` execution. In Docker deployments, non-`docker` stdio commands are transparently executed inside `petaio/mcp-runner:latest`; explicit `docker` commands keep their original behavior.
 - REST API adapter. Register HTTP endpoints as MCP servers. Peta Core translates tool calls to HTTP requests without writing a custom MCP server.
 - Skill packages. Upload per-server ZIP bundles with `SKILL.md` metadata. Served as namespaced MCP tools, isolated by server ID.
 

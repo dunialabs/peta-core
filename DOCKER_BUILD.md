@@ -1,6 +1,7 @@
 # PETA Core - Docker Build Guide
 
 This document explains how to build and push Docker images for PETA Core (MCP Gateway).
+The `petaio/mcp-runner` image used by Docker-deployed `CustomStdio` servers is built and released separately from this repository.
 
 ## Prerequisites
 

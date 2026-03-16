@@ -12,7 +12,7 @@
     "rebuild": "npm run clean && npm run build",
     "start": "NODE_ENV=production node scripts/start-app.js",
     "start:prod": "npm run build && npm start",
-    "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
+    "test": "npm run build && NODE_OPTIONS='--experimental-vm-modules' jest",
     "db:start": "docker compose up -d postgres",
     "db:stop": "docker compose down",
     "db:restart": "docker compose restart postgres",
@@ -63,7 +63,8 @@
     "testEnvironment": "node",
     "testMatch": [
       "**/src/**/*.test.ts",
-      "**/tests/**/*.test.ts"
+      "**/tests/**/*.test.ts",
+      "**/tests/**/*.test.js"
     ],
     "testPathIgnorePatterns": [
       "/node_modules/",

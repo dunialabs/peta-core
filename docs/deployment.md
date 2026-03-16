@@ -191,6 +191,10 @@ For additional environment variables (for example OAuth clients, multi-tenant co
 
 The default Docker setup uses the following containers and settings.
 
+### CustomStdio In Docker
+
+When `peta-core` runs with `PETA_CORE_IN_DOCKER=true`, non-`docker` `CustomStdio` commands are executed inside `petaio/mcp-runner:latest`, while explicit `docker` commands keep their original behavior. For the complete behavior and current limitations, see [DOCKER_DEPLOYMENT.md](./DOCKER_DEPLOYMENT.md).
+
 ### PostgreSQL
 
 - Container name: `peta-core-postgres`

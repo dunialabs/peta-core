@@ -80,11 +80,9 @@ export class DownstreamTransportFactory {
     return new StdioClientTransport({
       command: config.command,
       args: config.args || [],
-      env: {
-        ...process.env,
-        ...config.env
-      },
-      cwd: config.cwd
+      env: config.env,
+      cwd: config.cwd,
+      stderr: config.stderr
     });
   }
 

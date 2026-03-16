@@ -799,6 +799,7 @@ null
 - **RestApi (3)**: must include `apis[0].auth`; system injects `launchConfig.auth`
 - **Skills (4)**: must include `type` and `serverName`
 - **CustomStdio (5)**: must include `command`; optional `args` (array) and `env` (object). When `allowUserInput=true`, users override env via `stdioEnv` in User API
+  - Docker deployment behavior: if `PETA_CORE_IN_DOCKER=true` and `command` is not `docker`, peta-core wraps execution into `docker run ... petaio/mcp-runner:latest ...` internally. Stored configuration format remains unchanged.
 
 **OAuth Template note**:
 

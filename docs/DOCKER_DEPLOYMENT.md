@@ -322,6 +322,22 @@ docker compose up -d
 # API: http://localhost:4002
 ```
 
+#### CustomStdio Runner Behavior (Docker Deployment)
+
+When `peta-core` runs in Docker (`PETA_CORE_IN_DOCKER=true`):
+
+1. `ServerCategory.CustomStdio` with `command` explicitly set to `docker` keeps the existing behavior (no additional wrapper).
+2. Other `CustomStdio` commands are wrapped automatically and executed in `petaio/mcp-runner:latest`:
+
+```bash
+docker run -i --rm --init ... petaio/mcp-runner:latest <original-command> <original-args...>
+```
+
+Important boundary for v1:
+
+- `peta-core` does not auto-detect or auto-mount arbitrary host project directories.
+- Commands that depend on local source directories (for example `npm run dev` over host files) may fail in Docker deployment.
+
 ## 📖 Usage Guide
 
 ### Health Check

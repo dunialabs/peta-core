@@ -42,6 +42,7 @@ import { ProxyContext } from '../../types/mcp.types.js';
 import { createLogger } from '../../logger/index.js';
 import * as path from 'path';
 import { resolveHostPath } from '../../utils/DockerHostPathResolver.js';
+import { customStdioRunnerService } from './CustomStdioRunnerService.js';
 
 /**
  * Subscription state structure
@@ -772,8 +773,24 @@ export class ServerManager {
           break;
       }
 
+      const { launchConfig: resolvedLaunchConfig, runnerMetadata } =
+        customStdioRunnerService.resolveLaunchPlan(serverEntity, launchConfig);
+      if (runnerMetadata) {
+        this.logger.info(
+          {
+            serverId: serverEntity.serverId,
+            originalCommand: runnerMetadata.originalCommand,
+            runnerImage: runnerMetadata.runnerImage
+          },
+          'CustomStdio command wrapped to runner container'
+        );
+      }
+
       // 4. Create transport using dynamic transport factory
-      const { transport, transportType } = await DownstreamTransportFactory.create(launchConfig);
+      const { transport, transportType } = await DownstreamTransportFactory.create(resolvedLaunchConfig);
+      const runnerExecutionTrace = runnerMetadata
+        ? customStdioRunnerService.attachExecutionTrace(transport)
+        : undefined;
 
       // 1.5 Detect and cache transport type if not already set
       if (!serverEntity.transportType || serverEntity.transportType !== transportType) {
@@ -794,7 +811,28 @@ export class ServerManager {
         const affectedSessions = SessionStore.instance?.getSessionsUsingServer(serverEntity.serverId) ?? [];
         
         serverContext.status = ServerStatus.Error;
-        serverContext.recordError(`Transport closed by server`);
+        let closeErrorMessage = 'Transport closed by server';
+        if (runnerMetadata && runnerExecutionTrace) {
+          const runnerFailure = customStdioRunnerService.buildFailureDetails(
+            serverEntity.serverId,
+            runnerMetadata,
+            runnerExecutionTrace
+          );
+          if (runnerFailure) {
+            closeErrorMessage = runnerFailure.message;
+            this.logger.error({
+              serverId: serverEntity.serverId,
+              originalCommand: runnerMetadata.originalCommand,
+              runnerImage: runnerMetadata.runnerImage,
+              category: runnerFailure.category,
+              reason: runnerFailure.reason,
+              exitCode: runnerExecutionTrace.exitCode,
+              signal: runnerExecutionTrace.signal,
+              stderrTail: runnerFailure.stderrSummary
+            }, 'CustomStdio runner process exited');
+          }
+        }
+        serverContext.recordError(closeErrorMessage);
 
         if (serverEntity.allowUserInput) {
           void this.closeTemporaryServer(serverEntity.serverId, serverContext.userId!).catch((error) => {
@@ -823,7 +861,32 @@ export class ServerManager {
       );
       
       // 6. Establish connection
-      await client.connect(transport);
+      try {
+        await client.connect(transport);
+      } catch (error) {
+        if (runnerMetadata && runnerExecutionTrace) {
+          const runnerFailure = customStdioRunnerService.buildFailureDetails(
+            serverEntity.serverId,
+            runnerMetadata,
+            runnerExecutionTrace,
+            error
+          );
+          if (runnerFailure) {
+            this.logger.error({
+              serverId: serverEntity.serverId,
+              originalCommand: runnerMetadata.originalCommand,
+              runnerImage: runnerMetadata.runnerImage,
+              category: runnerFailure.category,
+              reason: runnerFailure.reason,
+              exitCode: runnerExecutionTrace.exitCode,
+              signal: runnerExecutionTrace.signal,
+              stderrTail: runnerFailure.stderrSummary
+            }, 'CustomStdio runner failed during startup');
+            throw new Error(runnerFailure.message);
+          }
+        }
+        throw error;
+      }
       this.logger.info({ serverName: serverEntity.serverName }, 'Connection established');
       if (serverEntity.category === ServerCategory.CustomRemote || serverEntity.category === ServerCategory.CustomStdio) {
         const serverInfo = client.getServerVersion();
