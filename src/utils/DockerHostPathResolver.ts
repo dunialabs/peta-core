@@ -1,6 +1,7 @@
 import * as http from 'http';
 import * as fs from 'fs';
 import { createLogger } from '../logger/index.js';
+import { DOCKER_SOCKET_PATH } from './DockerRuntimeProbe.js';
 
 interface DockerMount {
   Source: string;
@@ -15,7 +16,6 @@ interface ContainerInfo {
 }
 
 const logger = createLogger('DockerHostPathResolver');
-const DOCKER_SOCKET = '/var/run/docker.sock';
 
 // Cached result: null = not yet fetched, [] = fetched but none found
 let cachedMounts: DockerMount[] | null = null;
@@ -88,7 +88,7 @@ async function getMounts(): Promise<DockerMount[] | null> {
 
   // Docker socket must exist and be accessible
   try {
-    await fs.promises.access(DOCKER_SOCKET, fs.constants.R_OK);
+    await fs.promises.access(DOCKER_SOCKET_PATH, fs.constants.R_OK);
   } catch {
     resolutionFailed = true;
     return null;
@@ -102,7 +102,7 @@ async function getMounts(): Promise<DockerMount[] | null> {
   }
 
   try {
-    const body = await httpGetUnixSocket(DOCKER_SOCKET, `/containers/${containerId}/json`);
+    const body = await httpGetUnixSocket(DOCKER_SOCKET_PATH, `/containers/${containerId}/json`);
     const info: ContainerInfo = JSON.parse(body);
     cachedMounts = Array.isArray(info.Mounts) ? info.Mounts : [];
     logger.debug({ mountCount: cachedMounts.length }, 'Docker container mounts cached');

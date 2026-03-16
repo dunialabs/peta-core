@@ -507,6 +507,7 @@ _Example 4: CustomStdio Server (category=5) — user provides env overrides_
   - **Merge behavior**: Admin-defined env (from `configTemplate.env`) is merged with user-provided `stdioEnv`. User values override admin defaults on key collision.
   - **Immutable fields**: `command` and `args` are set by admin in `configTemplate` and cannot be changed by the user.
   - **ConfigTemplate requirement**: CustomStdio servers must have a `configTemplate` with at least a `command` field. The `args` (array) and `env` (object) fields are optional.
+  - **Docker runtime note**: If `PETA_CORE_IN_DOCKER=true` and the configured `command` is not `docker`, peta-core wraps execution into `docker run ... petaio/mcp-runner:latest ...` internally. User-facing configuration fields do not change.
 
 **Return Result** (data):
 
@@ -548,6 +549,7 @@ _Example 4: CustomStdio Server (category=5) — user provides env overrides_
    - Validates `command` field exists (returns `SERVER_CONFIG_INVALID` if missing)
    - Merges admin env defaults with user-provided `stdioEnv` overrides (user wins on key collision)
    - Creates launchConfig: `{ command: "...", args: [...], env: { ...adminEnv, ...userEnv } }`
+   - On Docker deployments (`PETA_CORE_IN_DOCKER=true`), non-`docker` commands are executed inside `petaio/mcp-runner:latest`; explicit `docker` commands keep direct execution semantics
 
    **For RestApi Servers (category=3)**:
    - Requires `restfulApiAuth` parameter (must not be empty)
