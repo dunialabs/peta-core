@@ -444,58 +444,6 @@ export class GlobalRequestRouter {
     // Get subscribers for this resource
     const subscribers = ServerManager.instance.getResourceSubscribers(subscriptionKey);
 
-    if (subscribers.size === 0) {
-      this.logger.debug({ subscriptionKey }, 'No subscribers for resource, skipping notification');
-      return;
-    }
-
-    this.logger.debug(
-      { serverId, resourceUri, subscriberCount: subscribers.size },
-      'Broadcasting resource updated to subscribers',
-    );
-
-    // Get all sessions
-    const sessions = SessionStore.instance.getAllSessions();
-    const notificationKey = `resource_updated_${serverId}_${resourceUri}_${Date.now()}`;
-
-    for (const session of sessions) {
-      const sessionId = session.sessionId;
-
-      // Only notify sessions that subscribed to this resource
-      if (!subscribers.has(sessionId)) {
-        continue;
-      }
-
-      // Check permissions (additional security check)
-      if (!session.canAccessServer(serverId)) {
-        continue;
-      }
-
-      // Check if already sent (deduplication)
-      const sent = this.sentNotifications.get(sessionId) || new Set();
-      if (sent.has(notificationKey)) {
-        continue;
-      }
-
-      // Send notification
-      try {
-        session.sendResourceUpdated(serverId, notification);
-        // Record as sent
-        sent.add(notificationKey);
-        this.sentNotifications.set(sessionId, sent);
-
-        // Clean up old notification records (keep last 100)
-        if (sent.size > 100) {
-          const array = Array.from(sent);
-          sent.clear();
-          array.slice(-100).forEach((k) => sent.add(k));
-        }
-      } catch (error) {
-        this.logger.error({ error, sessionId }, 'Failed to send resource updated to session');
-      }
-    }
-
-    // Invalidate result cache entries for this resource (PRD Section 22.1)
     try {
       const cacheService = ResultCacheService.instance;
       if (cacheService.enabled) {
@@ -510,6 +458,50 @@ export class GlobalRequestRouter {
         { error, serverId, resourceUri },
         'Failed to invalidate result cache for resource update',
       );
+    }
+
+    if (subscribers.size === 0) {
+      this.logger.debug({ subscriptionKey }, 'No subscribers for resource, skipping notification');
+      return;
+    }
+
+    this.logger.debug(
+      { serverId, resourceUri, subscriberCount: subscribers.size },
+      'Broadcasting resource updated to subscribers',
+    );
+
+    const sessions = SessionStore.instance.getAllSessions();
+    const notificationKey = `resource_updated_${serverId}_${resourceUri}_${Date.now()}`;
+
+    for (const session of sessions) {
+      const sessionId = session.sessionId;
+
+      if (!subscribers.has(sessionId)) {
+        continue;
+      }
+
+      if (!session.canAccessServer(serverId)) {
+        continue;
+      }
+
+      const sent = this.sentNotifications.get(sessionId) || new Set();
+      if (sent.has(notificationKey)) {
+        continue;
+      }
+
+      try {
+        session.sendResourceUpdated(serverId, notification);
+        sent.add(notificationKey);
+        this.sentNotifications.set(sessionId, sent);
+
+        if (sent.size > 100) {
+          const array = Array.from(sent);
+          sent.clear();
+          array.slice(-100).forEach((k) => sent.add(k));
+        }
+      } catch (error) {
+        this.logger.error({ error, sessionId }, 'Failed to send resource updated to session');
+      }
     }
   }
 

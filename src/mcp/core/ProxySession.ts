@@ -453,62 +453,85 @@ export class ProxySession {
         const effectiveDangerLevel = userDangerLevel ?? serverDangerLevel ?? DangerLevel.Silent;
 
         if (toolCachePolicy && effectiveDangerLevel < DangerLevel.Approval) {
-          const scopeCtx: CacheScopeContext = { userId: this.userId };
-          try {
-            const cached = await cacheService.lookup(
-              'tool',
-              result.serverID,
-              result.originalName,
-              scopeCtx,
-              toolCachePolicy,
-              request.params.arguments,
+          // Also check policy engine — it can require approval independently of dangerLevel
+          const policyCheck = await policyEngine.evaluate({
+            userId: this.userId,
+            serverId: result.serverID,
+            toolName: result.originalName,
+            args: (request.params.arguments ?? {}) as Record<string, unknown>,
+            dangerLevel: effectiveDangerLevel,
+          });
+          if (
+            policyCheck.decision === PolicyDecision.Deny ||
+            policyCheck.decision === PolicyDecision.RequireApproval
+          ) {
+            this.logger.debug(
+              {
+                toolName,
+                serverId: result.serverID,
+                'cache.bypass_reason': 'policy_gated',
+                policyDecision: policyCheck.decision,
+              },
+              'Cache bypassed: tool requires policy approval or is denied',
             );
-            if (cached.hit && cached.entry) {
-              this.logger.info(
+          } else {
+            const scopeCtx: CacheScopeContext = { userId: this.userId };
+            try {
+              const cached = await cacheService.lookup(
+                'tool',
+                result.serverID,
+                result.originalName,
+                scopeCtx,
+                toolCachePolicy,
+                request.params.arguments,
+              );
+              if (cached.hit && cached.entry) {
+                this.logger.info(
+                  {
+                    'cache.enabled': true,
+                    'cache.backend': cacheService.getConfigSnapshot().backend,
+                    'cache.cacheable': true,
+                    'cache.hit': true,
+                    'cache.scope_type': toolCachePolicy.scope,
+                    'cache.key_hash': cached.entry.requestHash,
+                    'cache.entry_bytes': cached.entry.payloadBytes,
+                    'cache.ttl_seconds': toolCachePolicy.ttlSeconds,
+                    'cache.admission_policy': toolCachePolicy.admissionPolicy,
+                    toolName,
+                    serverId: result.serverID,
+                  },
+                  'Tool call served from cache (fast-path)',
+                );
+                await this.sessionLogger.logClientRequest({
+                  action: MCPEventLogType.ResponseTool,
+                  serverId: result.serverID,
+                  upstreamRequestId: String(originalRequestId),
+                  uniformRequestId,
+                  requestParams: request.params,
+                  responseResult: cached.entry.payload,
+                  duration: Date.now() - startTime,
+                  statusCode: 200,
+                });
+                return cached.entry.payload as CallToolResult;
+              }
+              this.logger.debug(
                 {
                   'cache.enabled': true,
-                  'cache.backend': cacheService.getConfigSnapshot().backend,
-                  'cache.cacheable': true,
-                  'cache.hit': true,
+                  'cache.hit': false,
+                  'cache.bypass_reason': cached.bypassReason ?? 'miss',
                   'cache.scope_type': toolCachePolicy.scope,
-                  'cache.key_hash': cached.entry.requestHash,
-                  'cache.entry_bytes': cached.entry.payloadBytes,
-                  'cache.ttl_seconds': toolCachePolicy.ttlSeconds,
                   'cache.admission_policy': toolCachePolicy.admissionPolicy,
                   toolName,
                   serverId: result.serverID,
                 },
-                'Tool call served from cache (fast-path)',
+                'Tool cache miss',
               );
-              await this.sessionLogger.logClientRequest({
-                action: MCPEventLogType.ResponseTool,
-                serverId: result.serverID,
-                upstreamRequestId: String(originalRequestId),
-                uniformRequestId,
-                requestParams: request.params,
-                responseResult: cached.entry.payload,
-                duration: Date.now() - startTime,
-                statusCode: 200,
-              });
-              return cached.entry.payload as CallToolResult;
+            } catch (cacheError) {
+              this.logger.warn(
+                { error: cacheError, toolName, 'cache.bypass_reason': 'backend_unavailable' },
+                'Cache fast-path lookup failed, continuing normally',
+              );
             }
-            this.logger.debug(
-              {
-                'cache.enabled': true,
-                'cache.hit': false,
-                'cache.bypass_reason': cached.bypassReason ?? 'miss',
-                'cache.scope_type': toolCachePolicy.scope,
-                'cache.admission_policy': toolCachePolicy.admissionPolicy,
-                toolName,
-                serverId: result.serverID,
-              },
-              'Tool cache miss',
-            );
-          } catch (cacheError) {
-            this.logger.warn(
-              { error: cacheError, toolName, 'cache.bypass_reason': 'backend_unavailable' },
-              'Cache fast-path lookup failed, continuing normally',
-            );
           }
         }
       }
