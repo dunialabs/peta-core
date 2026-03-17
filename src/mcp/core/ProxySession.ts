@@ -805,7 +805,7 @@ export class ProxySession {
         statusCode: serverResult.isError ? 500 : 200,
       });
 
-      if (toolCachePolicy && !serverResult.isError) {
+      if (toolCachePolicy && !serverResult.isError && !approvalRequestId) {
         cacheService
           .storeResult(
             'tool',

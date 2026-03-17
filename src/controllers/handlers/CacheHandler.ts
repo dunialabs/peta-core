@@ -29,9 +29,37 @@ export class CacheHandler {
     };
   }
 
-  async handleGetPolicy(_request: AdminRequest): Promise<unknown> {
+  async handleGetPolicy(request: AdminRequest): Promise<unknown> {
     const cacheService = this.requireService();
-    return cacheService.getConfigSnapshot();
+    const data = request.data as Record<string, unknown> | undefined;
+    const serverId = typeof data?.serverId === 'string' ? data.serverId : undefined;
+
+    const config = cacheService.getConfigSnapshot();
+
+    if (!serverId) {
+      return {
+        globalConfig: {
+          enabled: config.enabled,
+          backend: config.backend,
+          defaultTtlSeconds: config.defaultTtlSeconds,
+          defaultAdmissionPolicy: config.defaultAdmissionPolicy,
+          defaultAdmissionWindowSeconds: config.defaultAdmissionWindowSeconds,
+          maxEntryBytes: config.maxEntryBytes,
+        },
+      };
+    }
+
+    return {
+      serverId,
+      globalConfig: {
+        enabled: config.enabled,
+        backend: config.backend,
+        defaultTtlSeconds: config.defaultTtlSeconds,
+        defaultAdmissionPolicy: config.defaultAdmissionPolicy,
+        defaultAdmissionWindowSeconds: config.defaultAdmissionWindowSeconds,
+        maxEntryBytes: config.maxEntryBytes,
+      },
+    };
   }
 
   async handlePurgeGlobal(_request: AdminRequest): Promise<unknown> {
