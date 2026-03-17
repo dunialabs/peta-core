@@ -175,7 +175,7 @@ If you are certain you will not use Peta-managed credentials, set `PETA_AUTH_AUT
 
 | Name                  | Required | Default | Description                                                                                      |
 | --------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `LAZY_START_ENABLED`  |          | `true`  | Enable lazy loading for MCP servers. When true, servers load config but delay startup until first use; idle servers auto-shutdown. |
+| `LAZY_START_ENABLED`  |          | `true`  | Enable lazy loading for MCP servers. When true, servers stay managed in memory, delay startup until first use, and idle/unexpected closes can return them to `Sleeping` for later wake-up. |
 
 #### Cloudflared DDNS (optional)
 
