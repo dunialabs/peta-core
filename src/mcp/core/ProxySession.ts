@@ -464,8 +464,20 @@ export class ProxySession {
               request.params.arguments,
             );
             if (cached.hit && cached.entry) {
-              this.logger.debug(
-                { toolName, serverId: result.serverID },
+              this.logger.info(
+                {
+                  'cache.enabled': true,
+                  'cache.backend': cacheService.getConfigSnapshot().backend,
+                  'cache.cacheable': true,
+                  'cache.hit': true,
+                  'cache.scope_type': toolCachePolicy.scope,
+                  'cache.key_hash': cached.entry.requestHash,
+                  'cache.entry_bytes': cached.entry.payloadBytes,
+                  'cache.ttl_seconds': toolCachePolicy.ttlSeconds,
+                  'cache.admission_policy': toolCachePolicy.admissionPolicy,
+                  toolName,
+                  serverId: result.serverID,
+                },
                 'Tool call served from cache (fast-path)',
               );
               await this.sessionLogger.logClientRequest({
@@ -480,9 +492,21 @@ export class ProxySession {
               });
               return cached.entry.payload as CallToolResult;
             }
+            this.logger.debug(
+              {
+                'cache.enabled': true,
+                'cache.hit': false,
+                'cache.bypass_reason': cached.bypassReason ?? 'miss',
+                'cache.scope_type': toolCachePolicy.scope,
+                'cache.admission_policy': toolCachePolicy.admissionPolicy,
+                toolName,
+                serverId: result.serverID,
+              },
+              'Tool cache miss',
+            );
           } catch (cacheError) {
             this.logger.warn(
-              { error: cacheError, toolName },
+              { error: cacheError, toolName, 'cache.bypass_reason': 'backend_unavailable' },
               'Cache fast-path lookup failed, continuing normally',
             );
           }
@@ -1391,8 +1415,18 @@ export class ProxySession {
               request.params,
             );
             if (cached.hit && cached.entry) {
-              this.logger.debug(
-                { resourceUri, serverId: result.serverID },
+              this.logger.info(
+                {
+                  'cache.enabled': true,
+                  'cache.hit': true,
+                  'cache.scope_type': resCachePolicy.scope,
+                  'cache.key_hash': cached.entry.requestHash,
+                  'cache.entry_bytes': cached.entry.payloadBytes,
+                  'cache.ttl_seconds': resCachePolicy.ttlSeconds,
+                  'cache.admission_policy': resCachePolicy.admissionPolicy,
+                  resourceUri,
+                  serverId: result.serverID,
+                },
                 'Resource read served from cache (fast-path)',
               );
               await this.sessionLogger.logClientRequest({
@@ -1407,9 +1441,21 @@ export class ProxySession {
               });
               return cached.entry.payload as ReadResourceResult;
             }
+            this.logger.debug(
+              {
+                'cache.enabled': true,
+                'cache.hit': false,
+                'cache.bypass_reason': cached.bypassReason ?? 'miss',
+                'cache.scope_type': resCachePolicy.scope,
+                'cache.admission_policy': resCachePolicy.admissionPolicy,
+                resourceUri,
+                serverId: result.serverID,
+              },
+              'Resource cache miss',
+            );
           } catch (cacheError) {
             this.logger.warn(
-              { error: cacheError, resourceUri },
+              { error: cacheError, resourceUri, 'cache.bypass_reason': 'backend_unavailable' },
               'Resource cache fast-path failed, continuing normally',
             );
           }
@@ -1827,8 +1873,18 @@ export class ProxySession {
               request.params.arguments,
             );
             if (cached.hit && cached.entry) {
-              this.logger.debug(
-                { promptName, serverId: parseResult.serverID },
+              this.logger.info(
+                {
+                  'cache.enabled': true,
+                  'cache.hit': true,
+                  'cache.scope_type': promptCachePolicy.scope,
+                  'cache.key_hash': cached.entry.requestHash,
+                  'cache.entry_bytes': cached.entry.payloadBytes,
+                  'cache.ttl_seconds': promptCachePolicy.ttlSeconds,
+                  'cache.admission_policy': promptCachePolicy.admissionPolicy,
+                  promptName,
+                  serverId: parseResult.serverID,
+                },
                 'Prompt get served from cache (fast-path)',
               );
               await this.sessionLogger.logClientRequest({
@@ -1843,9 +1899,21 @@ export class ProxySession {
               });
               return cached.entry.payload as GetPromptResult;
             }
+            this.logger.debug(
+              {
+                'cache.enabled': true,
+                'cache.hit': false,
+                'cache.bypass_reason': cached.bypassReason ?? 'miss',
+                'cache.scope_type': promptCachePolicy.scope,
+                'cache.admission_policy': promptCachePolicy.admissionPolicy,
+                promptName,
+                serverId: parseResult.serverID,
+              },
+              'Prompt cache miss',
+            );
           } catch (cacheError) {
             this.logger.warn(
-              { error: cacheError, promptName },
+              { error: cacheError, promptName, 'cache.bypass_reason': 'backend_unavailable' },
               'Prompt cache fast-path failed, continuing normally',
             );
           }
