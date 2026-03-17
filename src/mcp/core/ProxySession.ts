@@ -434,6 +434,62 @@ export class ProxySession {
       throw new McpError(ErrorCode.InvalidParams, errorMsg);
     }
 
+    const earlyServerContext = ServerManager.instance.getServerContext(
+      result.serverID,
+      this.clientSession.userId,
+    );
+    if (earlyServerContext) {
+      const cacheService = ResultCacheService.instance;
+      if (cacheService.enabled) {
+        const toolCachePolicy = cacheService.resolveToolPolicy(
+          earlyServerContext.capabilitiesConfig,
+          result.originalName,
+        );
+        const serverDangerLevel = earlyServerContext.getDangerLevel(result.originalName);
+        const userDangerLevel = this.clientSession.getDangerLevel(
+          result.serverID,
+          result.originalName,
+        );
+        const effectiveDangerLevel = userDangerLevel ?? serverDangerLevel ?? DangerLevel.Silent;
+
+        if (toolCachePolicy && effectiveDangerLevel < DangerLevel.Approval) {
+          const scopeCtx: CacheScopeContext = { userId: this.userId };
+          try {
+            const cached = await cacheService.lookup(
+              'tool',
+              result.serverID,
+              result.originalName,
+              scopeCtx,
+              toolCachePolicy,
+              request.params.arguments,
+            );
+            if (cached.hit && cached.entry) {
+              this.logger.debug(
+                { toolName, serverId: result.serverID },
+                'Tool call served from cache (fast-path)',
+              );
+              await this.sessionLogger.logClientRequest({
+                action: MCPEventLogType.ResponseTool,
+                serverId: result.serverID,
+                upstreamRequestId: String(originalRequestId),
+                uniformRequestId,
+                requestParams: request.params,
+                responseResult: cached.entry.payload,
+                duration: Date.now() - startTime,
+                statusCode: 200,
+              });
+              return cached.entry.payload as CallToolResult;
+            }
+          } catch (cacheError) {
+            this.logger.warn(
+              { error: cacheError, toolName },
+              'Cache fast-path lookup failed, continuing normally',
+            );
+          }
+        }
+      }
+    }
+
     // Ensure server is available (lazy start)
     await ServerManager.instance.ensureServerAvailable(result.serverID, this.clientSession.userId);
 
@@ -737,45 +793,6 @@ export class ProxySession {
       'Registering tool call request',
     );
 
-    const cacheService = ResultCacheService.instance;
-    const toolCachePolicy = cacheService.enabled
-      ? cacheService.resolveToolPolicy(targetServerContext!.capabilitiesConfig, result.originalName)
-      : null;
-    const scopeCtx: CacheScopeContext = { userId: this.userId };
-
-    if (toolCachePolicy && !approvalRequestId) {
-      try {
-        const cached = await cacheService.lookup(
-          'tool',
-          result.serverID,
-          result.originalName,
-          scopeCtx,
-          toolCachePolicy,
-          request.params.arguments,
-        );
-        if (cached.hit && cached.entry) {
-          this.logger.debug({ toolName, serverId: result.serverID }, 'Tool call served from cache');
-          await this.sessionLogger.logClientRequest({
-            action: MCPEventLogType.ResponseTool,
-            serverId: result.serverID,
-            upstreamRequestId: String(originalRequestId),
-            uniformRequestId,
-            requestParams: request.params,
-            responseResult: cached.entry.payload,
-            duration: Date.now() - startTime,
-            statusCode: 200,
-          });
-          this.requestIdMapper.removeMapping(proxyRequestId);
-          return cached.entry.payload as CallToolResult;
-        }
-      } catch (cacheError) {
-        this.logger.warn(
-          { error: cacheError, toolName },
-          'Cache lookup failed, proceeding without cache',
-        );
-      }
-    }
-
     let isReconnected: boolean | undefined;
 
     try {
@@ -805,20 +822,29 @@ export class ProxySession {
         statusCode: serverResult.isError ? 500 : 200,
       });
 
-      if (toolCachePolicy && !serverResult.isError && !approvalRequestId) {
-        cacheService
-          .storeResult(
-            'tool',
-            result.serverID,
-            result.originalName,
-            scopeCtx,
-            toolCachePolicy,
-            request.params.arguments,
-            serverResult,
-          )
-          .catch((storeError) => {
-            this.logger.warn({ error: storeError, toolName }, 'Cache store failed');
-          });
+      const cacheServiceForStore = ResultCacheService.instance;
+      if (cacheServiceForStore.enabled) {
+        const storeCachePolicy = cacheServiceForStore.resolveToolPolicy(
+          targetServerContext.capabilitiesConfig,
+          result.originalName,
+        );
+
+        if (storeCachePolicy && !serverResult.isError && !approvalRequestId) {
+          const storeScopeCtx: CacheScopeContext = { userId: this.userId };
+          cacheServiceForStore
+            .storeResult(
+              'tool',
+              result.serverID,
+              result.originalName,
+              storeScopeCtx,
+              storeCachePolicy,
+              request.params.arguments,
+              serverResult,
+            )
+            .catch((storeError) => {
+              this.logger.warn({ error: storeError, toolName }, 'Cache store failed');
+            });
+        }
       }
 
       if (approvalRequestId) {
@@ -1342,6 +1368,55 @@ export class ProxySession {
       throw new McpError(ErrorCode.InvalidParams, errorMsg);
     }
 
+    const earlyResContext = ServerManager.instance.getServerContext(
+      result.serverID,
+      this.clientSession.userId,
+    );
+    if (earlyResContext) {
+      const resCacheService = ResultCacheService.instance;
+      if (resCacheService.enabled) {
+        const resCachePolicy = resCacheService.resolveResourcePolicy(
+          earlyResContext.capabilitiesConfig,
+          result.originalName,
+        );
+        if (resCachePolicy) {
+          const resScopeCtx: CacheScopeContext = { userId: this.userId };
+          try {
+            const cached = await resCacheService.lookup(
+              'resource',
+              result.serverID,
+              result.originalName,
+              resScopeCtx,
+              resCachePolicy,
+              request.params,
+            );
+            if (cached.hit && cached.entry) {
+              this.logger.debug(
+                { resourceUri, serverId: result.serverID },
+                'Resource read served from cache (fast-path)',
+              );
+              await this.sessionLogger.logClientRequest({
+                action: MCPEventLogType.ResponseResource,
+                serverId: result.serverID,
+                upstreamRequestId: String(originalRequestId),
+                uniformRequestId,
+                requestParams: request.params,
+                responseResult: cached.entry.payload,
+                duration: Date.now() - startTime,
+                statusCode: 200,
+              });
+              return cached.entry.payload as ReadResourceResult;
+            }
+          } catch (cacheError) {
+            this.logger.warn(
+              { error: cacheError, resourceUri },
+              'Resource cache fast-path failed, continuing normally',
+            );
+          }
+        }
+      }
+    }
+
     // Ensure server is available (lazy start)
     await ServerManager.instance.ensureServerAvailable(result.serverID, this.clientSession.userId);
 
@@ -1410,48 +1485,6 @@ export class ProxySession {
       proxyContext: proxyContext,
     };
 
-    const resCacheService = ResultCacheService.instance;
-    const resCachePolicy = resCacheService.enabled
-      ? resCacheService.resolveResourcePolicy(targetServer!.capabilitiesConfig, result.originalName)
-      : null;
-    const resScopeCtx: CacheScopeContext = { userId: this.userId };
-
-    if (resCachePolicy) {
-      try {
-        const cached = await resCacheService.lookup(
-          'resource',
-          result.serverID,
-          result.originalName,
-          resScopeCtx,
-          resCachePolicy,
-          request.params,
-        );
-        if (cached.hit && cached.entry) {
-          this.logger.debug(
-            { resourceUri, serverId: result.serverID },
-            'Resource read served from cache',
-          );
-          await this.sessionLogger.logClientRequest({
-            action: MCPEventLogType.ResponseResource,
-            serverId: result.serverID,
-            upstreamRequestId: String(originalRequestId),
-            uniformRequestId,
-            requestParams: request.params,
-            responseResult: cached.entry.payload,
-            duration: Date.now() - startTime,
-            statusCode: 200,
-          });
-          this.requestIdMapper.removeMapping(proxyRequestId);
-          return cached.entry.payload as ReadResourceResult;
-        }
-      } catch (cacheError) {
-        this.logger.warn(
-          { error: cacheError, resourceUri },
-          'Resource cache lookup failed, proceeding without cache',
-        );
-      }
-    }
-
     let isReconnected: boolean | undefined;
 
     try {
@@ -1463,20 +1496,28 @@ export class ProxySession {
 
       targetServer.clearTimeout();
 
-      if (resCachePolicy) {
-        resCacheService
-          .storeResult(
-            'resource',
-            result.serverID,
-            result.originalName,
-            resScopeCtx,
-            resCachePolicy,
-            request.params,
-            serverResult,
-          )
-          .catch((storeError) => {
-            this.logger.warn({ error: storeError, resourceUri }, 'Resource cache store failed');
-          });
+      const resCacheServiceForStore = ResultCacheService.instance;
+      if (resCacheServiceForStore.enabled) {
+        const storeResCachePolicy = resCacheServiceForStore.resolveResourcePolicy(
+          targetServer.capabilitiesConfig,
+          result.originalName,
+        );
+        if (storeResCachePolicy) {
+          const storeResScopeCtx: CacheScopeContext = { userId: this.userId };
+          resCacheServiceForStore
+            .storeResult(
+              'resource',
+              result.serverID,
+              result.originalName,
+              storeResScopeCtx,
+              storeResCachePolicy,
+              request.params,
+              serverResult,
+            )
+            .catch((storeError) => {
+              this.logger.warn({ error: storeError, resourceUri }, 'Resource cache store failed');
+            });
+        }
       }
 
       try {
@@ -1763,6 +1804,55 @@ export class ProxySession {
       throw new McpError(ErrorCode.InvalidParams, `Permission denied for prompt: ${promptName}`);
     }
 
+    const earlyPromptContext = ServerManager.instance.getServerContext(
+      parseResult.serverID,
+      this.clientSession.userId,
+    );
+    if (earlyPromptContext) {
+      const promptCacheService = ResultCacheService.instance;
+      if (promptCacheService.enabled) {
+        const promptCachePolicy = promptCacheService.resolvePromptPolicy(
+          earlyPromptContext.capabilitiesConfig,
+          parseResult.originalName,
+        );
+        if (promptCachePolicy) {
+          const promptScopeCtx: CacheScopeContext = { userId: this.userId };
+          try {
+            const cached = await promptCacheService.lookup(
+              'prompt',
+              parseResult.serverID,
+              parseResult.originalName,
+              promptScopeCtx,
+              promptCachePolicy,
+              request.params.arguments,
+            );
+            if (cached.hit && cached.entry) {
+              this.logger.debug(
+                { promptName, serverId: parseResult.serverID },
+                'Prompt get served from cache (fast-path)',
+              );
+              await this.sessionLogger.logClientRequest({
+                action: MCPEventLogType.ResponsePrompt,
+                serverId: parseResult.serverID,
+                upstreamRequestId: String(extra.requestId),
+                uniformRequestId,
+                requestParams: request.params,
+                responseResult: cached.entry.payload,
+                duration: Date.now() - startTime,
+                statusCode: 200,
+              });
+              return cached.entry.payload as GetPromptResult;
+            }
+          } catch (cacheError) {
+            this.logger.warn(
+              { error: cacheError, promptName },
+              'Prompt cache fast-path failed, continuing normally',
+            );
+          }
+        }
+      }
+    }
+
     // Ensure server is available (lazy start)
     await ServerManager.instance.ensureServerAvailable(
       parseResult.serverID,
@@ -1818,51 +1908,6 @@ export class ProxySession {
       uniformRequestId: uniformRequestId,
     };
 
-    const promptCacheService = ResultCacheService.instance;
-    const promptCachePolicy = promptCacheService.enabled
-      ? promptCacheService.resolvePromptPolicy(
-          targetServerContext!.capabilitiesConfig,
-          parseResult.originalName,
-        )
-      : null;
-    const promptScopeCtx: CacheScopeContext = { userId: this.userId };
-
-    if (promptCachePolicy) {
-      try {
-        const cached = await promptCacheService.lookup(
-          'prompt',
-          parseResult.serverID,
-          parseResult.originalName,
-          promptScopeCtx,
-          promptCachePolicy,
-          request.params.arguments,
-        );
-        if (cached.hit && cached.entry) {
-          this.logger.debug(
-            { promptName, serverId: parseResult.serverID },
-            'Prompt get served from cache',
-          );
-          await this.sessionLogger.logClientRequest({
-            action: MCPEventLogType.ResponsePrompt,
-            serverId: parseResult.serverID,
-            upstreamRequestId: String(extra.requestId),
-            uniformRequestId,
-            requestParams: request.params,
-            responseResult: cached.entry.payload,
-            duration: Date.now() - startTime,
-            statusCode: 200,
-          });
-          this.requestIdMapper.removeMapping(proxyRequestId);
-          return cached.entry.payload as GetPromptResult;
-        }
-      } catch (cacheError) {
-        this.logger.warn(
-          { error: cacheError, promptName },
-          'Prompt cache lookup failed, proceeding without cache',
-        );
-      }
-    }
-
     let isReconnected: boolean | undefined;
 
     try {
@@ -1879,20 +1924,29 @@ export class ProxySession {
       });
       targetServerContext.clearTimeout();
 
-      if (promptCachePolicy) {
-        promptCacheService
-          .storeResult(
-            'prompt',
-            parseResult.serverID,
-            parseResult.originalName,
-            promptScopeCtx,
-            promptCachePolicy,
-            request.params.arguments,
-            result,
-          )
-          .catch((storeError) => {
-            this.logger.warn({ error: storeError, promptName }, 'Prompt cache store failed');
-          });
+      const promptCacheServiceForStore = ResultCacheService.instance;
+      if (promptCacheServiceForStore.enabled) {
+        const storePromptCachePolicy = promptCacheServiceForStore.resolvePromptPolicy(
+          targetServerContext.capabilitiesConfig,
+          parseResult.originalName,
+        );
+
+        if (storePromptCachePolicy) {
+          const storePromptScopeCtx: CacheScopeContext = { userId: this.userId };
+          promptCacheServiceForStore
+            .storeResult(
+              'prompt',
+              parseResult.serverID,
+              parseResult.originalName,
+              storePromptScopeCtx,
+              storePromptCachePolicy,
+              request.params.arguments,
+              result,
+            )
+            .catch((storeError) => {
+              this.logger.warn({ error: storeError, promptName }, 'Prompt cache store failed');
+            });
+        }
       }
 
       try {
