@@ -89,6 +89,8 @@ import { ProxyContext } from '../../types/mcp.types.js';
 import { createLogger } from '../../logger/index.js';
 import { policyEngine } from '../services/PolicyEngine.js';
 import { approvalService, ApprovalRateLimitError } from '../services/ApprovalService.js';
+import { ResultCacheService } from './cache/ResultCacheService.js';
+import type { CacheScopeContext, ResolvedCachePolicy } from './cache/types.js';
 
 /**
  * MCP Proxy Session
@@ -735,6 +737,45 @@ export class ProxySession {
       'Registering tool call request',
     );
 
+    const cacheService = ResultCacheService.instance;
+    const toolCachePolicy = cacheService.enabled
+      ? cacheService.resolveToolPolicy(targetServerContext!.capabilitiesConfig, result.originalName)
+      : null;
+    const scopeCtx: CacheScopeContext = { userId: this.userId };
+
+    if (toolCachePolicy && !approvalRequestId) {
+      try {
+        const cached = await cacheService.lookup(
+          'tool',
+          result.serverID,
+          result.originalName,
+          scopeCtx,
+          toolCachePolicy,
+          request.params.arguments,
+        );
+        if (cached.hit && cached.entry) {
+          this.logger.debug({ toolName, serverId: result.serverID }, 'Tool call served from cache');
+          await this.sessionLogger.logClientRequest({
+            action: MCPEventLogType.ResponseTool,
+            serverId: result.serverID,
+            upstreamRequestId: String(originalRequestId),
+            uniformRequestId,
+            requestParams: request.params,
+            responseResult: cached.entry.payload,
+            duration: Date.now() - startTime,
+            statusCode: 200,
+          });
+          this.requestIdMapper.removeMapping(proxyRequestId);
+          return cached.entry.payload as CallToolResult;
+        }
+      } catch (cacheError) {
+        this.logger.warn(
+          { error: cacheError, toolName },
+          'Cache lookup failed, proceeding without cache',
+        );
+      }
+    }
+
     let isReconnected: boolean | undefined;
 
     try {
@@ -763,6 +804,22 @@ export class ProxySession {
         duration: Date.now() - startTime,
         statusCode: serverResult.isError ? 500 : 200,
       });
+
+      if (toolCachePolicy && !serverResult.isError) {
+        cacheService
+          .storeResult(
+            'tool',
+            result.serverID,
+            result.originalName,
+            scopeCtx,
+            toolCachePolicy,
+            request.params.arguments,
+            serverResult,
+          )
+          .catch((storeError) => {
+            this.logger.warn({ error: storeError, toolName }, 'Cache store failed');
+          });
+      }
 
       if (approvalRequestId) {
         if (serverResult.isError === true) {
@@ -1353,6 +1410,48 @@ export class ProxySession {
       proxyContext: proxyContext,
     };
 
+    const resCacheService = ResultCacheService.instance;
+    const resCachePolicy = resCacheService.enabled
+      ? resCacheService.resolveResourcePolicy(targetServer!.capabilitiesConfig, result.originalName)
+      : null;
+    const resScopeCtx: CacheScopeContext = { userId: this.userId };
+
+    if (resCachePolicy) {
+      try {
+        const cached = await resCacheService.lookup(
+          'resource',
+          result.serverID,
+          result.originalName,
+          resScopeCtx,
+          resCachePolicy,
+          request.params,
+        );
+        if (cached.hit && cached.entry) {
+          this.logger.debug(
+            { resourceUri, serverId: result.serverID },
+            'Resource read served from cache',
+          );
+          await this.sessionLogger.logClientRequest({
+            action: MCPEventLogType.ResponseResource,
+            serverId: result.serverID,
+            upstreamRequestId: String(originalRequestId),
+            uniformRequestId,
+            requestParams: request.params,
+            responseResult: cached.entry.payload,
+            duration: Date.now() - startTime,
+            statusCode: 200,
+          });
+          this.requestIdMapper.removeMapping(proxyRequestId);
+          return cached.entry.payload as ReadResourceResult;
+        }
+      } catch (cacheError) {
+        this.logger.warn(
+          { error: cacheError, resourceUri },
+          'Resource cache lookup failed, proceeding without cache',
+        );
+      }
+    }
+
     let isReconnected: boolean | undefined;
 
     try {
@@ -1363,6 +1462,22 @@ export class ProxySession {
       });
 
       targetServer.clearTimeout();
+
+      if (resCachePolicy) {
+        resCacheService
+          .storeResult(
+            'resource',
+            result.serverID,
+            result.originalName,
+            resScopeCtx,
+            resCachePolicy,
+            request.params,
+            serverResult,
+          )
+          .catch((storeError) => {
+            this.logger.warn({ error: storeError, resourceUri }, 'Resource cache store failed');
+          });
+      }
 
       try {
         // Log response to client
@@ -1703,6 +1818,51 @@ export class ProxySession {
       uniformRequestId: uniformRequestId,
     };
 
+    const promptCacheService = ResultCacheService.instance;
+    const promptCachePolicy = promptCacheService.enabled
+      ? promptCacheService.resolvePromptPolicy(
+          targetServerContext!.capabilitiesConfig,
+          parseResult.originalName,
+        )
+      : null;
+    const promptScopeCtx: CacheScopeContext = { userId: this.userId };
+
+    if (promptCachePolicy) {
+      try {
+        const cached = await promptCacheService.lookup(
+          'prompt',
+          parseResult.serverID,
+          parseResult.originalName,
+          promptScopeCtx,
+          promptCachePolicy,
+          request.params.arguments,
+        );
+        if (cached.hit && cached.entry) {
+          this.logger.debug(
+            { promptName, serverId: parseResult.serverID },
+            'Prompt get served from cache',
+          );
+          await this.sessionLogger.logClientRequest({
+            action: MCPEventLogType.ResponsePrompt,
+            serverId: parseResult.serverID,
+            upstreamRequestId: String(extra.requestId),
+            uniformRequestId,
+            requestParams: request.params,
+            responseResult: cached.entry.payload,
+            duration: Date.now() - startTime,
+            statusCode: 200,
+          });
+          this.requestIdMapper.removeMapping(proxyRequestId);
+          return cached.entry.payload as GetPromptResult;
+        }
+      } catch (cacheError) {
+        this.logger.warn(
+          { error: cacheError, promptName },
+          'Prompt cache lookup failed, proceeding without cache',
+        );
+      }
+    }
+
     let isReconnected: boolean | undefined;
 
     try {
@@ -1718,6 +1878,22 @@ export class ProxySession {
         relatedRequestId: proxyRequestId, // Use proxyRequestId as related ID
       });
       targetServerContext.clearTimeout();
+
+      if (promptCachePolicy) {
+        promptCacheService
+          .storeResult(
+            'prompt',
+            parseResult.serverID,
+            parseResult.originalName,
+            promptScopeCtx,
+            promptCachePolicy,
+            request.params.arguments,
+            result,
+          )
+          .catch((storeError) => {
+            this.logger.warn({ error: storeError, promptName }, 'Prompt cache store failed');
+          });
+      }
 
       try {
         // Log response

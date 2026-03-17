@@ -29,11 +29,16 @@ import { UserController } from './user/UserController.js';
 import { UserRequestHandler } from './user/UserRequestHandler.js';
 
 import cors from 'cors';
-import { LATEST_PROTOCOL_VERSION }  from "@modelcontextprotocol/sdk/types.js";
+import { LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/sdk/types.js';
 import { CapabilitiesService } from './mcp/services/CapabilitiesService.js';
 import { APP_INFO } from './config/config.js';
 import { createLogger } from './logger/index.js';
 import { CloudflaredService } from './services/CloudflaredService.js';
+import { loadResultCacheConfig } from './config/resultCacheConfig.js';
+import { ResultCacheManager, ResultCacheService } from './mcp/core/cache/index.js';
+import { createResultCacheStore } from './mcp/core/cache/stores/ResultCacheStoreFactory.js';
+import { NoopResultCacheStore } from './mcp/core/cache/stores/NoopResultCacheStore.js';
+import type { ResultCacheStore } from './mcp/core/cache/stores/ResultCacheStore.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -74,39 +79,35 @@ export async function initializeAuthModule() {
 
   // 2. Create token validator
   const tokenValidator = new TokenValidator();
-  
+
   // 3. Create session store
   const sessionStore = SessionStore.instance;
-  
+
   // 5. Create rate limit service
   const rateLimitService = new RateLimitService();
-  
+
   // 6. Create rate limit middleware
   const rateLimitMiddleware = new RateLimitMiddleware(rateLimitService);
-  
+
   // 7. Create IP whitelist service
   const ipWhitelistService = new IpWhitelistService();
-  
+
   // 8. Create IP whitelist middleware
   const ipWhitelistMiddleware = new IpWhitelistMiddleware(ipWhitelistService);
-  
+
   // 9. Create authentication middleware
-  const authMiddleware = new AuthMiddleware(
-    tokenValidator
-  );
-  
+  const authMiddleware = new AuthMiddleware(tokenValidator);
+
   // 9.1. Create admin authentication middleware
   const adminAuthMiddleware = new AdminAuthMiddleware(tokenValidator);
-  
+
   // 6. Create global server manager
   const serverManager = ServerManager.instance;
-  
+
   CapabilitiesService.getInstance();
-  
+
   // 10. Create configuration management interface
-  const configController = new ConfigController(
-    ipWhitelistService
-  );
+  const configController = new ConfigController(ipWhitelistService);
 
   // 10.1. Initialize User module (transport-agnostic business logic layer)
   const userRequestHandler = UserRequestHandler.instance;
@@ -154,7 +155,7 @@ export async function initializeAuthModule() {
     logSyncService,
     eventCleanupService,
     urlUtils,
-    socketService: null as SocketService | null  // Will be initialized after server starts
+    socketService: null as SocketService | null, // Will be initialized after server starts
   };
 }
 
@@ -173,6 +174,7 @@ export async function startApplication() {
 
     // Create Express application
     const app = express();
+    let resultCacheStore: ResultCacheStore = new NoopResultCacheStore();
 
     // CORS configuration constants - centralized management of all CORS-related settings
     const CORS_CONFIG = {
@@ -188,200 +190,246 @@ export async function startApplication() {
         'X-RateLimit-Limit',
         'X-RateLimit-Remaining',
         'X-RateLimit-Reset',
-        'Retry-After'
+        'Retry-After',
       ],
       // Allowed request headers (for OPTIONS preflight)
-      ALLOW_HEADERS_DEFAULT: 'Content-Type, Authorization, Mcp-Session-Id, mcp-session-id, mcp-protocol-version,Accept,last-event-id',
+      ALLOW_HEADERS_DEFAULT:
+        'Content-Type, Authorization, Mcp-Session-Id, mcp-session-id, mcp-protocol-version,Accept,last-event-id',
       MAX_AGE: '86400', // Preflight cache time: 24 hours
     };
     // ==================== Special request handlers - must be before all middleware ====================
 
     app.put(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], (req, res) => {
       if (isDevelopment) {
-        requestLogger.debug({
-          headers: req.headers,
-          method: req.method,
-          url: req.url,
-        }, 'Received PUT request');
+        requestLogger.debug(
+          {
+            headers: req.headers,
+            method: req.method,
+            url: req.url,
+          },
+          'Received PUT request',
+        );
       }
-      res.writeHead(405, {
-        Allow: 'GET, POST, DELETE'
-    }).end(
-        JSON.stringify({
+      res
+        .writeHead(405, {
+          Allow: 'GET, POST, DELETE',
+        })
+        .end(
+          JSON.stringify({
             jsonrpc: '2.0',
             error: {
-                code: -32000,
-                message: 'Method not allowed.'
+              code: -32000,
+              message: 'Method not allowed.',
             },
-            id: null
-        })
-    );
+            id: null,
+          }),
+        );
     });
 
     app.patch(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], (req, res) => {
       if (isDevelopment) {
-        requestLogger.debug({
-          headers: req.headers,
-          method: req.method,
-          url: req.url,
-        }, 'Received PATCH request');
+        requestLogger.debug(
+          {
+            headers: req.headers,
+            method: req.method,
+            url: req.url,
+          },
+          'Received PATCH request',
+        );
       }
-      res.writeHead(405, {
-        Allow: 'GET, POST, DELETE'
-      }).end(
-        JSON.stringify({
+      res
+        .writeHead(405, {
+          Allow: 'GET, POST, DELETE',
+        })
+        .end(
+          JSON.stringify({
             jsonrpc: '2.0',
             error: {
-                code: -32000,
-                message: 'Method not allowed.'
+              code: -32000,
+              message: 'Method not allowed.',
             },
-            id: null
-        })
-      );
+            id: null,
+          }),
+        );
     });
 
     // Handle HEAD requests - for health checks and availability probes
     app.head(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], async (req, res) => {
       if (isDevelopment) {
-        requestLogger.debug({
-          headers: req.headers,
-          method: req.method,
-          url: req.url,
-        }, 'Received HEAD request');
+        requestLogger.debug(
+          {
+            headers: req.headers,
+            method: req.method,
+            url: req.url,
+          },
+          'Received HEAD request',
+        );
       }
       // Check if token is present (Authorization header or query parameter)
       const authHeaderValue = req.headers['authorization'];
-      const bearerToken = authHeaderValue?.startsWith('Bearer ') ? authHeaderValue.substring(7).trim() : '';
+      const bearerToken = authHeaderValue?.startsWith('Bearer ')
+        ? authHeaderValue.substring(7).trim()
+        : '';
       const hasAuthHeader = bearerToken.length > 0;
-      const hasTokenParam = typeof req.query.token === 'string' && req.query.token.trim().length > 0;
-      const hasApiKeyParam = typeof req.query.api_key === 'string' && req.query.api_key.trim().length > 0;
+      const hasTokenParam =
+        typeof req.query.token === 'string' && req.query.token.trim().length > 0;
+      const hasApiKeyParam =
+        typeof req.query.api_key === 'string' && req.query.api_key.trim().length > 0;
       const hasToken = hasAuthHeader || hasTokenParam || hasApiKeyParam;
       // Mirror POST auth-intent logic: detect malformed auth attempts
-      const hasAuthAttempt = !!(req.headers['authorization'] || req.query.token !== undefined || req.query.api_key !== undefined);
+      const hasAuthAttempt = !!(
+        req.headers['authorization'] ||
+        req.query.token !== undefined ||
+        req.query.api_key !== undefined
+      );
 
       // Get base URL (supports local development and production environments)
-      const protocol = req.headers['x-forwarded-proto'] as string || 'https';
-      const host = req.headers['x-forwarded-host'] as string || req.headers.host;
+      const protocol = (req.headers['x-forwarded-proto'] as string) || 'https';
+      const host = (req.headers['x-forwarded-host'] as string) || req.headers.host;
       const baseUrl = `${protocol}://${host}`;
       const metadataUrl = `${baseUrl}/.well-known/oauth-protected-resource`;
       if (isDevelopment) {
-        requestLogger.debug({
-          hasToken,
-          hasAuthHeader,
-          hasTokenParam,
-          hasApiKeyParam,
-          metadataUrl,
-        }, 'HEAD request auth check');
+        requestLogger.debug(
+          {
+            hasToken,
+            hasAuthHeader,
+            hasTokenParam,
+            hasApiKeyParam,
+            metadataUrl,
+          },
+          'HEAD request auth check',
+        );
       }
       // Anonymous access is determined by path: /mcp/public signals anonymous intent
       const requestsAnonymous = req.path === '/mcp/public' || req.path === '/mcp/public/';
       if (!hasToken && hasAuthAttempt) {
         // Malformed auth (empty Bearer, empty ?token=, empty ?api_key=) — reject before anything else
         // Mirrors POST handler: malformed auth always returns 401 regardless of path
-        res.status(401).set({
-          'X-Powered-By': 'Express',
-          'Access-Control-Allow-Origin': CORS_CONFIG.ALLOW_ORIGIN,
-          'Access-Control-Expose-Headers': CORS_CONFIG.EXPOSE_HEADERS_BASIC,
-          'WWW-Authenticate': `Bearer error="invalid_request", error_description="Malformed authorization", resource_metadata="${metadataUrl}"`,
-          'Allow': CORS_CONFIG.ALLOW_METHODS,
-          'Content-Type': 'application/json',
-          'mcp-protocol-version': LATEST_PROTOCOL_VERSION,
-          connection: 'keep-alive',
-        }).end();
+        res
+          .status(401)
+          .set({
+            'X-Powered-By': 'Express',
+            'Access-Control-Allow-Origin': CORS_CONFIG.ALLOW_ORIGIN,
+            'Access-Control-Expose-Headers': CORS_CONFIG.EXPOSE_HEADERS_BASIC,
+            'WWW-Authenticate': `Bearer error="invalid_request", error_description="Malformed authorization", resource_metadata="${metadataUrl}"`,
+            Allow: CORS_CONFIG.ALLOW_METHODS,
+            'Content-Type': 'application/json',
+            'mcp-protocol-version': LATEST_PROTOCOL_VERSION,
+            connection: 'keep-alive',
+          })
+          .end();
       } else if (!hasToken && !requestsAnonymous) {
         // No token, not on /mcp/public path — standard OAuth challenge (Smithery/Claude Web style)
-        res.status(401).set({
-          'X-Powered-By': 'Express',
-          'Access-Control-Allow-Origin': CORS_CONFIG.ALLOW_ORIGIN,
-          'Access-Control-Expose-Headers': CORS_CONFIG.EXPOSE_HEADERS_BASIC,
-          'WWW-Authenticate': `Bearer error="invalid_token", error_description="Missing Authorization header", resource_metadata="${metadataUrl}"`,
-          'Allow': CORS_CONFIG.ALLOW_METHODS,
-          'Content-Type': 'application/json',
-          'mcp-protocol-version': LATEST_PROTOCOL_VERSION,
-          connection: 'keep-alive',
-        }).end(
-          JSON.stringify({
+        res
+          .status(401)
+          .set({
+            'X-Powered-By': 'Express',
+            'Access-Control-Allow-Origin': CORS_CONFIG.ALLOW_ORIGIN,
+            'Access-Control-Expose-Headers': CORS_CONFIG.EXPOSE_HEADERS_BASIC,
+            'WWW-Authenticate': `Bearer error="invalid_token", error_description="Missing Authorization header", resource_metadata="${metadataUrl}"`,
+            Allow: CORS_CONFIG.ALLOW_METHODS,
+            'Content-Type': 'application/json',
+            'mcp-protocol-version': LATEST_PROTOCOL_VERSION,
+            connection: 'keep-alive',
+          })
+          .end(
+            JSON.stringify({
               jsonrpc: '2.0',
               error: {
-                  code: -32000,
-                  message: 'Method not allowed.'
+                code: -32000,
+                message: 'Method not allowed.',
               },
-              id: null
-          })
-      );
+              id: null,
+            }),
+          );
       } else if (!hasToken && !hasAuthAttempt && requestsAnonymous) {
         // Anonymous HEAD probe — verify anonymous servers actually exist before confirming availability
         try {
           const anonServerCount = await prisma.server.count({
-            where: { anonymousAccess: true, enabled: true, allowUserInput: false }
+            where: { anonymousAccess: true, enabled: true, allowUserInput: false },
           });
           if (anonServerCount > 0) {
-            res.status(200).set({
-              'X-Powered-By': 'Express',
-              'Access-Control-Allow-Origin': CORS_CONFIG.ALLOW_ORIGIN,
-              'Access-Control-Expose-Headers': CORS_CONFIG.EXPOSE_HEADERS_BASIC,
-              'Allow': CORS_CONFIG.ALLOW_METHODS,
-              'Content-Type': 'application/json',
-              'mcp-protocol-version': LATEST_PROTOCOL_VERSION,
-              connection: 'keep-alive',
-            }).end();
+            res
+              .status(200)
+              .set({
+                'X-Powered-By': 'Express',
+                'Access-Control-Allow-Origin': CORS_CONFIG.ALLOW_ORIGIN,
+                'Access-Control-Expose-Headers': CORS_CONFIG.EXPOSE_HEADERS_BASIC,
+                Allow: CORS_CONFIG.ALLOW_METHODS,
+                'Content-Type': 'application/json',
+                'mcp-protocol-version': LATEST_PROTOCOL_VERSION,
+                connection: 'keep-alive',
+              })
+              .end();
           } else {
             // No anonymous servers configured — fall back to 401 OAuth challenge
-            res.status(401).set({
-              'X-Powered-By': 'Express',
-              'Access-Control-Allow-Origin': CORS_CONFIG.ALLOW_ORIGIN,
-              'Access-Control-Expose-Headers': CORS_CONFIG.EXPOSE_HEADERS_BASIC,
-              'WWW-Authenticate': `Bearer error="invalid_token", error_description="No anonymous access available", resource_metadata="${metadataUrl}"`,
-              'Allow': CORS_CONFIG.ALLOW_METHODS,
-              'Content-Type': 'application/json',
-              'mcp-protocol-version': LATEST_PROTOCOL_VERSION,
-              connection: 'keep-alive',
-            }).end();
+            res
+              .status(401)
+              .set({
+                'X-Powered-By': 'Express',
+                'Access-Control-Allow-Origin': CORS_CONFIG.ALLOW_ORIGIN,
+                'Access-Control-Expose-Headers': CORS_CONFIG.EXPOSE_HEADERS_BASIC,
+                'WWW-Authenticate': `Bearer error="invalid_token", error_description="No anonymous access available", resource_metadata="${metadataUrl}"`,
+                Allow: CORS_CONFIG.ALLOW_METHODS,
+                'Content-Type': 'application/json',
+                'mcp-protocol-version': LATEST_PROTOCOL_VERSION,
+                connection: 'keep-alive',
+              })
+              .end();
           }
         } catch {
           res.status(500).end();
         }
       } else {
-        res.status(405 ).set({
-          'X-Powered-By': 'Express',
-          'Access-Control-Allow-Origin': CORS_CONFIG.ALLOW_ORIGIN,
-          'Access-Control-Expose-Headers': CORS_CONFIG.EXPOSE_HEADERS_BASIC,
-          'Allow': CORS_CONFIG.ALLOW_METHODS,
-          'Content-Type': 'application/json',
-          'mcp-protocol-version': LATEST_PROTOCOL_VERSION,
-          connection: 'keep-alive',
-        }).end(
-          JSON.stringify({
+        res
+          .status(405)
+          .set({
+            'X-Powered-By': 'Express',
+            'Access-Control-Allow-Origin': CORS_CONFIG.ALLOW_ORIGIN,
+            'Access-Control-Expose-Headers': CORS_CONFIG.EXPOSE_HEADERS_BASIC,
+            Allow: CORS_CONFIG.ALLOW_METHODS,
+            'Content-Type': 'application/json',
+            'mcp-protocol-version': LATEST_PROTOCOL_VERSION,
+            connection: 'keep-alive',
+          })
+          .end(
+            JSON.stringify({
               jsonrpc: '2.0',
               error: {
-                  code: -32000,
-                  message: 'Method not allowed.'
+                code: -32000,
+                message: 'Method not allowed.',
               },
-              id: null
-          })
-      );
+              id: null,
+            }),
+          );
       }
     });
 
     app.options(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], (req, res) => {
       if (isDevelopment) {
-        requestLogger.debug({
-          headers: req.headers,
-          method: req.method,
-          url: req.url,
-        }, 'Received OPTIONS request');
+        requestLogger.debug(
+          {
+            headers: req.headers,
+            method: req.method,
+            url: req.url,
+          },
+          'Received OPTIONS request',
+        );
       }
-      res.status(204).set({
-        'Access-Control-Allow-Origin': CORS_CONFIG.ALLOW_ORIGIN,
-        'Access-Control-Allow-Methods': CORS_CONFIG.ALLOW_METHODS,
-        'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || CORS_CONFIG.ALLOW_HEADERS_DEFAULT,
-        'Access-Control-Expose-Headers': CORS_CONFIG.EXPOSE_HEADERS_BASIC,
-        'Access-Control-Max-Age': CORS_CONFIG.MAX_AGE,
-        'Vary': 'Access-Control-Request-Headers',
-        'X-Powered-By': 'Express',
-      }).end();
+      res
+        .status(204)
+        .set({
+          'Access-Control-Allow-Origin': CORS_CONFIG.ALLOW_ORIGIN,
+          'Access-Control-Allow-Methods': CORS_CONFIG.ALLOW_METHODS,
+          'Access-Control-Allow-Headers':
+            req.headers['access-control-request-headers'] || CORS_CONFIG.ALLOW_HEADERS_DEFAULT,
+          'Access-Control-Expose-Headers': CORS_CONFIG.EXPOSE_HEADERS_BASIC,
+          'Access-Control-Max-Age': CORS_CONFIG.MAX_AGE,
+          Vary: 'Access-Control-Request-Headers',
+          'X-Powered-By': 'Express',
+        })
+        .end();
     });
-
 
     // ==================== General middleware ====================
 
@@ -394,21 +442,47 @@ export async function startApplication() {
     // Commented out in production, can be enabled in development for debugging
     app.use((req, res, next) => {
       if (isDevelopment) {
-        requestLogger.debug({
-          method: req.method,
-          url: req.url,
-          body: req.body,
-        }, 'Received request');
+        requestLogger.debug(
+          {
+            method: req.method,
+            url: req.url,
+            body: req.body,
+          },
+          'Received request',
+        );
       }
       next();
     });
 
     // CORS middleware - handles CORS for other non-HEAD/OPTIONS requests
-    app.use(cors({
-      origin: CORS_CONFIG.ALLOW_ORIGIN,
-      exposedHeaders: CORS_CONFIG.EXPOSE_HEADERS_FULL,
-      allowedHeaders: CORS_CONFIG.ALLOW_HEADERS_DEFAULT
-    }));
+    app.use(
+      cors({
+        origin: CORS_CONFIG.ALLOW_ORIGIN,
+        exposedHeaders: CORS_CONFIG.EXPOSE_HEADERS_FULL,
+        allowedHeaders: CORS_CONFIG.ALLOW_HEADERS_DEFAULT,
+      }),
+    );
+
+    const cacheConfig = loadResultCacheConfig();
+    if (!cacheConfig.enabled) {
+      appLogger.info('Result cache is disabled');
+      resultCacheStore = new NoopResultCacheStore();
+    } else {
+      resultCacheStore = await createResultCacheStore(cacheConfig);
+      appLogger.info({ backend: cacheConfig.backend }, 'Result cache store initialized');
+    }
+
+    const resultCacheManager = new ResultCacheManager(
+      resultCacheStore,
+      cacheConfig,
+      createLogger('ResultCacheManager'),
+    );
+    const resultCacheService = ResultCacheService.initialize(
+      cacheConfig,
+      resultCacheStore,
+      resultCacheManager,
+    );
+    authModule.configController.setResultCacheService(resultCacheService);
 
     // ==================== OAuth route registration ====================
 
@@ -458,23 +532,23 @@ export async function startApplication() {
           oauth: {
             metadata: {
               authorization_server: '/.well-known/oauth-authorization-server',
-              protected_resource: '/.well-known/oauth-protected-resource'
+              protected_resource: '/.well-known/oauth-protected-resource',
             },
             register: '/register',
             authorize: '/authorize',
             token: '/token',
             introspect: '/introspect',
             revoke: '/revoke',
-            admin: '/oauth/admin/clients'
-          }
-        }
+            admin: '/oauth/admin/clients',
+          },
+        },
       });
     });
-    
+
     // Root path POST request handler - returns error message
     app.post('/', (req, res) => {
       res.status(400).json({
-        error: 'Invalid endpoint. Please use /mcp for MCP requests or /admin for admin operations.'
+        error: 'Invalid endpoint. Please use /mcp for MCP requests or /admin for admin operations.',
       });
     });
 
@@ -483,6 +557,7 @@ export async function startApplication() {
       try {
         const serverStatus = await authModule.serverManager.getAllServersStatus();
         const sessionCount = authModule.sessionStore.getActiveSessionCount();
+        const cacheHealth = await resultCacheService.getHealth();
 
         res.status(200).json({
           status: 'healthy',
@@ -490,26 +565,30 @@ export async function startApplication() {
           uptime: process.uptime(),
           sessions: {
             active: sessionCount,
-            total: authModule.sessionStore.getTotalSessionCount()
+            total: authModule.sessionStore.getTotalSessionCount(),
           },
           socketio: {
             onlineUsers: authModule.socketService?.getOnlineUserIds().length || 0,
-            totalConnections: authModule.socketService?.getTotalConnections() || 0
+            totalConnections: authModule.socketService?.getTotalConnections() || 0,
           },
           servers: serverStatus,
-          memory: process.memoryUsage()
+          cache: {
+            enabled: resultCacheService.enabled,
+            health: cacheHealth,
+          },
+          memory: process.memoryUsage(),
         });
       } catch (error) {
         appLogger.error({ error }, 'Health check error');
         res.status(500).json({
           status: 'unhealthy',
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         });
       }
     });
-    
+
     // Start server - supports HTTPS first, falls back to HTTP on failure
-    const port = parseInt(process.env.BACKEND_PORT || "3002");
+    const port = parseInt(process.env.BACKEND_PORT || '3002');
     const httpsPort = parseInt(process.env.BACKEND_HTTPS_PORT || String(port));
     const enableHttps = process.env.ENABLE_HTTPS === 'true'; // Control HTTPS enablement via environment variable
 
@@ -525,18 +604,24 @@ export async function startApplication() {
 
         // Check if certificate files exist
         if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) {
-          serverLogger.warn({ certPath, keyPath }, 'SSL certificates not found, falling back to HTTP mode');
+          serverLogger.warn(
+            { certPath, keyPath },
+            'SSL certificates not found, falling back to HTTP mode',
+          );
         } else {
           // Read SSL certificates
           const httpsOptions = {
             key: fs.readFileSync(keyPath),
-            cert: fs.readFileSync(certPath)
+            cert: fs.readFileSync(certPath),
           };
 
           // Create HTTPS server
           httpsServer = https.createServer(httpsOptions, app);
           httpsServer.listen(httpsPort, () => {
-            serverLogger.info({ port: httpsPort, protocol: 'https' }, 'Peta Core HTTPS server listening');
+            serverLogger.info(
+              { port: httpsPort, protocol: 'https' },
+              'Peta Core HTTPS server listening',
+            );
           });
         }
       } catch (error) {
@@ -589,13 +674,13 @@ export async function startApplication() {
       appLogger.error({ error }, 'Failed to auto-start cloudflared (non-fatal, continuing...)');
       // Don't block application startup if cloudflared fails
     }
-    
+
     // Graceful shutdown handling
     let sigtermHandler: (() => void) | null = null;
     let sigintHandler: (() => void) | null = null;
 
     const shutdown = async (signal: string) => {
-      const exitCode = (signal === 'UNCAUGHT_EXCEPTION' || signal === 'UNHANDLED_REJECTION') ? 1 : 0;
+      const exitCode = signal === 'UNCAUGHT_EXCEPTION' || signal === 'UNHANDLED_REJECTION' ? 1 : 0;
 
       // Prevent duplicate shutdown process execution
       if (isShuttingDown) {
@@ -690,10 +775,12 @@ export async function startApplication() {
             try {
               await Promise.race([
                 socketService.shutdown(),
-                new Promise<void>((resolve) => setTimeout(() => {
-                  console.warn('⚠️ Socket.IO shutdown timeout, continuing...');
-                  resolve();
-                }, 3000))
+                new Promise<void>((resolve) =>
+                  setTimeout(() => {
+                    console.warn('⚠️ Socket.IO shutdown timeout, continuing...');
+                    resolve();
+                  }, 3000),
+                ),
               ]);
               console.log('✅ Socket.IO service stopped');
             } catch (error) {
@@ -758,6 +845,14 @@ export async function startApplication() {
 
         // 8. Disconnect Prisma database connection
         try {
+          appLogger.info('Closing result cache store...');
+          await resultCacheStore.close?.();
+          appLogger.info('Result cache store closed');
+        } catch (error) {
+          appLogger.error({ error }, 'Error closing result cache store');
+        }
+
+        try {
           console.log('Disconnecting from database...');
           await prisma.$disconnect();
           console.log('✅ Database disconnected');
@@ -787,7 +882,7 @@ export async function startApplication() {
     };
     process.on('SIGTERM', sigtermHandler);
     process.on('SIGINT', sigintHandler);
-    
+
     // Unhandled exception capture
     process.on('uncaughtException', (error) => {
       appLogger.error({ error }, 'Uncaught Exception');
@@ -798,7 +893,6 @@ export async function startApplication() {
       appLogger.error({ reason, promise }, 'Unhandled Rejection');
       shutdown('UNHANDLED_REJECTION');
     });
-    
   } catch (error) {
     appLogger.error({ error }, 'Failed to start application');
     process.exit(1);
