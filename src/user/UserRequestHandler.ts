@@ -274,7 +274,7 @@ export class UserRequestHandler {
             },
             {},
           );
-          this.logger.debug({ authConfValue }, 'authConfValue');
+          
           const oauthCode = authConfValue.YOUR_OAUTH_CODE?.value;
           const oauthRedirectUrl = authConfValue.YOUR_OAUTH_REDIRECT_URL?.value;
           const oauthCodeVerifierValue = authConfValue.YOUR_OAUTH_PKCE_VERIFIER?.value;
