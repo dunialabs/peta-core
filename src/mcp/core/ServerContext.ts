@@ -465,18 +465,33 @@ export class ServerContext {
   }
 
   async closeConnection(status: ServerStatus): Promise<void> {
-    if (!this.connection) {
+    this.status = status;
+
+    const connection = this.connection;
+    const transport = this.transport;
+    if (!connection) {
+      this.transport = undefined;
       return;
     }
 
-    this.status = status;
-    
-    if (this.transport instanceof StreamableHTTPClientTransport) {
-      await this.transport?.terminateSession();
+    try {
+      if (transport instanceof StreamableHTTPClientTransport) {
+        await transport.terminateSession();
+      }
+
+      await connection.close();
+    } finally {
+      this.clearConnectionState(status);
+    }
+  }
+
+  clearConnectionState(status?: ServerStatus): void {
+    if (status !== undefined) {
+      this.status = status;
     }
 
-    await this.connection.close();
     this.connection = undefined;
+    this.transport = undefined;
   }
 
 
