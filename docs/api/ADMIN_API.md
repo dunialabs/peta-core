@@ -219,7 +219,7 @@ interface AdminResponse<T = any> {
 - `1` Offline
 - `2` Connecting
 - `3` Error
-- `4` Sleeping (lazy start)
+- `4` Sleeping (lazy start; currently no active connection but can be woken up again)
 
 **DangerLevel**
 
@@ -774,7 +774,7 @@ null
 - `authType` (number, required): Server authorization type, defaults to 1, API Key authentication, 2 Google OAuth authentication
 - `configTemplate` (string, **required**): JSON config template string; must be non-empty and not `{}` (validated regardless of allowUserInput)
 - `category` (number, required): Server category. `1`: Template, `2`: CustomRemote, `3`: RestApi, `4`: Skills, `5`: CustomStdio
-- `lazyStartEnabled` (boolean, optional): Enable lazy loading for this server. When true, server loads into memory but delays startup until first use, and auto-shuts down when idle. Defaults to `true`
+- `lazyStartEnabled` (boolean, optional): Enable lazy loading for this server. When true, server stays managed in memory, delays startup until first use, and idle/unexpected closes can return it to `Sleeping` so it can be started again later. Defaults to `true`
 - `publicAccess` (boolean, optional): Whether public access is enabled. If true, users without explicit permissions can still access this server. Defaults to `false`
 - `anonymousAccess` (boolean, optional): Whether anonymous access (no authentication token) is enabled. Defaults to `false`
 - `anonymousRateLimit` (number, optional): Rate limit for anonymous access (requests per minute per source IP). Must be an integer between 1 and 1000. Defaults to `10`
@@ -937,7 +937,7 @@ null
 - `capabilities` (string or object, optional): Capability configuration. **Merge semantics; omitted fields are not removed**
 - `enabled` (boolean, optional): Whether enabled
 - `configTemplate` (string, optional): Only RestApi/CustomRemote/CustomStdio can update
-- `lazyStartEnabled` (boolean, optional): Enable lazy loading for this server. When true, server loads into memory but delays startup until first use, and auto-shuts down when idle
+- `lazyStartEnabled` (boolean, optional): Enable lazy loading for this server. When true, server stays managed in memory, delays startup until first use, and idle/unexpected closes can return it to `Sleeping` so it can be started again later
 - `publicAccess` (boolean, optional): Public access flag
 - `anonymousAccess` (boolean, optional): Anonymous access flag
 - `anonymousRateLimit` (number, optional): Rate limit for anonymous access (requests per minute per source IP). Must be an integer between 1 and 1000
