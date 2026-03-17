@@ -210,7 +210,7 @@ _No parameters required - capabilities are retrieved for the authenticated user_
   - `1` = Offline
   - `2` = Connecting
   - `3` = Error
-  - `4` = Sleeping
+  - `4` = Sleeping (currently no active connection but can be woken up again)
 - `tools`: Object mapping tool names to their configuration
   - `enabled`: Whether user can use this tool
   - `description`: Tool description

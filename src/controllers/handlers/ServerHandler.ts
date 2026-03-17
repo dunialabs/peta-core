@@ -899,6 +899,11 @@ export class ServerHandler {
             ServerManager.instance.reconnectTemporaryServer(temporaryServer.serverEntity, temporaryServer.userId!, temporaryServer.userToken!);
           }
         }
+        if (lazyStartEnabled === true && existingServer.lazyStartEnabled === false) {
+          if (temporaryServer.status !== ServerStatus.Online && temporaryServer.status !== ServerStatus.Connecting) {
+            temporaryServer.clearConnectionState(ServerStatus.Sleeping);
+          }
+        }
       }
     } else {
       const context = ServerManager.instance.getServerContext(serverId);
@@ -909,9 +914,14 @@ export class ServerHandler {
             ServerManager.instance.reconnectServer(context.serverEntity, ServerManager.instance.getOwnerToken());
           }
         }
+        if (lazyStartEnabled === true && existingServer.lazyStartEnabled === false) {
+          if (context.status !== ServerStatus.Online && context.status !== ServerStatus.Connecting) {
+            context.clearConnectionState(ServerStatus.Sleeping);
+          }
+        }
       } else {
         if (lazyStartEnabled === true && existingServer.lazyStartEnabled === false) {
-          serverContext = ServerManager.instance.addSleepingServer(existingServer);
+          serverContext = ServerManager.instance.addSleepingServer(newServer);
         }
       }
     }
