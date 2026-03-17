@@ -193,7 +193,9 @@ export class ResultCacheManager {
       payloadBytes,
     });
 
-    const shouldCompress = this.config.compress === 'true' || this.config.compress === 'auto';
+    const shouldCompress =
+      this.config.compress === 'true' ||
+      (this.config.compress === 'auto' && this.config.backend === 'redis');
     const serialized = this.serializer.serialize(
       envelope,
       shouldCompress,

@@ -199,35 +199,3 @@ export class CachePolicyResolver {
       : AdmissionPolicy.Immediate;
   }
 }
-
-export function resolveToolPolicy(
-  capabilitiesConfig: ServerConfigCapabilities,
-  toolName: string,
-  globalConfig: ResultCacheConfig,
-): ResolvedCachePolicy | null {
-  return new CachePolicyResolver().resolveToolPolicy(capabilitiesConfig, toolName, globalConfig);
-}
-
-export function resolvePromptPolicy(
-  capabilitiesConfig: ServerConfigCapabilities,
-  promptName: string,
-  globalConfig: ResultCacheConfig,
-): ResolvedCachePolicy | null {
-  return new CachePolicyResolver().resolvePromptPolicy(
-    capabilitiesConfig,
-    promptName,
-    globalConfig,
-  );
-}
-
-export function resolveResourcePolicy(
-  capabilitiesConfig: ServerConfigCapabilities,
-  uri: string,
-  globalConfig: ResultCacheConfig,
-): ResolvedCachePolicy | null {
-  return new CachePolicyResolver().resolveResourcePolicy(capabilitiesConfig, uri, globalConfig);
-}
-
-export function isToolCacheSafe(dangerLevel?: DangerLevel): boolean {
-  return new CachePolicyResolver().isToolCacheSafe(dangerLevel);
-}
