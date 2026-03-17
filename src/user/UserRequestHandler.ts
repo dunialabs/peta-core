@@ -274,9 +274,14 @@ export class UserRequestHandler {
             },
             {},
           );
-          const oauthCode = authConfValue.YOUR_OAUTH_CODE.value;
-          const oauthRedirectUrl = authConfValue.YOUR_OAUTH_REDIRECT_URL.value;
-          const oauthCodeVerifier = authConfValue.YOUR_OAUTH_PKCE_VERIFIER.value;
+          this.logger.debug({ authConfValue }, 'authConfValue');
+          const oauthCode = authConfValue.YOUR_OAUTH_CODE?.value;
+          const oauthRedirectUrl = authConfValue.YOUR_OAUTH_REDIRECT_URL?.value;
+          const oauthCodeVerifierValue = authConfValue.YOUR_OAUTH_PKCE_VERIFIER?.value;
+          const oauthCodeVerifier =
+            typeof oauthCodeVerifierValue === 'string' && oauthCodeVerifierValue !== ''
+              ? oauthCodeVerifierValue
+              : undefined;
 
           if (typeof oauthCode !== 'string' || oauthCode === '') {
             throw new UserError(
