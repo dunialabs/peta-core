@@ -8,6 +8,9 @@ export class DiscoveryConfigService {
   private static instance: DiscoveryConfigService;
   private readonly logger = createLogger('DiscoveryConfigService');
   private enabled = false;
+  private cachedProfile: DiscoveryProfileLike = null;
+  private cacheExpiry = 0;
+  private static readonly CACHE_TTL_MS = 10_000;
 
   private constructor() {}
 
@@ -24,7 +27,16 @@ export class DiscoveryConfigService {
 
   async getActiveProfile(userId?: string): Promise<DiscoveryProfileLike> {
     void userId;
+
+    const now = Date.now();
+    if (this.cachedProfile !== undefined && now < this.cacheExpiry) {
+      this.enabled = Boolean(this.cachedProfile?.enabled);
+      return this.cachedProfile;
+    }
+
     const profile = await DiscoveryProfileRepository.findDefault();
+    this.cachedProfile = profile;
+    this.cacheExpiry = now + DiscoveryConfigService.CACHE_TTL_MS;
     this.enabled = Boolean(profile?.enabled);
     return profile;
   }
@@ -68,6 +80,8 @@ export class DiscoveryConfigService {
       'Updated discovery global configuration',
     );
 
+    this.invalidateCache();
+
     const refreshed = await DiscoveryProfileRepository.findDefault();
     this.enabled = Boolean(refreshed?.enabled);
 
@@ -75,6 +89,10 @@ export class DiscoveryConfigService {
       enabled: this.enabled,
       defaultProfileId: refreshed?.id ?? null,
     };
+  }
+
+  invalidateCache(): void {
+    this.cacheExpiry = 0;
   }
 }
 

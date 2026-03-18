@@ -2,13 +2,21 @@ import { createLogger } from '../../logger/index.js';
 import { CatalogActionRepository } from '../../repositories/CatalogActionRepository.js';
 import { UserRepository } from '../../repositories/UserRepository.js';
 import { ServerManager } from '../core/ServerManager.js';
+import { discoveryConfigService } from './DiscoveryConfigService.js';
 import {
   CatalogSearchInput,
   CatalogSearchResult,
   CatalogSearchResultItem,
+  DiscoveryProfileConfig,
 } from '../../types/discovery.types.js';
 
 const MAX_SCAN_SIZE = 1000;
+
+/**
+ * Callback for per-tool permission checks.
+ * Returns true if the user can use the specified tool on the specified server.
+ */
+export type ToolPermissionChecker = (serverId: string, originalToolName: string) => boolean;
 
 export class DiscoverySearchService {
   private static instance: DiscoverySearchService;
@@ -23,7 +31,11 @@ export class DiscoverySearchService {
     return DiscoverySearchService.instance;
   }
 
-  async search(input: CatalogSearchInput, userId: string): Promise<CatalogSearchResult> {
+  async search(
+    input: CatalogSearchInput,
+    userId: string,
+    canUseTool?: ToolPermissionChecker,
+  ): Promise<CatalogSearchResult> {
     const query = input.query.trim();
     if (!query) {
       return {
@@ -33,8 +45,8 @@ export class DiscoverySearchService {
       };
     }
 
-    const authorizedServerIds = await this.getAuthorizedServerIds(userId);
-    if (authorizedServerIds.length === 0) {
+    const authCtx = await this.getAuthContext(userId);
+    if (authCtx.serverIds.length === 0) {
       return {
         results: [],
         nextCursor: null,
@@ -45,8 +57,8 @@ export class DiscoverySearchService {
     const requestedServerIds = (input.serverIds ?? []).filter((id) => id.trim() !== '');
     const serverIds =
       requestedServerIds.length > 0
-        ? requestedServerIds.filter((id) => authorizedServerIds.includes(id))
-        : authorizedServerIds;
+        ? requestedServerIds.filter((id) => authCtx.serverIds.includes(id))
+        : authCtx.serverIds;
 
     if (serverIds.length === 0) {
       return {
@@ -69,7 +81,65 @@ export class DiscoverySearchService {
       offset: 0,
     });
 
-    const ranked = scanned
+    const profile = await discoveryConfigService.getActiveProfile();
+    const config = profile?.config as DiscoveryProfileConfig | null;
+    const exposureRules = config?.directExposureRules;
+
+    const visibilityFiltered = authCtx.isAnonymous
+      ? scanned.filter((action) => action.publicVisible)
+      : scanned;
+
+    const user = await UserRepository.findByUserId(userId);
+    const toolPermissionFiltered = user
+      ? visibilityFiltered.filter((action) => {
+          const serverContext = ServerManager.instance
+            .getAvailableServers()
+            .find((context) => context.serverID === action.serverId);
+          if (!serverContext) {
+            return false;
+          }
+
+          if (!this.isRecord(user.permissions)) {
+            return true;
+          }
+
+          const serverPerms = user.permissions[action.serverId];
+          if (!this.isRecord(serverPerms)) {
+            return true;
+          }
+
+          const tools = serverPerms.tools;
+          if (!this.isRecord(tools)) {
+            return true;
+          }
+
+          const toolPerm = tools[action.originalName];
+          if (!this.isRecord(toolPerm)) {
+            return true;
+          }
+
+          const enabled = toolPerm.enabled;
+          return typeof enabled === 'boolean' ? enabled : true;
+        })
+      : visibilityFiltered;
+
+    const callbackFiltered = canUseTool
+      ? toolPermissionFiltered.filter((action) => canUseTool(action.serverId, action.originalName))
+      : toolPermissionFiltered;
+
+    let filtered = callbackFiltered;
+
+    if (input.approvalAllowed === false) {
+      filtered = filtered.filter((action) => !action.approvalRequired);
+    }
+
+    if (input.directCallableOnly) {
+      filtered = filtered.filter((action) =>
+        this.isActionDirectCallable(action.serverId, exposureRules),
+      );
+    }
+
+    const ranked = filtered
       .map((action) => ({
         action,
         rank: this.calculateRank(action, query, input.categories ?? []),
@@ -90,7 +160,7 @@ export class DiscoverySearchService {
         : [],
       riskLevel: action.riskLevel,
       approvalRequired: action.approvalRequired,
-      directCallable: true,
+      directCallable: this.isActionDirectCallable(action.serverId, exposureRules),
       schemaHash: action.schemaHash,
     }));
 
@@ -174,20 +244,49 @@ export class DiscoverySearchService {
     return value;
   }
 
-  private async getAuthorizedServerIds(userId: string): Promise<string[]> {
-    const user = await UserRepository.findByUserId(userId);
-    if (user) {
-      return ServerManager.instance
-        .getUserAvailableServers(user)
-        .map((context) => context.serverID);
+  private isActionDirectCallable(
+    serverId: string,
+    rules?: Array<{ match: { serverIds?: string[] }; directCallable: boolean }> | null,
+  ): boolean {
+    if (!rules || rules.length === 0) {
+      return true;
     }
 
-    return ServerManager.instance
-      .getAvailableServers()
-      .filter(
-        (context) => context.serverEntity.publicAccess || context.serverEntity.anonymousAccess,
-      )
-      .map((context) => context.serverID);
+    for (const rule of rules) {
+      if (rule.match.serverIds?.length && rule.match.serverIds.includes(serverId)) {
+        return rule.directCallable;
+      }
+    }
+
+    return false;
+  }
+
+  private async getAuthContext(
+    userId: string,
+  ): Promise<{ serverIds: string[]; isAnonymous: boolean }> {
+    const user = await UserRepository.findByUserId(userId);
+    if (user) {
+      return {
+        serverIds: ServerManager.instance
+          .getUserAvailableServers(user)
+          .map((context) => context.serverID),
+        isAnonymous: false,
+      };
+    }
+
+    return {
+      serverIds: ServerManager.instance
+        .getAvailableServers()
+        .filter(
+          (context) => context.serverEntity.publicAccess || context.serverEntity.anonymousAccess,
+        )
+        .map((context) => context.serverID),
+      isAnonymous: true,
+    };
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 }
 

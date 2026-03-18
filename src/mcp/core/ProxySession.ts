@@ -93,6 +93,7 @@ import {
   RESERVED_CATALOG_TOOLS,
   CATALOG_TOOL_NAMES,
   DiscoveryMode,
+  DiscoveryProfileConfig,
 } from '../../types/discovery.types.js';
 import {
   handleCatalogSearch,
@@ -100,6 +101,21 @@ import {
   handleCatalogExecute,
 } from '../services/DiscoveryNativeToolHandlers.js';
 import { discoveryConfigService } from '../services/DiscoveryConfigService.js';
+
+function isToolDirectCallable(
+  serverId: string,
+  rules: Array<{ match: { serverIds?: string[] }; directCallable: boolean }>,
+): boolean {
+  for (const rule of rules) {
+    if (rule.match.serverIds && rule.match.serverIds.length > 0) {
+      if (rule.match.serverIds.includes(serverId)) {
+        return rule.directCallable;
+      }
+    }
+  }
+
+  return false;
+}
 
 /**
  * MCP Proxy Session
@@ -388,6 +404,17 @@ export class ProxySession {
         if (mode === DiscoveryMode.STRICT) {
           allTools.tools = [...catalogToolDefs];
         } else {
+          const config = profile.config as DiscoveryProfileConfig | null;
+          const rules = config?.directExposureRules;
+
+          if (rules && rules.length > 0) {
+            allTools.tools = allTools.tools.filter((tool: Tool) => {
+              const parts = tool.name.split('_-_');
+              const serverId = parts.length > 1 ? parts[parts.length - 1] : '';
+              return isToolDirectCallable(serverId, rules);
+            });
+          }
+
           allTools.tools = [...allTools.tools, ...catalogToolDefs];
         }
       }
@@ -951,11 +978,14 @@ export class ProxySession {
     };
 
     const extra = {
-      requestId: `catalog-${Date.now()}`,
+      requestId: `catalog-exec-${Date.now()}`,
       signal: undefined,
       sendNotification: async () => undefined,
       sendRequest: async () => {
-        throw new Error('Catalog internal tool calls do not support reverse requests');
+        throw new McpError(
+          ErrorCode.InternalError,
+          'Catalog-executed tools cannot initiate reverse requests (e.g., sampling). Execute this tool directly instead.',
+        );
       },
     } as unknown as RequestHandlerExtra<any, any>;
 

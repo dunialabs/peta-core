@@ -4,6 +4,7 @@ import {
   DiscoveryGlobalConfig,
   DiscoveryMode,
   DiscoveryPreviewResult,
+  DiscoveryProfileConfig,
   DiscoveryProfileCreateInput,
   DiscoveryProfileUpdateInput,
 } from '../../types/discovery.types.js';
@@ -69,9 +70,11 @@ export class DiscoveryHandler {
 
     if (data.isDefault) {
       await DiscoveryProfileRepository.setDefault(created.id);
+      discoveryConfigService.invalidateCache();
       return (await DiscoveryProfileRepository.findById(created.id)) ?? created;
     }
 
+    discoveryConfigService.invalidateCache();
     return created;
   }
 
@@ -126,9 +129,11 @@ export class DiscoveryHandler {
 
     if (data.isDefault === true) {
       await DiscoveryProfileRepository.setDefault(data.id);
+      discoveryConfigService.invalidateCache();
       return (await DiscoveryProfileRepository.findById(data.id)) ?? updated;
     }
 
+    discoveryConfigService.invalidateCache();
     return updated;
   }
 
@@ -138,7 +143,9 @@ export class DiscoveryHandler {
       throw new AdminError('Missing required field: id', AdminErrorCode.INVALID_REQUEST);
     }
 
-    return await DiscoveryProfileRepository.delete(id);
+    const deleted = await DiscoveryProfileRepository.delete(id);
+    discoveryConfigService.invalidateCache();
+    return deleted;
   }
 
   async handlePreviewDiscovery(request: AdminRequest<{ profileId?: string }>): Promise<unknown> {
@@ -168,28 +175,47 @@ export class DiscoveryHandler {
       }
     }
 
-    const actions = await CatalogActionRepository.search({
+    const config = profile.config as DiscoveryProfileConfig | null;
+    const exposureRules = config?.directExposureRules;
+    const mode = isDiscoveryMode(profile.mode) ? profile.mode : DiscoveryMode.FLAT;
+
+    const allActions = await CatalogActionRepository.search({
       query: '',
-      limit: 1000,
+      limit: 5000,
       offset: 0,
     });
 
-    const mode = isDiscoveryMode(profile.mode) ? profile.mode : DiscoveryMode.FLAT;
-    const directTools =
-      mode === DiscoveryMode.STRICT
-        ? []
-        : actions.map((action) => ({
+    let directTools: Array<{ name: string; serverId: string }> = [];
+    let hiddenTools: Array<{ actionId: string; displayName: string; serverId: string }> = [];
+
+    if (mode === DiscoveryMode.FLAT) {
+      directTools = allActions.map((action) => ({
+        name: action.wireName ?? action.displayName,
+        serverId: action.serverId,
+      }));
+    } else if (mode === DiscoveryMode.STRICT) {
+      hiddenTools = allActions.map((action) => ({
+        actionId: action.actionId,
+        displayName: action.displayName,
+        serverId: action.serverId,
+      }));
+    } else {
+      for (const action of allActions) {
+        const isDirect = isActionDirectCallablePreview(action.serverId, exposureRules);
+        if (isDirect) {
+          directTools.push({
             name: action.wireName ?? action.displayName,
             serverId: action.serverId,
-          }));
-    const hiddenTools =
-      mode === DiscoveryMode.STRICT
-        ? actions.map((action) => ({
+          });
+        } else {
+          hiddenTools.push({
             actionId: action.actionId,
             displayName: action.displayName,
             serverId: action.serverId,
-          }))
-        : [];
+          });
+        }
+      }
+    }
 
     const result: DiscoveryPreviewResult = {
       mode,
@@ -225,4 +251,21 @@ function isDiscoveryMode(value: unknown): value is DiscoveryMode {
   return (
     value === DiscoveryMode.FLAT || value === DiscoveryMode.HYBRID || value === DiscoveryMode.STRICT
   );
+}
+
+function isActionDirectCallablePreview(
+  serverId: string,
+  rules?: Array<{ match: { serverIds?: string[] }; directCallable: boolean }> | null,
+): boolean {
+  if (!rules || rules.length === 0) {
+    return true;
+  }
+
+  for (const rule of rules) {
+    if (rule.match.serverIds?.length && rule.match.serverIds.includes(serverId)) {
+      return rule.directCallable;
+    }
+  }
+
+  return false;
 }

@@ -7,20 +7,27 @@ import {
 import { UserRepository } from '../../repositories/UserRepository.js';
 import { CatalogActionRepository } from '../../repositories/CatalogActionRepository.js';
 import { ServerManager } from '../core/ServerManager.js';
+import { discoveryConfigService } from './DiscoveryConfigService.js';
 import {
   CATALOG_TOOL_NAMES,
   CatalogDescribeInput,
   CatalogDescribeResult,
   CatalogExecuteInput,
   CatalogSearchInput,
+  DiscoveryProfileConfig,
 } from '../../types/discovery.types.js';
-import { discoverySearchService } from './DiscoverySearchService.js';
+import { discoverySearchService, type ToolPermissionChecker } from './DiscoverySearchService.js';
 
 interface ProxySessionLike {
   executeToolCallInternal(
     aliasedToolName: string,
     toolArgs: Record<string, unknown>,
   ): Promise<CallToolResult>;
+}
+
+interface ClientSessionLike {
+  userId: string;
+  canUseTool(serverID: string, toolName: string): boolean;
 }
 
 export function getCatalogToolDefinitions(): Tool[] {
@@ -98,14 +105,19 @@ export function getCatalogToolDefinitions(): Tool[] {
 export async function handleCatalogSearch(
   args: unknown,
   userId: string,
-  clientSession: unknown,
+  clientSession: ClientSessionLike,
 ): Promise<CallToolResult> {
-  void clientSession;
   const input = parseCatalogSearchInput(args);
-  const result = await discoverySearchService.search(input, userId);
+
+  // Build per-tool permission checker from clientSession
+  const canUseTool: ToolPermissionChecker = (serverId, originalToolName) =>
+    clientSession.canUseTool(serverId, originalToolName);
+
+  const result = await discoverySearchService.search(input, userId, canUseTool);
 
   return {
     content: [{ type: 'text', text: JSON.stringify(result) }],
+    structuredContent: toStructuredContent(result),
   };
 }
 
@@ -114,7 +126,13 @@ export async function handleCatalogDescribe(
   userId: string,
 ): Promise<CallToolResult> {
   const input = parseCatalogDescribeInput(args);
-  const authorizedServerIds = await getAuthorizedServerIds(userId);
+  const user = await UserRepository.findByUserId(userId);
+  const isAnonymous = !user;
+  const authorizedServerIds = await getAuthorizedServerIds(userId, user);
+  const activeProfile = await discoveryConfigService.getActiveProfile();
+  const profileConfig = activeProfile?.config as DiscoveryProfileConfig | null;
+  const exposureRules = profileConfig?.directExposureRules;
+
   const items = await Promise.all(
     input.actionIds.map(async (actionId) => await CatalogActionRepository.findByActionId(actionId)),
   );
@@ -122,6 +140,30 @@ export async function handleCatalogDescribe(
   const filtered = items
     .filter((item): item is NonNullable<(typeof items)[number]> => item !== null)
     .filter((item) => authorizedServerIds.includes(item.serverId))
+    .filter((item) => {
+      if (!user || !isRecord(user.permissions)) {
+        return true;
+      }
+
+      const serverPerms = user.permissions[item.serverId];
+      if (!isRecord(serverPerms)) {
+        return true;
+      }
+
+      const tools = serverPerms.tools;
+      if (!isRecord(tools)) {
+        return true;
+      }
+
+      const toolPerm = tools[item.originalName];
+      if (!isRecord(toolPerm)) {
+        return true;
+      }
+
+      const enabled = toolPerm.enabled;
+      return typeof enabled === 'boolean' ? enabled : true;
+    })
+    .filter((item) => !isAnonymous || item.publicVisible)
     .map((item) => ({
       actionId: item.actionId,
       displayName: item.displayName,
@@ -141,7 +183,7 @@ export async function handleCatalogDescribe(
         ? item.requiredScopes.filter((scope): scope is string => typeof scope === 'string')
         : null,
       approvalRequired: item.approvalRequired,
-      directCallable: true,
+      directCallable: isActionDirectCallableFromRules(item.serverId, exposureRules),
       wireName: item.wireName,
       schemaHash: item.schemaHash,
     }));
@@ -152,6 +194,7 @@ export async function handleCatalogDescribe(
 
   return {
     content: [{ type: 'text', text: JSON.stringify(result) }],
+    structuredContent: toStructuredContent(result),
   };
 }
 
@@ -237,16 +280,38 @@ function parseCatalogExecuteInput(value: unknown): CatalogExecuteInput {
   };
 }
 
-async function getAuthorizedServerIds(userId: string): Promise<string[]> {
-  const user = await UserRepository.findByUserId(userId);
-  if (user) {
-    return ServerManager.instance.getUserAvailableServers(user).map((context) => context.serverID);
+async function getAuthorizedServerIds(
+  userId: string,
+  user?: Awaited<ReturnType<typeof UserRepository.findByUserId>>,
+): Promise<string[]> {
+  const resolvedUser = user ?? (await UserRepository.findByUserId(userId));
+  if (resolvedUser) {
+    return ServerManager.instance
+      .getUserAvailableServers(resolvedUser)
+      .map((context) => context.serverID);
   }
 
   return ServerManager.instance
     .getAvailableServers()
     .filter((context) => context.serverEntity.publicAccess || context.serverEntity.anonymousAccess)
     .map((context) => context.serverID);
+}
+
+function isActionDirectCallableFromRules(
+  serverId: string,
+  rules?: Array<{ match: { serverIds?: string[] }; directCallable: boolean }> | null,
+): boolean {
+  if (!rules || rules.length === 0) {
+    return true;
+  }
+
+  for (const rule of rules) {
+    if (rule.match.serverIds?.length && rule.match.serverIds.includes(serverId)) {
+      return rule.directCallable;
+    }
+  }
+
+  return false;
 }
 
 function asOptionalString(value: unknown): string | undefined {
@@ -284,4 +349,12 @@ function asOptionalRiskLevel(value: unknown): 'low' | 'medium' | 'high' | 'criti
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function toStructuredContent(value: unknown): Record<string, unknown> {
+  if (isRecord(value)) {
+    return value;
+  }
+
+  return { value };
 }
