@@ -80,6 +80,7 @@ export function getCatalogToolDefinitions(): Tool[] {
             minItems: 1,
           },
           detail: { type: 'string', enum: ['full'] },
+          profileId: { type: 'string', description: 'Profile ID for directCallable evaluation' },
         },
         required: ['actionIds'],
         additionalProperties: false,
@@ -146,8 +147,13 @@ export async function handleCatalogDescribe(
   let activeProfile;
   if (input.profileId) {
     activeProfile = await DiscoveryProfileRepository.findById(input.profileId);
-  }
-  if (!activeProfile) {
+    if (!activeProfile) {
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ results: [] }) }],
+        structuredContent: toStructuredContent({ results: [] }),
+      };
+    }
+  } else {
     activeProfile = await discoveryConfigService.getActiveProfile();
   }
   const profileConfig = activeProfile?.config as DiscoveryProfileConfig | null;
