@@ -124,6 +124,7 @@ export async function handleCatalogSearch(
 export async function handleCatalogDescribe(
   args: unknown,
   userId: string,
+  clientSession?: ClientSessionLike,
 ): Promise<CallToolResult> {
   const input = parseCatalogDescribeInput(args);
   const user = await UserRepository.findByUserId(userId);
@@ -164,6 +165,10 @@ export async function handleCatalogDescribe(
       return typeof enabled === 'boolean' ? enabled : true;
     })
     .filter((item) => !isAnonymous || item.publicVisible)
+    .filter((item) => {
+      if (!clientSession) return true;
+      return clientSession.canUseTool(item.serverId, item.originalName);
+    })
     .map((item) => ({
       actionId: item.actionId,
       displayName: item.displayName,

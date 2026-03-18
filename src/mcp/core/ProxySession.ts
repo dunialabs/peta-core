@@ -467,6 +467,7 @@ export class ProxySession {
           catalogResult = await handleCatalogDescribe(
             request.params.arguments,
             this.clientSession.userId,
+            this.clientSession,
           );
           break;
         case CATALOG_TOOL_NAMES.EXECUTE:
