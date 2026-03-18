@@ -15,6 +15,7 @@ import {
   CatalogExecuteInput,
   CatalogSearchInput,
   DiscoveryProfileConfig,
+  evaluateExposureRules,
 } from '../../types/discovery.types.js';
 import {
   discoverySearchService,
@@ -52,7 +53,7 @@ export function getCatalogToolDefinitions(): Tool[] {
           approvalAllowed: { type: 'boolean' },
           directCallableOnly: { type: 'boolean' },
           detail: { type: 'string', enum: ['summary'] },
-          limit: { type: 'integer', minimum: 1, maximum: 100 },
+          limit: { type: 'integer', minimum: 1, maximum: 25, default: 10 },
           cursor: { type: ['string', 'null'] },
         },
         required: ['query'],
@@ -61,6 +62,8 @@ export function getCatalogToolDefinitions(): Tool[] {
       annotations: {
         title: 'Catalog Search',
         readOnlyHint: true,
+        idempotentHint: true,
+        destructiveHint: false,
       },
     },
     {
@@ -83,6 +86,8 @@ export function getCatalogToolDefinitions(): Tool[] {
       annotations: {
         title: 'Catalog Describe',
         readOnlyHint: true,
+        idempotentHint: true,
+        destructiveHint: false,
       },
     },
     {
@@ -169,7 +174,18 @@ export async function handleCatalogDescribe(
         ? item.requiredScopes.filter((scope): scope is string => typeof scope === 'string')
         : null,
       approvalRequired: item.approvalRequired,
-      directCallable: isActionDirectCallableFromRules(item.serverId, exposureRules),
+      directCallable: evaluateExposureRules(
+        exposureRules,
+        {
+          serverId: item.serverId,
+          category: item.category,
+          riskLevel: item.riskLevel,
+          tags: Array.isArray(item.tags)
+            ? (item.tags as string[]).filter((t): t is string => typeof t === 'string')
+            : [],
+        },
+        true,
+      ),
       wireName: item.wireName,
       schemaHash: item.schemaHash,
     }));
@@ -281,23 +297,6 @@ async function getAuthorizedServerIds(
     .getAvailableServers()
     .filter((context) => context.serverEntity.publicAccess || context.serverEntity.anonymousAccess)
     .map((context) => context.serverID);
-}
-
-function isActionDirectCallableFromRules(
-  serverId: string,
-  rules?: Array<{ match: { serverIds?: string[] }; directCallable: boolean }> | null,
-): boolean {
-  if (!rules || rules.length === 0) {
-    return true;
-  }
-
-  for (const rule of rules) {
-    if (rule.match.serverIds?.length && rule.match.serverIds.includes(serverId)) {
-      return rule.directCallable;
-    }
-  }
-
-  return false;
 }
 
 function asOptionalString(value: unknown): string | undefined {

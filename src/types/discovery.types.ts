@@ -100,6 +100,43 @@ export interface DiscoveryProfileConfig {
   }>;
 }
 
+export type ExposureRule = NonNullable<DiscoveryProfileConfig['directExposureRules']>[number];
+
+/**
+ * Evaluate exposure rules to determine if an action is directly callable.
+ * Returns the `directCallable` value of the first matching rule,
+ * or `defaultValue` if no rule matches.
+ */
+export function evaluateExposureRules(
+  rules: ExposureRule[] | null | undefined,
+  action: {
+    serverId: string;
+    category?: string | null;
+    riskLevel?: string | null;
+    tags?: string[];
+  },
+  defaultValue: boolean,
+): boolean {
+  if (!rules || rules.length === 0) return defaultValue;
+
+  for (const rule of rules) {
+    const m = rule.match;
+    let matched = false;
+
+    if (m.serverIds?.length && m.serverIds.includes(action.serverId)) matched = true;
+    if (m.categories?.length && action.category && m.categories.includes(action.category))
+      matched = true;
+    if (m.riskLevels?.length && action.riskLevel && m.riskLevels.includes(action.riskLevel))
+      matched = true;
+    if (m.tags?.length && action.tags?.length && m.tags.some((t) => action.tags!.includes(t)))
+      matched = true;
+
+    if (matched) return rule.directCallable;
+  }
+
+  return defaultValue;
+}
+
 export interface DiscoveryGlobalConfig {
   enabled: boolean;
   defaultProfileId?: string | null;

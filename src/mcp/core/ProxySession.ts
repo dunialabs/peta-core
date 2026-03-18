@@ -94,6 +94,7 @@ import {
   CATALOG_TOOL_NAMES,
   DiscoveryMode,
   DiscoveryProfileConfig,
+  evaluateExposureRules,
 } from '../../types/discovery.types.js';
 import {
   handleCatalogSearch,
@@ -101,21 +102,6 @@ import {
   handleCatalogExecute,
 } from '../services/DiscoveryNativeToolHandlers.js';
 import { discoveryConfigService } from '../services/DiscoveryConfigService.js';
-
-function isToolDirectCallable(
-  serverId: string,
-  rules: Array<{ match: { serverIds?: string[] }; directCallable: boolean }>,
-): boolean {
-  for (const rule of rules) {
-    if (rule.match.serverIds && rule.match.serverIds.length > 0) {
-      if (rule.match.serverIds.includes(serverId)) {
-        return rule.directCallable;
-      }
-    }
-  }
-
-  return false;
-}
 
 /**
  * MCP Proxy Session
@@ -411,7 +397,7 @@ export class ProxySession {
             allTools.tools = allTools.tools.filter((tool: Tool) => {
               const parts = tool.name.split('_-_');
               const serverId = parts.length > 1 ? parts[parts.length - 1] : '';
-              return isToolDirectCallable(serverId, rules);
+              return evaluateExposureRules(rules, { serverId }, false);
             });
           }
 

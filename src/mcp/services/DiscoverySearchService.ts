@@ -8,6 +8,7 @@ import {
   CatalogSearchResult,
   CatalogSearchResultItem,
   DiscoveryProfileConfig,
+  evaluateExposureRules,
 } from '../../types/discovery.types.js';
 
 const MAX_SCAN_SIZE = 1000;
@@ -76,7 +77,7 @@ export class DiscoverySearchService {
       return { results: [], nextCursor: null, totalCount: 0 };
     }
 
-    const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
+    const limit = Math.min(Math.max(input.limit ?? 10, 1), 25);
     const offset = this.parseCursor(input.cursor);
 
     const scanned = await CatalogActionRepository.search({
@@ -115,7 +116,18 @@ export class DiscoverySearchService {
 
     if (input.directCallableOnly) {
       filtered = filtered.filter((action) =>
-        this.isActionDirectCallable(action.serverId, exposureRules),
+        evaluateExposureRules(
+          exposureRules,
+          {
+            serverId: action.serverId,
+            category: action.category,
+            riskLevel: action.riskLevel,
+            tags: Array.isArray(action.tags)
+              ? action.tags.filter((t): t is string => typeof t === 'string')
+              : [],
+          },
+          true,
+        ),
       );
     }
 
@@ -140,7 +152,18 @@ export class DiscoverySearchService {
         : [],
       riskLevel: action.riskLevel,
       approvalRequired: action.approvalRequired,
-      directCallable: this.isActionDirectCallable(action.serverId, exposureRules),
+      directCallable: evaluateExposureRules(
+        exposureRules,
+        {
+          serverId: action.serverId,
+          category: action.category,
+          riskLevel: action.riskLevel,
+          tags: Array.isArray(action.tags)
+            ? action.tags.filter((t): t is string => typeof t === 'string')
+            : [],
+        },
+        true,
+      ),
       schemaHash: action.schemaHash,
     }));
 
@@ -222,23 +245,6 @@ export class DiscoverySearchService {
     }
 
     return value;
-  }
-
-  private isActionDirectCallable(
-    serverId: string,
-    rules?: Array<{ match: { serverIds?: string[] }; directCallable: boolean }> | null,
-  ): boolean {
-    if (!rules || rules.length === 0) {
-      return true;
-    }
-
-    for (const rule of rules) {
-      if (rule.match.serverIds?.length && rule.match.serverIds.includes(serverId)) {
-        return rule.directCallable;
-      }
-    }
-
-    return false;
   }
 
   private getAuthContextFromUser(user: Awaited<ReturnType<typeof UserRepository.findByUserId>>): {

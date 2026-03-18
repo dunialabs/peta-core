@@ -7,6 +7,7 @@ import {
   DiscoveryProfileConfig,
   DiscoveryProfileCreateInput,
   DiscoveryProfileUpdateInput,
+  evaluateExposureRules,
 } from '../../types/discovery.types.js';
 import { createLogger } from '../../logger/index.js';
 import { DiscoveryProfileRepository } from '../../repositories/DiscoveryProfileRepository.js';
@@ -206,7 +207,18 @@ export class DiscoveryHandler {
       }));
     } else {
       for (const action of allActions) {
-        const isDirect = isActionDirectCallablePreview(action.serverId, exposureRules);
+        const isDirect = evaluateExposureRules(
+          exposureRules,
+          {
+            serverId: action.serverId,
+            category: action.category,
+            riskLevel: action.riskLevel,
+            tags: Array.isArray(action.tags)
+              ? (action.tags as string[]).filter((t): t is string => typeof t === 'string')
+              : [],
+          },
+          true,
+        );
         if (isDirect) {
           directTools.push({
             name: action.wireName ?? action.displayName,
@@ -256,21 +268,4 @@ function isDiscoveryMode(value: unknown): value is DiscoveryMode {
   return (
     value === DiscoveryMode.FLAT || value === DiscoveryMode.HYBRID || value === DiscoveryMode.STRICT
   );
-}
-
-function isActionDirectCallablePreview(
-  serverId: string,
-  rules?: Array<{ match: { serverIds?: string[] }; directCallable: boolean }> | null,
-): boolean {
-  if (!rules || rules.length === 0) {
-    return true;
-  }
-
-  for (const rule of rules) {
-    if (rule.match.serverIds?.length && rule.match.serverIds.includes(serverId)) {
-      return rule.directCallable;
-    }
-  }
-
-  return false;
 }
