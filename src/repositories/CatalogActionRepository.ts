@@ -136,7 +136,7 @@ export class CatalogActionRepository {
     if (params.tags && params.tags.length > 0) {
       where.OR = params.tags.map((tag) => ({
         tags: {
-          array_contains: tag,
+          array_contains: [tag],
         },
       }));
     }

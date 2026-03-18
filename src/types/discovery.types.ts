@@ -123,6 +123,7 @@ export function evaluateExposureRules(
 
   for (const rule of rules) {
     const m = rule.match;
+    if (!m || typeof m !== 'object') continue;
     let hasCondition = false;
     let matched = true;
 
