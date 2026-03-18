@@ -396,7 +396,9 @@ export class ProxySession {
           if (rules && rules.length > 0) {
             allTools.tools = allTools.tools.filter((tool: Tool) => {
               const parts = tool.name.split('_-_');
-              const serverId = parts.length > 1 ? parts[parts.length - 1] : '';
+              const contextId = parts.length > 1 ? parts[parts.length - 1] : '';
+              const ctx = ServerManager.instance.getServerContextByID(contextId);
+              const serverId = ctx?.serverID ?? contextId;
               return evaluateExposureRules(rules, { serverId }, false);
             });
           }

@@ -242,7 +242,13 @@ export async function handleCatalogExecute(
     );
   }
 
-  const aliasedName = `${action.originalName}_-_${action.serverId}`;
+  const serverContext = ServerManager.instance
+    .getAvailableServers()
+    .find((ctx) => ctx.serverID === action.serverId);
+  if (!serverContext) {
+    throw new McpError(ErrorCode.InvalidParams, 'Server not available for catalog action');
+  }
+  const aliasedName = `${action.originalName}_-_${serverContext.id}`;
   return await proxySession.executeToolCallInternal(aliasedName, input.arguments);
 }
 

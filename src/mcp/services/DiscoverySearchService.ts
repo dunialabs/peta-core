@@ -91,9 +91,15 @@ export class DiscoverySearchService {
       offset: 0,
     });
 
-    const profile = input.profileId
-      ? await DiscoveryProfileRepository.findById(input.profileId)
-      : await discoveryConfigService.getActiveProfile();
+    let profile;
+    if (input.profileId) {
+      profile = await DiscoveryProfileRepository.findById(input.profileId);
+      if (!profile) {
+        return { results: [], nextCursor: null, totalCount: 0 };
+      }
+    } else {
+      profile = await discoveryConfigService.getActiveProfile();
+    }
     const config = profile?.config as DiscoveryProfileConfig | null;
     const exposureRules = config?.directExposureRules;
 

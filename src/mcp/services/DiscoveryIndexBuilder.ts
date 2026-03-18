@@ -32,8 +32,9 @@ export class DiscoveryIndexBuilder {
       totalIndexed += result.indexedActions;
     }
 
-    const activeServerIds = serverContexts.map((ctx) => ctx.serverID);
-    await CatalogActionRepository.deleteExceptServerIds(activeServerIds);
+    const allEnabledServers = await ServerManager.instance.getAllServers();
+    const enabledServerIds = allEnabledServers.filter((s) => s.enabled).map((s) => s.serverId);
+    await CatalogActionRepository.deleteExceptServerIds(enabledServerIds);
 
     this.logger.info(
       { serverCount: serverContexts.length, indexedActions: totalIndexed },
