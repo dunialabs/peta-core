@@ -26,13 +26,14 @@ export class DiscoveryIndexBuilder {
       .getAvailableServers()
       .filter((context) => context.serverEntity.enabled === true);
 
-    await CatalogActionRepository.deleteAll();
-
     let totalIndexed = 0;
     for (const serverContext of serverContexts) {
       const result = await this.rebuildForServer(serverContext.serverID);
       totalIndexed += result.indexedActions;
     }
+
+    const activeServerIds = serverContexts.map((ctx) => ctx.serverID);
+    await CatalogActionRepository.deleteExceptServerIds(activeServerIds);
 
     this.logger.info(
       { serverCount: serverContexts.length, indexedActions: totalIndexed },
@@ -64,8 +65,9 @@ export class DiscoveryIndexBuilder {
     );
     const actions = tools.map((tool) => this.mapToolToCatalogAction(serverId, tool, isPublic));
 
-    await CatalogActionRepository.deleteByServerId(serverId);
     await CatalogActionRepository.bulkUpsert(actions);
+    const newActionIds = actions.map((a) => a.actionId);
+    await CatalogActionRepository.deleteByServerIdExcept(serverId, newActionIds);
 
     this.logger.info(
       { serverId, indexedActions: actions.length },

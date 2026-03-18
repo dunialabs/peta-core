@@ -234,6 +234,26 @@ export class CatalogActionRepository {
     return result.count;
   }
 
+  static async deleteByServerIdExcept(serverId: string, keepActionIds: string[]): Promise<number> {
+    if (keepActionIds.length === 0) {
+      return this.deleteByServerId(serverId);
+    }
+    const result = await catalogActionModel.catalogAction.deleteMany({
+      where: { serverId, actionId: { notIn: keepActionIds } },
+    });
+    return result.count;
+  }
+
+  static async deleteExceptServerIds(keepServerIds: string[]): Promise<number> {
+    if (keepServerIds.length === 0) {
+      return this.deleteAll();
+    }
+    const result = await catalogActionModel.catalogAction.deleteMany({
+      where: { serverId: { notIn: keepServerIds } },
+    });
+    return result.count;
+  }
+
   static async deleteAll(): Promise<number> {
     const result = await catalogActionModel.catalogAction.deleteMany({
       where: {},
