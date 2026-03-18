@@ -58,9 +58,13 @@ export class DiscoveryIndexBuilder {
       return { indexedActions: 0 };
     }
 
-    const tools = (serverContext.tools?.tools ??
-      serverContext.cachedTools?.tools ??
-      []) as ToolLike[];
+    const tools = (serverContext.tools?.tools ?? serverContext.cachedTools?.tools ?? null) as
+      | ToolLike[]
+      | null;
+    if (!tools) {
+      this.logger.debug({ serverId }, 'Server has no tools loaded yet, skipping catalog rebuild');
+      return { indexedActions: 0 };
+    }
     const isPublic = Boolean(
       serverContext.serverEntity?.publicAccess || serverContext.serverEntity?.anonymousAccess,
     );
