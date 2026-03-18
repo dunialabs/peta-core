@@ -255,7 +255,7 @@ export async function handleCatalogExecute(
     );
   }
 
-  const serverContext = ServerManager.instance.getServerContext(action.serverId);
+  const serverContext = ServerManager.instance.getServerContext(action.serverId, userId);
   if (!serverContext) {
     throw new McpError(ErrorCode.InvalidParams, 'Server not available for catalog action');
   }
