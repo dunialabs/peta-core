@@ -270,3 +270,74 @@ model ToolPolicySet {
   @@index([serverId, status])
   @@map("tool_policy_set")
 }
+
+// ==================== Progressive Disclosure ====================
+
+model DiscoveryProfile {
+  id               String    @id @default(cuid())
+  name             String    @unique
+  description      String?
+  mode             String    @default("FLAT") @db.VarChar(20) // FLAT | HYBRID | STRICT
+  enabled          Boolean   @default(false)
+  isDefault        Boolean   @default(false)
+  publicVisible    Boolean   @default(false) @map("public_visible")
+  anonymousVisible Boolean   @default(false) @map("anonymous_visible")
+  config           Json?
+  instructionText  String?   @map("instruction_text") @db.Text
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  actionBindings   CatalogActionProfile[]
+
+  @@map("discovery_profile")
+}
+
+model CatalogAction {
+  id               String    @id @default(cuid())
+  actionId         String    @unique @map("action_id")
+  serverId         String    @map("server_id") @db.VarChar(128)
+  originalName     String    @map("original_name")
+  wireName         String?   @map("wire_name")
+  displayName      String    @map("display_name")
+  title            String
+  summary          String    @db.Text
+  description      String?   @db.Text
+  category         String?
+  tags             Json?
+  riskLevel        String?   @map("risk_level") @db.VarChar(20)
+  requiredScopes   Json?     @map("required_scopes")
+  approvalRequired Boolean   @default(false) @map("approval_required")
+  publicVisible    Boolean   @default(false) @map("public_visible")
+  enabled          Boolean   @default(true)
+  inputSchema      Json      @map("input_schema")
+  outputSchema     Json?     @map("output_schema")
+  annotations      Json?
+  examples         Json?
+  schemaHash       String    @map("schema_hash")
+  searchText       String?   @map("search_text") @db.Text
+  lastIndexedAt    DateTime  @default(now()) @map("last_indexed_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  profileBindings  CatalogActionProfile[]
+
+  @@index([serverId], map: "idx_catalog_action_server_id")
+  @@index([category], map: "idx_catalog_action_category")
+  @@map("catalog_action")
+}
+
+model CatalogActionProfile {
+  id             String   @id @default(cuid())
+  actionId       String   @map("action_id")
+  profileId      String   @map("profile_id")
+  directCallable Boolean  @default(false) @map("direct_callable")
+  rankBoost      Int      @default(0) @map("rank_boost")
+  enabled        Boolean  @default(true)
+
+  action  CatalogAction    @relation(fields: [actionId], references: [actionId], onDelete: Cascade)
+  profile DiscoveryProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([actionId, profileId])
+  @@index([profileId], map: "idx_catalog_action_profile_profile_id")
+  @@map("catalog_action_profile")
+}

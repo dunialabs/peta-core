@@ -89,6 +89,17 @@ import { ProxyContext } from '../../types/mcp.types.js';
 import { createLogger } from '../../logger/index.js';
 import { policyEngine } from '../services/PolicyEngine.js';
 import { approvalService, ApprovalRateLimitError } from '../services/ApprovalService.js';
+import {
+  RESERVED_CATALOG_TOOLS,
+  CATALOG_TOOL_NAMES,
+  DiscoveryMode,
+} from '../../types/discovery.types.js';
+import {
+  handleCatalogSearch,
+  handleCatalogDescribe,
+  handleCatalogExecute,
+} from '../services/DiscoveryNativeToolHandlers.js';
+import { discoveryConfigService } from '../services/DiscoveryConfigService.js';
 
 /**
  * MCP Proxy Session
@@ -168,6 +179,12 @@ export class ProxySession {
       this.isInitialized = true;
       this.clientSession.connectionInitialized(this.upstreamServer);
     };
+
+    this.upstreamServer.setRequestHandler(
+      InitializeRequestSchema,
+      async (request: InitializeRequest, extra: RequestHandlerExtra<any, any>) =>
+        this.handleInitialize(request, extra),
+    );
 
     // Tools
     this.upstreamServer.setRequestHandler(
@@ -360,6 +377,22 @@ export class ProxySession {
     const startTime = Date.now();
     const allTools = this.clientSession.listTools();
 
+    const profile = await discoveryConfigService.getActiveProfile();
+    if (profile && profile.enabled && profile.mode !== 'FLAT') {
+      const mode = profile.mode as DiscoveryMode;
+      if (mode === DiscoveryMode.HYBRID || mode === DiscoveryMode.STRICT) {
+        const { getCatalogToolDefinitions } =
+          await import('../services/DiscoveryNativeToolHandlers.js');
+        const catalogToolDefs = getCatalogToolDefinitions();
+
+        if (mode === DiscoveryMode.STRICT) {
+          allTools.tools = [...catalogToolDefs];
+        } else {
+          allTools.tools = [...allTools.tools, ...catalogToolDefs];
+        }
+      }
+    }
+
     await this.sessionLogger.logClientRequest({
       action: MCPEventLogType.ResponseToolList,
       upstreamRequestId: String(extra.requestId),
@@ -384,10 +417,57 @@ export class ProxySession {
     const startTime = Date.now();
     const toolName = request.params.name;
     this.logger.debug({ toolName }, 'Handling tool call');
-
-    // Generate uniformRequestId for correlation
     const uniformRequestId = LogService.getInstance().generateUniformRequestId(this.sessionId);
     const originalRequestId = extra.requestId;
+
+    // Progressive Disclosure: only intercept catalog tools when PPD is active (non-FLAT)
+    const ppdProfile = await discoveryConfigService.getActiveProfile();
+    const ppdActive = ppdProfile && ppdProfile.enabled && ppdProfile.mode !== 'FLAT';
+
+    if (ppdActive && RESERVED_CATALOG_TOOLS.has(toolName)) {
+      const startTimeCatalog = Date.now();
+      let catalogResult: CallToolResult;
+
+      switch (toolName) {
+        case CATALOG_TOOL_NAMES.SEARCH:
+          catalogResult = await handleCatalogSearch(
+            request.params.arguments,
+            this.clientSession.userId,
+            this.clientSession,
+          );
+          break;
+        case CATALOG_TOOL_NAMES.DESCRIBE:
+          catalogResult = await handleCatalogDescribe(
+            request.params.arguments,
+            this.clientSession.userId,
+          );
+          break;
+        case CATALOG_TOOL_NAMES.EXECUTE:
+          catalogResult = await handleCatalogExecute(
+            request.params.arguments,
+            this.clientSession.userId,
+            this,
+          );
+          break;
+        default:
+          throw new McpError(ErrorCode.MethodNotFound, `Unknown catalog tool: ${toolName}`);
+      }
+
+      await this.sessionLogger.logClientRequest({
+        action: MCPEventLogType.RequestTool,
+        upstreamRequestId: String(originalRequestId),
+        uniformRequestId,
+        requestParams: JSON.stringify({ name: toolName, arguments: request.params.arguments }),
+        responseResult: JSON.stringify(catalogResult),
+        serverId: 'gateway',
+        duration: Date.now() - startTimeCatalog,
+        statusCode: catalogResult.isError ? 500 : 200,
+      });
+
+      return catalogResult;
+    }
+
+    // Generate uniformRequestId for correlation
     let approvalRequestId: string | null = null;
     let approvalHeartbeatTimer: NodeJS.Timeout | null = null;
 
@@ -856,6 +936,59 @@ export class ProxySession {
       // Clean up request mapping
       this.requestIdMapper.removeMapping(proxyRequestId);
     }
+  }
+
+  public async executeToolCallInternal(
+    aliasedToolName: string,
+    toolArgs: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const request: CallToolRequest = {
+      method: 'tools/call',
+      params: {
+        name: aliasedToolName,
+        arguments: toolArgs,
+      },
+    };
+
+    const extra = {
+      requestId: `catalog-${Date.now()}`,
+      signal: undefined,
+      sendNotification: async () => undefined,
+      sendRequest: async () => {
+        throw new Error('Catalog internal tool calls do not support reverse requests');
+      },
+    } as unknown as RequestHandlerExtra<any, any>;
+
+    return await this.handleToolCall(request, extra);
+  }
+
+  private async handleInitialize(
+    request: InitializeRequest,
+    extra: RequestHandlerExtra<any, any>,
+  ): Promise<InitializeResult> {
+    void extra;
+
+    const result: InitializeResult = {
+      protocolVersion: request.params.protocolVersion,
+      capabilities: {
+        tools: { listChanged: true },
+        resources: { listChanged: true, subscribe: true },
+        prompts: { listChanged: true },
+        completions: {},
+        logging: {},
+      },
+      serverInfo: {
+        name: APP_INFO.name,
+        version: APP_INFO.version,
+      },
+    };
+
+    const profile = await discoveryConfigService.getActiveProfile(this.clientSession.userId);
+    if (profile && profile.enabled && profile.mode !== 'FLAT' && profile.instructionText) {
+      result.instructions = profile.instructionText;
+    }
+
+    return result;
   }
 
   /**
