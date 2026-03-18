@@ -1,5 +1,6 @@
 import { createLogger } from '../../logger/index.js';
 import { CatalogActionRepository } from '../../repositories/CatalogActionRepository.js';
+import { DiscoveryProfileRepository } from '../../repositories/DiscoveryProfileRepository.js';
 import { UserRepository } from '../../repositories/UserRepository.js';
 import { ServerManager } from '../core/ServerManager.js';
 import { discoveryConfigService } from './DiscoveryConfigService.js';
@@ -90,7 +91,9 @@ export class DiscoverySearchService {
       offset: 0,
     });
 
-    const profile = await discoveryConfigService.getActiveProfile();
+    const profile = input.profileId
+      ? await DiscoveryProfileRepository.findById(input.profileId)
+      : await discoveryConfigService.getActiveProfile();
     const config = profile?.config as DiscoveryProfileConfig | null;
     const exposureRules = config?.directExposureRules;
 
@@ -162,6 +165,7 @@ export class DiscoverySearchService {
           tags: Array.isArray(action.tags)
             ? action.tags.filter((t): t is string => typeof t === 'string')
             : [],
+          approvalRequired: action.approvalRequired,
         },
         true,
       ),
