@@ -12,6 +12,25 @@ import {
 
 const MAX_SCAN_SIZE = 1000;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function isToolEnabledForUser(
+  permissions: unknown,
+  serverId: string,
+  toolName: string,
+): boolean {
+  if (!isRecord(permissions)) return true;
+  const serverPerms = permissions[serverId];
+  if (!isRecord(serverPerms)) return true;
+  const tools = serverPerms.tools;
+  if (!isRecord(tools)) return true;
+  const toolPerm = tools[toolName];
+  if (!isRecord(toolPerm)) return true;
+  return typeof toolPerm.enabled === 'boolean' ? toolPerm.enabled : true;
+}
+
 /**
  * Callback for per-tool permission checks.
  * Returns true if the user can use the specified tool on the specified server.
@@ -38,20 +57,13 @@ export class DiscoverySearchService {
   ): Promise<CatalogSearchResult> {
     const query = input.query.trim();
     if (!query) {
-      return {
-        results: [],
-        nextCursor: null,
-        totalCount: 0,
-      };
+      return { results: [], nextCursor: null, totalCount: 0 };
     }
 
-    const authCtx = await this.getAuthContext(userId);
+    const user = await UserRepository.findByUserId(userId);
+    const authCtx = this.getAuthContextFromUser(user);
     if (authCtx.serverIds.length === 0) {
-      return {
-        results: [],
-        nextCursor: null,
-        totalCount: 0,
-      };
+      return { results: [], nextCursor: null, totalCount: 0 };
     }
 
     const requestedServerIds = (input.serverIds ?? []).filter((id) => id.trim() !== '');
@@ -61,11 +73,7 @@ export class DiscoverySearchService {
         : authCtx.serverIds;
 
     if (serverIds.length === 0) {
-      return {
-        results: [],
-        nextCursor: null,
-        totalCount: 0,
-      };
+      return { results: [], nextCursor: null, totalCount: 0 };
     }
 
     const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
@@ -89,38 +97,10 @@ export class DiscoverySearchService {
       ? scanned.filter((action) => action.publicVisible)
       : scanned;
 
-    const user = await UserRepository.findByUserId(userId);
     const toolPermissionFiltered = user
-      ? visibilityFiltered.filter((action) => {
-          const serverContext = ServerManager.instance
-            .getAvailableServers()
-            .find((context) => context.serverID === action.serverId);
-          if (!serverContext) {
-            return false;
-          }
-
-          if (!this.isRecord(user.permissions)) {
-            return true;
-          }
-
-          const serverPerms = user.permissions[action.serverId];
-          if (!this.isRecord(serverPerms)) {
-            return true;
-          }
-
-          const tools = serverPerms.tools;
-          if (!this.isRecord(tools)) {
-            return true;
-          }
-
-          const toolPerm = tools[action.originalName];
-          if (!this.isRecord(toolPerm)) {
-            return true;
-          }
-
-          const enabled = toolPerm.enabled;
-          return typeof enabled === 'boolean' ? enabled : true;
-        })
+      ? visibilityFiltered.filter((action) =>
+          isToolEnabledForUser(user.permissions, action.serverId, action.originalName),
+        )
       : visibilityFiltered;
 
     const callbackFiltered = canUseTool
@@ -261,10 +241,10 @@ export class DiscoverySearchService {
     return false;
   }
 
-  private async getAuthContext(
-    userId: string,
-  ): Promise<{ serverIds: string[]; isAnonymous: boolean }> {
-    const user = await UserRepository.findByUserId(userId);
+  private getAuthContextFromUser(user: Awaited<ReturnType<typeof UserRepository.findByUserId>>): {
+    serverIds: string[];
+    isAnonymous: boolean;
+  } {
     if (user) {
       return {
         serverIds: ServerManager.instance
@@ -283,10 +263,6 @@ export class DiscoverySearchService {
         .map((context) => context.serverID),
       isAnonymous: true,
     };
-  }
-
-  private isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 }
 

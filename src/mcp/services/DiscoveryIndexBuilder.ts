@@ -57,7 +57,8 @@ export class DiscoveryIndexBuilder {
     const tools = (serverContext.tools?.tools ??
       serverContext.cachedTools?.tools ??
       []) as ToolLike[];
-    const actions = tools.map((tool) => this.mapToolToCatalogAction(serverId, tool));
+    const isPublic = Boolean(serverContext.serverEntity?.publicAccess);
+    const actions = tools.map((tool) => this.mapToolToCatalogAction(serverId, tool, isPublic));
 
     await CatalogActionRepository.deleteByServerId(serverId);
     await CatalogActionRepository.bulkUpsert(actions);
@@ -69,7 +70,7 @@ export class DiscoveryIndexBuilder {
     return { indexedActions: actions.length };
   }
 
-  private mapToolToCatalogAction(serverId: string, tool: ToolLike) {
+  private mapToolToCatalogAction(serverId: string, tool: ToolLike, isPublic = false) {
     const originalToolName = tool.name;
     const actionId = `ppd_${this.slug(serverId)}_${this.slug(originalToolName)}`;
     const wireName = `${originalToolName}_-_${serverId}`;
@@ -102,7 +103,7 @@ export class DiscoveryIndexBuilder {
       riskLevel: this.extractRiskLevel(annotations),
       requiredScopes: this.extractRequiredScopes(annotations),
       approvalRequired: false,
-      publicVisible: false,
+      publicVisible: isPublic,
       enabled: true,
       inputSchema,
       outputSchema,

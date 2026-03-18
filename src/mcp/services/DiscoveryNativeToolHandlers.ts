@@ -16,7 +16,11 @@ import {
   CatalogSearchInput,
   DiscoveryProfileConfig,
 } from '../../types/discovery.types.js';
-import { discoverySearchService, type ToolPermissionChecker } from './DiscoverySearchService.js';
+import {
+  discoverySearchService,
+  isToolEnabledForUser,
+  type ToolPermissionChecker,
+} from './DiscoverySearchService.js';
 
 interface ProxySessionLike {
   executeToolCallInternal(
@@ -134,36 +138,13 @@ export async function handleCatalogDescribe(
   const profileConfig = activeProfile?.config as DiscoveryProfileConfig | null;
   const exposureRules = profileConfig?.directExposureRules;
 
-  const items = await Promise.all(
-    input.actionIds.map(async (actionId) => await CatalogActionRepository.findByActionId(actionId)),
-  );
+  const items = await CatalogActionRepository.findByActionIds(input.actionIds);
 
   const filtered = items
-    .filter((item): item is NonNullable<(typeof items)[number]> => item !== null)
     .filter((item) => authorizedServerIds.includes(item.serverId))
-    .filter((item) => {
-      if (!user || !isRecord(user.permissions)) {
-        return true;
-      }
-
-      const serverPerms = user.permissions[item.serverId];
-      if (!isRecord(serverPerms)) {
-        return true;
-      }
-
-      const tools = serverPerms.tools;
-      if (!isRecord(tools)) {
-        return true;
-      }
-
-      const toolPerm = tools[item.originalName];
-      if (!isRecord(toolPerm)) {
-        return true;
-      }
-
-      const enabled = toolPerm.enabled;
-      return typeof enabled === 'boolean' ? enabled : true;
-    })
+    .filter((item) =>
+      user ? isToolEnabledForUser(user.permissions, item.serverId, item.originalName) : true,
+    )
     .filter((item) => !isAnonymous || item.publicVisible)
     .filter((item) => {
       if (!clientSession) return true;

@@ -83,7 +83,7 @@ export class DiscoveryConfigService {
     this.invalidateCache();
 
     const refreshed = await DiscoveryProfileRepository.findDefault();
-    this.enabled = Boolean(refreshed?.enabled);
+    this.enabled = refreshed ? Boolean(refreshed.enabled) : config.enabled;
 
     return {
       enabled: this.enabled,

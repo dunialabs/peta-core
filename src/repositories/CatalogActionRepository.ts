@@ -29,18 +29,6 @@ export interface CatalogActionRecord {
   updatedAt: Date;
 }
 
-export interface ProfileBindingRecord {
-  actionId: string;
-  directCallable: boolean;
-  rankBoost: number;
-  enabled: boolean;
-}
-
-export type CatalogActionWithBinding = CatalogActionRecord & {
-  profileDirectCallable: boolean;
-  profileRankBoost: number;
-};
-
 type CatalogActionDelegate = {
   findUnique(args: { where: { actionId: string } }): Promise<CatalogActionRecord | null>;
   findMany(args: {
@@ -111,6 +99,13 @@ export class CatalogActionRepository {
   static async findByActionId(actionId: string): Promise<CatalogActionRecord | null> {
     return await catalogActionModel.catalogAction.findUnique({
       where: { actionId },
+    });
+  }
+
+  static async findByActionIds(actionIds: string[]): Promise<CatalogActionRecord[]> {
+    if (actionIds.length === 0) return [];
+    return await catalogActionModel.catalogAction.findMany({
+      where: { actionId: { in: actionIds } },
     });
   }
 
@@ -268,92 +263,6 @@ export class CatalogActionRepository {
       serverCount: Number(serverRows[0]?.cnt ?? 0),
       lastIndexedAt: aggregate._max.lastIndexedAt,
     };
-  }
-
-  /**
-   * Get profile bindings (directCallable, rankBoost) for a set of action IDs.
-   * Returns a Map keyed by actionId.
-   */
-  static async getProfileBindings(
-    actionIds: string[],
-    profileId: string,
-  ): Promise<Map<string, ProfileBindingRecord>> {
-    if (actionIds.length === 0) {
-      return new Map();
-    }
-
-    const rows = await prisma.$queryRaw<
-      Array<{
-        action_id: string;
-        direct_callable: boolean;
-        rank_boost: number;
-        enabled: boolean;
-      }>
-    >(
-      Prisma.sql`
-        SELECT action_id, direct_callable, rank_boost, enabled
-        FROM catalog_action_profile
-        WHERE profile_id = ${profileId}
-          AND action_id = ANY(${actionIds})
-      `,
-    );
-
-    const map = new Map<string, ProfileBindingRecord>();
-    for (const row of rows) {
-      map.set(row.action_id, {
-        actionId: row.action_id,
-        directCallable: row.direct_callable,
-        rankBoost: row.rank_boost,
-        enabled: row.enabled,
-      });
-    }
-    return map;
-  }
-
-  /**
-   * Get all action IDs that are marked directCallable for a given profile.
-   * Used by hybrid mode to determine which tools to expose directly.
-   */
-  static async getDirectCallableActionIds(profileId: string): Promise<Set<string>> {
-    const rows = await prisma.$queryRaw<
-      Array<{ action_id: string }>
-    >(
-      Prisma.sql`
-        SELECT cap.action_id
-        FROM catalog_action_profile cap
-        INNER JOIN catalog_action ca ON ca.action_id = cap.action_id
-        WHERE cap.profile_id = ${profileId}
-          AND cap.direct_callable = true
-          AND cap.enabled = true
-          AND ca.enabled = true
-      `,
-    );
-
-    return new Set(rows.map((row) => row.action_id));
-  }
-
-  /**
-   * Get the wire names (serverID-prefixed tool names) for actions marked
-   * directCallable in a profile. Used by hybrid mode handleToolsList to
-   * filter the direct tool set.
-   */
-  static async getDirectCallableWireNames(profileId: string): Promise<Set<string>> {
-    const rows = await prisma.$queryRaw<
-      Array<{ wire_name: string }>
-    >(
-      Prisma.sql`
-        SELECT ca.wire_name
-        FROM catalog_action_profile cap
-        INNER JOIN catalog_action ca ON ca.action_id = cap.action_id
-        WHERE cap.profile_id = ${profileId}
-          AND cap.direct_callable = true
-          AND cap.enabled = true
-          AND ca.enabled = true
-          AND ca.wire_name IS NOT NULL
-      `,
-    );
-
-    return new Set(rows.map((row) => row.wire_name));
   }
 }
 

@@ -143,6 +143,11 @@ export class DiscoveryHandler {
       throw new AdminError('Missing required field: id', AdminErrorCode.INVALID_REQUEST);
     }
 
+    const existing = await DiscoveryProfileRepository.findById(id);
+    if (!existing) {
+      throw new AdminError(`Discovery profile not found: ${id}`, AdminErrorCode.INVALID_REQUEST);
+    }
+
     const deleted = await DiscoveryProfileRepository.delete(id);
     discoveryConfigService.invalidateCache();
     return deleted;
