@@ -6,6 +6,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { UserRepository } from '../../repositories/UserRepository.js';
 import { CatalogActionRepository } from '../../repositories/CatalogActionRepository.js';
+import { DiscoveryProfileRepository } from '../../repositories/DiscoveryProfileRepository.js';
 import { ServerManager } from '../core/ServerManager.js';
 import { discoveryConfigService } from './DiscoveryConfigService.js';
 import {
@@ -142,7 +143,13 @@ export async function handleCatalogDescribe(
   const user = await UserRepository.findByUserId(userId);
   const isAnonymous = !user;
   const authorizedServerIds = await getAuthorizedServerIds(userId, user);
-  const activeProfile = await discoveryConfigService.getActiveProfile();
+  let activeProfile;
+  if (input.profileId) {
+    activeProfile = await DiscoveryProfileRepository.findById(input.profileId);
+  }
+  if (!activeProfile) {
+    activeProfile = await discoveryConfigService.getActiveProfile();
+  }
   const profileConfig = activeProfile?.config as DiscoveryProfileConfig | null;
   const exposureRules = profileConfig?.directExposureRules;
 
@@ -288,6 +295,7 @@ function parseCatalogDescribeInput(value: unknown): CatalogDescribeInput {
   return {
     actionIds,
     detail: value.detail === 'full' ? 'full' : undefined,
+    profileId: asOptionalString(value.profileId),
   };
 }
 

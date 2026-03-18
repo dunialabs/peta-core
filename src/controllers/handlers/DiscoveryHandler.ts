@@ -169,13 +169,21 @@ export class DiscoveryHandler {
     } else {
       profile = await DiscoveryProfileRepository.findDefault();
       if (!profile) {
-        // No profile at all — return empty flat preview
+        const allActions = await CatalogActionRepository.search({
+          query: '',
+          limit: 5000,
+          offset: 0,
+        });
+        const flatDirect = allActions.map((a) => ({
+          name: a.wireName ?? a.displayName,
+          serverId: a.serverId,
+        }));
         return {
           mode: DiscoveryMode.FLAT,
-          directTools: [],
+          directTools: flatDirect,
           hiddenTools: [],
           catalogToolsIncluded: [],
-          totalDirectCount: 0,
+          totalDirectCount: flatDirect.length,
           totalHiddenCount: 0,
         } satisfies DiscoveryPreviewResult;
       }

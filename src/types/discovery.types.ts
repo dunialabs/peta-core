@@ -51,6 +51,7 @@ export interface CatalogSearchResult {
 export interface CatalogDescribeInput {
   actionIds: string[];
   detail?: 'full';
+  profileId?: string;
 }
 
 export interface CatalogDescribeResultItem {
