@@ -106,6 +106,9 @@ export function getCatalogToolDefinitions(): Tool[] {
       },
       annotations: {
         title: 'Catalog Execute',
+        readOnlyHint: false,
+        idempotentHint: false,
+        destructiveHint: true,
       },
     },
   ];

@@ -57,7 +57,9 @@ export class DiscoveryIndexBuilder {
     const tools = (serverContext.tools?.tools ??
       serverContext.cachedTools?.tools ??
       []) as ToolLike[];
-    const isPublic = Boolean(serverContext.serverEntity?.publicAccess);
+    const isPublic = Boolean(
+      serverContext.serverEntity?.publicAccess || serverContext.serverEntity?.anonymousAccess,
+    );
     const actions = tools.map((tool) => this.mapToolToCatalogAction(serverId, tool, isPublic));
 
     await CatalogActionRepository.deleteByServerId(serverId);
