@@ -26,6 +26,8 @@ export class DiscoveryIndexBuilder {
       .getAvailableServers()
       .filter((context) => context.serverEntity.enabled === true);
 
+    await CatalogActionRepository.deleteAll();
+
     let totalIndexed = 0;
     for (const serverContext of serverContexts) {
       const result = await this.rebuildForServer(serverContext.serverID);
@@ -40,7 +42,6 @@ export class DiscoveryIndexBuilder {
   }
 
   async invalidateServer(serverId: string): Promise<{ indexedActions: number }> {
-    await CatalogActionRepository.deleteByServerId(serverId);
     return await this.rebuildForServer(serverId);
   }
 
@@ -51,6 +52,7 @@ export class DiscoveryIndexBuilder {
 
     if (!serverContext) {
       this.logger.warn({ serverId }, 'Server context not available for discovery index rebuild');
+      await CatalogActionRepository.deleteByServerId(serverId);
       return { indexedActions: 0 };
     }
 
