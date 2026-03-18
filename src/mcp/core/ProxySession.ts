@@ -405,6 +405,10 @@ export class ProxySession {
 
           allTools.tools = [...allTools.tools, ...catalogToolDefs];
         }
+
+        if (allTools._meta) {
+          allTools._meta.totalCount = allTools.tools.length;
+        }
       }
     }
 
