@@ -461,6 +461,7 @@ export class ProxySession {
             request.params.arguments,
             this.clientSession.userId,
             this,
+            this.clientSession,
           );
           break;
         default:

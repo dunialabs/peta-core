@@ -208,6 +208,7 @@ export async function handleCatalogExecute(
   args: unknown,
   userId: string,
   proxySession: ProxySessionLike,
+  clientSession?: ClientSessionLike,
 ): Promise<CallToolResult> {
   const input = parseCatalogExecuteInput(args);
   const action = await CatalogActionRepository.findByActionId(input.actionId);
@@ -215,8 +216,22 @@ export async function handleCatalogExecute(
     throw new McpError(ErrorCode.InvalidParams, `Unknown catalog actionId: ${input.actionId}`);
   }
 
-  const authorizedServerIds = await getAuthorizedServerIds(userId);
+  const user = await UserRepository.findByUserId(userId);
+  const authorizedServerIds = await getAuthorizedServerIds(userId, user);
   if (!authorizedServerIds.includes(action.serverId)) {
+    throw new McpError(ErrorCode.InvalidParams, 'Permission denied for catalog action');
+  }
+
+  const isAnonymous = !user;
+  if (isAnonymous && !action.publicVisible) {
+    throw new McpError(ErrorCode.InvalidParams, 'Permission denied for catalog action');
+  }
+
+  if (user && !isToolEnabledForUser(user.permissions, action.serverId, action.originalName)) {
+    throw new McpError(ErrorCode.InvalidParams, 'Permission denied for catalog action');
+  }
+
+  if (clientSession && !clientSession.canUseTool(action.serverId, action.originalName)) {
     throw new McpError(ErrorCode.InvalidParams, 'Permission denied for catalog action');
   }
 

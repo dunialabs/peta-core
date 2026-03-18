@@ -78,7 +78,7 @@ export class DiscoveryIndexBuilder {
 
   private mapToolToCatalogAction(serverId: string, tool: ToolLike, isPublic = false) {
     const originalToolName = tool.name;
-    const actionId = `ppd_${this.slug(serverId)}_${this.slug(originalToolName)}`;
+    const actionId = `ppd_${createHash('sha256').update(`${serverId}::${originalToolName}`).digest('hex').slice(0, 16)}`;
     const wireName = `${originalToolName}_-_${serverId}`;
     const displayName = `${serverId}.${originalToolName}`;
     const title = tool.title ?? originalToolName;
@@ -162,10 +162,6 @@ export class DiscoveryIndexBuilder {
       (scope): scope is string => typeof scope === 'string' && scope.trim().length > 0,
     );
     return scopes.length > 0 ? scopes : null;
-  }
-
-  private slug(value: string): string {
-    return value.replace(/[^a-zA-Z0-9_]+/g, '_');
   }
 }
 
