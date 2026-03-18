@@ -216,6 +216,7 @@ export class DiscoveryHandler {
             tags: Array.isArray(action.tags)
               ? (action.tags as string[]).filter((t): t is string => typeof t === 'string')
               : [],
+            approvalRequired: action.approvalRequired,
           },
           true,
         );

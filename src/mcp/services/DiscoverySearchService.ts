@@ -125,6 +125,7 @@ export class DiscoverySearchService {
             tags: Array.isArray(action.tags)
               ? action.tags.filter((t): t is string => typeof t === 'string')
               : [],
+            approvalRequired: action.approvalRequired,
           },
           true,
         ),

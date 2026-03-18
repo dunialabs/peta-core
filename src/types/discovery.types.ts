@@ -114,6 +114,7 @@ export function evaluateExposureRules(
     category?: string | null;
     riskLevel?: string | null;
     tags?: string[];
+    approvalRequired?: boolean;
   },
   defaultValue: boolean,
 ): boolean {
@@ -121,17 +122,31 @@ export function evaluateExposureRules(
 
   for (const rule of rules) {
     const m = rule.match;
-    let matched = false;
+    let hasCondition = false;
+    let matched = true;
 
-    if (m.serverIds?.length && m.serverIds.includes(action.serverId)) matched = true;
-    if (m.categories?.length && action.category && m.categories.includes(action.category))
-      matched = true;
-    if (m.riskLevels?.length && action.riskLevel && m.riskLevels.includes(action.riskLevel))
-      matched = true;
-    if (m.tags?.length && action.tags?.length && m.tags.some((t) => action.tags!.includes(t)))
-      matched = true;
+    if (m.serverIds?.length) {
+      hasCondition = true;
+      matched = matched && m.serverIds.includes(action.serverId);
+    }
+    if (m.categories?.length) {
+      hasCondition = true;
+      matched = matched && !!action.category && m.categories.includes(action.category);
+    }
+    if (m.riskLevels?.length) {
+      hasCondition = true;
+      matched = matched && !!action.riskLevel && m.riskLevels.includes(action.riskLevel);
+    }
+    if (m.tags?.length) {
+      hasCondition = true;
+      matched = matched && !!action.tags?.length && m.tags.some((t) => action.tags!.includes(t));
+    }
+    if (m.requireApproval !== undefined && m.requireApproval !== null) {
+      hasCondition = true;
+      matched = matched && action.approvalRequired === m.requireApproval;
+    }
 
-    if (matched) return rule.directCallable;
+    if (hasCondition && matched) return rule.directCallable;
   }
 
   return defaultValue;

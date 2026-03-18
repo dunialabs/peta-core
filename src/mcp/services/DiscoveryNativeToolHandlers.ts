@@ -183,6 +183,7 @@ export async function handleCatalogDescribe(
           tags: Array.isArray(item.tags)
             ? (item.tags as string[]).filter((t): t is string => typeof t === 'string')
             : [],
+          approvalRequired: item.approvalRequired,
         },
         true,
       ),
