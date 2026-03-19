@@ -119,7 +119,7 @@ export function evaluateExposureRules(
   },
   defaultValue: boolean,
 ): boolean {
-  if (!rules || rules.length === 0) return defaultValue;
+  if (!rules || !Array.isArray(rules) || rules.length === 0) return defaultValue;
 
   for (const rule of rules) {
     const m = rule.match;

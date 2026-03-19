@@ -116,8 +116,12 @@ export class DiscoveryHandler {
       throw new AdminError('Invalid field: mode', AdminErrorCode.INVALID_REQUEST);
     }
 
+    if (data.name !== undefined && typeof data.name === 'string' && data.name.trim() === '') {
+      throw new AdminError('Profile name cannot be blank', AdminErrorCode.INVALID_REQUEST);
+    }
+
     const updated = await DiscoveryProfileRepository.update(data.id, {
-      name: data.name,
+      name: data.name !== undefined ? data.name.trim() : undefined,
       description: data.description,
       mode: data.mode,
       enabled: data.enabled,
