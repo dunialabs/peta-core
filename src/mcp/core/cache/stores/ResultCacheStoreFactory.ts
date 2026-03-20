@@ -48,12 +48,15 @@ export async function createResultCacheStore(config: ResultCacheConfig): Promise
     }
 
     case 'redis': {
-      try {
-        if (!config.redisUrl) {
+      if (!config.redisUrl) {
+        logger.error('REDIS_URL is required when RESULT_CACHE_BACKEND=redis');
+        if (config.strictStartup) {
           throw new Error('REDIS_URL is required when RESULT_CACHE_BACKEND=redis');
         }
-
-        const redisStore = new RedisResultCacheStore(config.redisUrl);
+        return new NoopResultCacheStore();
+      }
+      const redisStore = new RedisResultCacheStore(config.redisUrl);
+      try {
         const health = await redisStore.healthcheck();
         if (!health.ok) {
           throw new Error(health.details ?? 'redis cache healthcheck failed');
@@ -61,6 +64,7 @@ export async function createResultCacheStore(config: ResultCacheConfig): Promise
         logger.info('Created Redis result cache store');
         return redisStore;
       } catch (error) {
+        await redisStore.close?.();
         logger.error({ error }, 'Failed to initialize Redis result cache store');
         if (config.strictStartup) {
           throw error;

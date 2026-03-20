@@ -1008,6 +1008,9 @@ export class ServerHandler {
       const newCapabilitiesObj =
         typeof newCapabilities === 'string' ? JSON.parse(newCapabilities) : newCapabilities;
       const oldCapabilitiesObj = oldCapabilities ? JSON.parse(oldCapabilities) : {};
+      oldCapabilitiesObj.tools = oldCapabilitiesObj.tools || {};
+      oldCapabilitiesObj.resources = oldCapabilitiesObj.resources || {};
+      oldCapabilitiesObj.prompts = oldCapabilitiesObj.prompts || {};
       let changed = false;
       if (newCapabilitiesObj.tools && Object.keys(newCapabilitiesObj.tools).length > 0) {
         for (const [toolName, toolConfig] of Object.entries(newCapabilitiesObj.tools)) {
