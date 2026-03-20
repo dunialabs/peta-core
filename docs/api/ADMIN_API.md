@@ -209,9 +209,14 @@ interface AdminResponse<T = any> {
 - `4` FigmaAuth
 - `5` GoogleCalendarAuth
 - `6` GithubAuth
-- `7` StripeAuth (reserved)
+- `7` ZendeskAuth
 - `8` CanvasAuth
 - `9` CanvaAuth
+- `10` GmailAuth
+- `11` GoogleDocsAuth
+- `12` GoogleSheetsAuth
+- `13` GoogleFormsAuth
+
 
 **ServerStatus**
 
@@ -771,7 +776,7 @@ null
 - `allowUserInput` (boolean, optional): Whether to allow user input, defaults to `false`
 - `proxyId` (number, optional): Associated proxy ID, defaults to `0`
 - `toolTmplId` (string, optional): Tool template ID, defaults to `null`
-- `authType` (number, required): Server authorization type, defaults to 1, API Key authentication, 2 Google OAuth authentication
+- `authType` (number, required): Server authorization type, defaults to `1` (`ApiKey`); see `ServerAuthType` enum above for all supported values
 - `configTemplate` (string, **required**): JSON config template string; must be non-empty and not `{}` (validated regardless of allowUserInput)
 - `category` (number, required): Server category. `1`: Template, `2`: CustomRemote, `3`: RestApi, `4`: Skills, `5`: CustomStdio
 - `lazyStartEnabled` (boolean, optional): Enable lazy loading for this server. When true, server stays managed in memory, delays startup until first use, and idle/unexpected closes can return it to `Sleeping` so it can be started again later. Defaults to `true`

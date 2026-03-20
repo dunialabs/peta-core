@@ -35,6 +35,10 @@ export enum ServerAuthType {
   ZendeskAuth = 7,   // Zendesk OAuth authentication
   CanvasAuth = 8,   // Canvas OAuth authentication
   CanvaAuth = 9,   // Canva OAuth authentication
+  GmailAuth = 10, // Gmail OAuth authentication
+  GoogleDocsAuth = 11, // Google Docs OAuth authentication
+  GoogleSheetsAuth = 12, // Google Sheets OAuth authentication
+  GoogleFormsAuth = 13, // Google Forms OAuth authentication
 }
 
 export enum MCPEventLogType {

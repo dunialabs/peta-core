@@ -475,6 +475,10 @@ export class ServerManager {
     switch (authType) {
       case ServerAuthType.GoogleAuth:
       case ServerAuthType.GoogleCalendarAuth:
+      case ServerAuthType.GmailAuth:
+      case ServerAuthType.GoogleDocsAuth:
+      case ServerAuthType.GoogleSheetsAuth:
+      case ServerAuthType.GoogleFormsAuth:
       case ServerAuthType.FigmaAuth:
       case ServerAuthType.GithubAuth:
       case ServerAuthType.CanvaAuth:
@@ -1311,6 +1315,10 @@ export class ServerManager {
     switch (authType) {
       case ServerAuthType.GoogleAuth:
       case ServerAuthType.GoogleCalendarAuth:
+      case ServerAuthType.GmailAuth:
+      case ServerAuthType.GoogleDocsAuth:
+      case ServerAuthType.GoogleSheetsAuth:
+      case ServerAuthType.GoogleFormsAuth:
       case ServerAuthType.NotionAuth:
       case ServerAuthType.FigmaAuth:
       case ServerAuthType.GithubAuth:

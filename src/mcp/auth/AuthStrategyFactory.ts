@@ -28,6 +28,10 @@ export class AuthStrategyFactory {
     switch (authType) {
       case ServerAuthType.GoogleAuth:
       case ServerAuthType.GoogleCalendarAuth:
+      case ServerAuthType.GmailAuth:
+      case ServerAuthType.GoogleDocsAuth:
+      case ServerAuthType.GoogleSheetsAuth:
+      case ServerAuthType.GoogleFormsAuth:
         return new GoogleAuthStrategy({
           clientId: config.clientId,
           clientSecret: config.clientSecret,
