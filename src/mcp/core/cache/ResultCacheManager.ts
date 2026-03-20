@@ -71,7 +71,7 @@ export class ResultCacheManager {
       return this.bypass('disabled_by_policy');
     }
 
-    const runtime = await this.resolveRuntimeContext(
+    const runtimeResult = await this.resolveRuntimeContext(
       operation,
       serverId,
       entityId,
@@ -80,9 +80,11 @@ export class ResultCacheManager {
       requestParams,
     );
 
-    if (!runtime) {
-      return this.miss();
+    if (runtimeResult.bypassReason) {
+      return this.bypass(runtimeResult.bypassReason);
     }
+
+    const runtime = runtimeResult.context;
 
     const entryKey = this.keyBuilder.buildResultEntryKey(
       this.config.keyPrefix,
@@ -138,7 +140,7 @@ export class ResultCacheManager {
       return false;
     }
 
-    const runtime = await this.resolveRuntimeContext(
+    const runtimeResult = await this.resolveRuntimeContext(
       operation,
       serverId,
       entityId,
@@ -146,9 +148,12 @@ export class ResultCacheManager {
       policy,
       requestParams,
     );
-    if (!runtime) {
+    if (runtimeResult.bypassReason) {
+      this.metrics.bypasses += 1;
       return false;
     }
+
+    const runtime = runtimeResult.context;
 
     const payloadBytes = this.estimatePayloadBytes(result);
     if (payloadBytes === null) {
@@ -232,7 +237,7 @@ export class ResultCacheManager {
       return 0;
     }
 
-    const runtime = await this.resolveRuntimeContext(
+    const runtimeResult = await this.resolveRuntimeContext(
       operation,
       serverId,
       entityId,
@@ -240,9 +245,11 @@ export class ResultCacheManager {
       policy,
       requestParams,
     );
-    if (!runtime) {
+    if (runtimeResult.bypassReason) {
       return 0;
     }
+
+    const runtime = runtimeResult.context;
 
     const admissionKey = this.keyBuilder.buildAdmissionKey(
       this.config.keyPrefix,
@@ -269,6 +276,53 @@ export class ResultCacheManager {
       this.metrics.bypasses += 1;
       this.logger.warn({ error, admissionKey }, 'Result cache admission record failed');
       return 0;
+    }
+  }
+
+  async clearAdmission(
+    operation: CacheOperationType,
+    serverId: string,
+    entityId: string,
+    scopeContext: CacheScopeContext,
+    policy: ResolvedCachePolicy,
+    requestParams: unknown,
+  ): Promise<void> {
+    if (!this.config.enabled || !policy.enabled) {
+      return;
+    }
+
+    const runtimeResult = await this.resolveRuntimeContext(
+      operation,
+      serverId,
+      entityId,
+      scopeContext,
+      policy,
+      requestParams,
+    );
+    if (runtimeResult.bypassReason) {
+      return;
+    }
+
+    const runtime = runtimeResult.context;
+
+    const admissionKey = this.keyBuilder.buildAdmissionKey(
+      this.config.keyPrefix,
+      operation,
+      serverId,
+      runtime.entityHash,
+      policy.scope,
+      runtime.scopeHash,
+      runtime.versions.globalVersion,
+      runtime.versions.serverVersion,
+      runtime.versions.entityVersion,
+      runtime.requestHash,
+    );
+
+    try {
+      await this.cacheStore.clearAdmission(admissionKey);
+    } catch (error) {
+      this.metrics.errors += 1;
+      this.logger.warn({ error, admissionKey }, 'Result cache admission clear failed');
     }
   }
 
@@ -338,7 +392,7 @@ export class ResultCacheManager {
     policy: ResolvedCachePolicy,
     requestParams: unknown,
   ): Promise<void> {
-    const runtime = await this.resolveRuntimeContext(
+    const runtimeResult = await this.resolveRuntimeContext(
       operation,
       serverId,
       entityId,
@@ -346,9 +400,11 @@ export class ResultCacheManager {
       policy,
       requestParams,
     );
-    if (!runtime) {
+    if (runtimeResult.bypassReason) {
       return;
     }
+
+    const runtime = runtimeResult.context;
 
     const entryKey = this.keyBuilder.buildResultEntryKey(
       this.config.keyPrefix,
@@ -409,16 +465,19 @@ export class ResultCacheManager {
     scopeContext: CacheScopeContext,
     policy: ResolvedCachePolicy,
     requestParams: unknown,
-  ): Promise<ResolvedRuntimeContext | null> {
+  ): Promise<
+    | { context: ResolvedRuntimeContext; bypassReason?: never }
+    | { context: null; bypassReason: CacheBypassReason }
+  > {
     const scopeIdentity = this.resolveScopeIdentity(scopeContext, policy.scope);
     if (!scopeIdentity) {
       if (policy.scope === CacheScope.User) {
-        this.bypass('missing_user_scope_identity');
+        return { context: null, bypassReason: 'missing_user_scope_identity' };
       }
       if (policy.scope === CacheScope.Tenant) {
-        this.bypass('missing_tenant_scope_identity');
+        return { context: null, bypassReason: 'missing_tenant_scope_identity' };
       }
-      return null;
+      return { context: null, bypassReason: 'missing_scope_identity' };
     }
 
     const scopeHash = this.keyBuilder.buildScopeHash(scopeIdentity);
@@ -440,21 +499,22 @@ export class ResultCacheManager {
       versions = { globalVersion, serverVersion, entityVersion };
     } catch (error) {
       this.metrics.errors += 1;
-      this.bypass('backend_unavailable');
       this.logger.warn(
         { error, operation, serverId, entityId },
         'Result cache namespace resolution failed',
       );
-      return null;
+      return { context: null, bypassReason: 'backend_unavailable' };
     }
 
     return {
-      scopeIdentity,
-      scopeHash,
-      requestHash,
-      entityHash,
-      versions,
-      namespaceKeys,
+      context: {
+        scopeIdentity,
+        scopeHash,
+        requestHash,
+        entityHash,
+        versions,
+        namespaceKeys,
+      },
     };
   }
 

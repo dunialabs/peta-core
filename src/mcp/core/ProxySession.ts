@@ -130,6 +130,7 @@ export class ProxySession {
   constructor(
     private sessionId: string,
     private userId: string,
+    private tenantId: string | undefined,
     private clientSession: ClientSession,
     private sessionLogger: SessionLogger,
     eventStore: PersistentEventStore,
@@ -475,7 +476,7 @@ export class ProxySession {
               'Cache bypassed: tool requires policy approval or is denied',
             );
           } else {
-            const scopeCtx: CacheScopeContext = { userId: this.userId };
+            const scopeCtx: CacheScopeContext = { userId: this.userId, tenantId: this.tenantId };
             try {
               const cached = await cacheService.lookup(
                 'tool',
@@ -849,50 +850,50 @@ export class ProxySession {
         }, 30_000);
       }
 
-      // Forward request to downstream server, passing signal and proxyRequestId
-      const serverResult = (await client.callTool(copyParams, CallToolResultSchema, {
-        signal: extra.signal, // Pass cancellation signal
-        relatedRequestId: proxyRequestId, // Use proxyRequestId as related ID
-      })) as CallToolResult;
-
-      targetServerContext.clearTimeout();
-
-      // Log response to client
-      await this.sessionLogger.logClientRequest({
-        action: MCPEventLogType.ResponseTool,
-        serverId: targetServerContext.serverEntity.serverId,
-        upstreamRequestId: String(originalRequestId),
-        uniformRequestId: uniformRequestId,
-        requestParams: request.params,
-        responseResult: serverResult,
-        duration: Date.now() - startTime,
-        statusCode: serverResult.isError ? 500 : 200,
-      });
-
       const cacheServiceForStore = ResultCacheService.instance;
-      if (cacheServiceForStore.enabled) {
-        const storeCachePolicy = cacheServiceForStore.resolveToolPolicy(
-          targetServerContext.capabilitiesConfig,
-          result.originalName,
-        );
+      const storeCachePolicy = cacheServiceForStore.resolveToolPolicy(
+        targetServerContext.capabilitiesConfig,
+        result.originalName,
+      );
+      const storeScopeCtx: CacheScopeContext = { userId: this.userId, tenantId: this.tenantId };
 
-        if (storeCachePolicy && !serverResult.isError && !approvalRequestId) {
-          const storeScopeCtx: CacheScopeContext = { userId: this.userId };
-          cacheServiceForStore
-            .storeResult(
+      // Use executeWithCache with singleflight for deduplication
+      const serverResult = storeCachePolicy
+        ? (
+            await cacheServiceForStore.executeWithCache(
               'tool',
               result.serverID,
               result.originalName,
               storeScopeCtx,
               storeCachePolicy,
               request.params.arguments,
-              serverResult,
+              async () => {
+                // Forward request to downstream server, passing signal and proxyRequestId
+                const rawResult = (await client.callTool(copyParams, CallToolResultSchema, {
+                  signal: extra.signal,
+                  relatedRequestId: proxyRequestId,
+                })) as CallToolResult;
+                targetServerContext.clearTimeout();
+                return rawResult;
+              },
             )
-            .catch((storeError) => {
-              this.logger.warn({ error: storeError, toolName }, 'Cache store failed');
-            });
-        }
-      }
+          ).result
+        : ((await client.callTool(copyParams, CallToolResultSchema, {
+            signal: extra.signal,
+            relatedRequestId: proxyRequestId,
+          })) as CallToolResult);
+
+      // Log response to client
+      await this.sessionLogger.logClientRequest({
+        action: MCPEventLogType.ResponseTool,
+        serverId: targetServerContext.serverEntity.serverId,
+        upstreamRequestId: String(originalRequestId),
+        uniformRequestId,
+        requestParams: request.params,
+        responseResult: serverResult,
+        duration: Date.now() - startTime,
+        statusCode: serverResult.isError ? 500 : 200,
+      });
 
       if (approvalRequestId) {
         if (serverResult.isError === true) {
@@ -1427,7 +1428,7 @@ export class ProxySession {
           result.originalName,
         );
         if (resCachePolicy) {
-          const resScopeCtx: CacheScopeContext = { userId: this.userId };
+          const resScopeCtx: CacheScopeContext = { userId: this.userId, tenantId: this.tenantId };
           try {
             const cached = await resCacheService.lookup(
               'resource',
@@ -1557,37 +1558,41 @@ export class ProxySession {
     let isReconnected: boolean | undefined;
 
     try {
-      // Forward request, passing signal and proxyRequestId
-      const serverResult = await client.readResource(requestCopy.params, {
-        signal: extra.signal, // Pass cancellation signal
-        relatedRequestId: proxyRequestId, // Use proxyRequestId as related ID
-      });
-
-      targetServer.clearTimeout();
-
       const resCacheServiceForStore = ResultCacheService.instance;
-      if (resCacheServiceForStore.enabled) {
-        const storeResCachePolicy = resCacheServiceForStore.resolveResourcePolicy(
-          targetServer.capabilitiesConfig,
-          result.originalName,
-        );
-        if (storeResCachePolicy) {
-          const storeResScopeCtx: CacheScopeContext = { userId: this.userId };
-          resCacheServiceForStore
-            .storeResult(
+      const storeResCachePolicy = resCacheServiceForStore.resolveResourcePolicy(
+        targetServer.capabilitiesConfig,
+        result.originalName,
+      );
+      const storeResScopeCtx: CacheScopeContext = {
+        userId: this.userId,
+        tenantId: this.tenantId,
+      };
+
+      // Use executeWithCache with singleflight for deduplication
+      const serverResult = storeResCachePolicy
+        ? (
+            await resCacheServiceForStore.executeWithCache(
               'resource',
               result.serverID,
               result.originalName,
               storeResScopeCtx,
               storeResCachePolicy,
               request.params,
-              serverResult,
+              async () => {
+                // Forward request, passing signal and proxyRequestId
+                const rawResult = await client.readResource(requestCopy.params, {
+                  signal: extra.signal,
+                  relatedRequestId: proxyRequestId,
+                });
+                targetServer.clearTimeout();
+                return rawResult;
+              },
             )
-            .catch((storeError) => {
-              this.logger.warn({ error: storeError, resourceUri }, 'Resource cache store failed');
-            });
-        }
-      }
+          ).result
+        : await client.readResource(requestCopy.params, {
+            signal: extra.signal,
+            relatedRequestId: proxyRequestId,
+          });
 
       try {
         // Log response to client
@@ -1885,7 +1890,10 @@ export class ProxySession {
           parseResult.originalName,
         );
         if (promptCachePolicy) {
-          const promptScopeCtx: CacheScopeContext = { userId: this.userId };
+          const promptScopeCtx: CacheScopeContext = {
+            userId: this.userId,
+            tenantId: this.tenantId,
+          };
           try {
             const cached = await promptCacheService.lookup(
               'prompt',
@@ -2008,37 +2016,42 @@ export class ProxySession {
         ...requestCopy.params._meta,
         proxyContext: proxyContext,
       };
-      // Forward request, passing signal and proxyRequestId
-      const result = await client.getPrompt(requestCopy.params, {
-        signal: extra.signal, // Pass cancellation signal
-        relatedRequestId: proxyRequestId, // Use proxyRequestId as related ID
-      });
-      targetServerContext.clearTimeout();
 
       const promptCacheServiceForStore = ResultCacheService.instance;
-      if (promptCacheServiceForStore.enabled) {
-        const storePromptCachePolicy = promptCacheServiceForStore.resolvePromptPolicy(
-          targetServerContext.capabilitiesConfig,
-          parseResult.originalName,
-        );
+      const storePromptCachePolicy = promptCacheServiceForStore.resolvePromptPolicy(
+        targetServerContext.capabilitiesConfig,
+        parseResult.originalName,
+      );
+      const storePromptScopeCtx: CacheScopeContext = {
+        userId: this.userId,
+        tenantId: this.tenantId,
+      };
 
-        if (storePromptCachePolicy) {
-          const storePromptScopeCtx: CacheScopeContext = { userId: this.userId };
-          promptCacheServiceForStore
-            .storeResult(
+      // Use executeWithCache with singleflight for deduplication
+      const result = storePromptCachePolicy
+        ? (
+            await promptCacheServiceForStore.executeWithCache(
               'prompt',
               parseResult.serverID,
               parseResult.originalName,
               storePromptScopeCtx,
               storePromptCachePolicy,
               request.params.arguments,
-              result,
+              async () => {
+                // Forward request, passing signal and proxyRequestId
+                const rawResult = await client.getPrompt(requestCopy.params, {
+                  signal: extra.signal,
+                  relatedRequestId: proxyRequestId,
+                });
+                targetServerContext.clearTimeout();
+                return rawResult;
+              },
             )
-            .catch((storeError) => {
-              this.logger.warn({ error: storeError, promptName }, 'Prompt cache store failed');
-            });
-        }
-      }
+          ).result
+        : await client.getPrompt(requestCopy.params, {
+            signal: extra.signal,
+            relatedRequestId: proxyRequestId,
+          });
 
       try {
         // Log response

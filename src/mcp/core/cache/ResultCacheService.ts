@@ -121,7 +121,7 @@ export class ResultCacheService {
       return false;
     }
 
-    return this.manager.store(
+    const stored = await this.manager.store(
       operation,
       serverId,
       entityId,
@@ -131,6 +131,21 @@ export class ResultCacheService {
       result,
       admissionCount,
     );
+
+    // Clear admission counter after successful promotion (best-effort)
+    // This prevents stale admission state from causing immediate re-promotion after TTL expiry
+    if (stored) {
+      this.manager
+        .clearAdmission(operation, serverId, entityId, scopeContext, policy, requestParams)
+        .catch((error) => {
+          this.logger.debug(
+            { error, operation, serverId, entityId },
+            'Background admission clear failed',
+          );
+        });
+    }
+
+    return stored;
   }
 
   async executeWithCache<T>(
@@ -156,7 +171,11 @@ export class ResultCacheService {
       return { result: lookupResult.entry.payload as T, cacheHit: true };
     }
 
-    const cacheKeyForSingleflight = `${operation}:${serverId}:${entityId}:${JSON.stringify(requestParams)}`;
+    const scopeId = scopeContext.tenantId ?? scopeContext.userId ?? 'anonymous';
+    const sortedParams = requestParams
+      ? JSON.stringify(requestParams, Object.keys(requestParams).sort())
+      : 'null';
+    const cacheKeyForSingleflight = `${operation}:${serverId}:${entityId}:${scopeId}:${sortedParams}`;
     const { result, isLeader } = await this.singleflight.execute(cacheKeyForSingleflight, factory);
 
     if (isLeader) {

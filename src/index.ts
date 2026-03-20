@@ -469,7 +469,17 @@ export async function startApplication() {
       resultCacheStore = new NoopResultCacheStore();
     } else {
       resultCacheStore = await createResultCacheStore(cacheConfig);
-      appLogger.info({ backend: cacheConfig.backend }, 'Result cache store initialized');
+      // Track effective backend for health reporting
+      const effectiveBackend =
+        resultCacheStore instanceof NoopResultCacheStore ? 'noop' : cacheConfig.backend;
+      if (effectiveBackend !== cacheConfig.backend) {
+        appLogger.warn(
+          { configured: cacheConfig.backend, effective: effectiveBackend },
+          'Cache backend fell back to noop - check logs above for initialization errors',
+        );
+      } else {
+        appLogger.info({ backend: cacheConfig.backend }, 'Result cache store initialized');
+      }
     }
 
     const resultCacheManager = new ResultCacheManager(

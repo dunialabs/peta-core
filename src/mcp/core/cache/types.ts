@@ -67,6 +67,7 @@ export type CacheBypassReason =
   | 'non_cacheable_dangerous_tool'
   | 'missing_user_scope_identity'
   | 'missing_tenant_scope_identity'
+  | 'missing_scope_identity'
   | 'payload_too_large'
   | 'serialization_failed'
   | 'deserialization_failed'
