@@ -4,10 +4,13 @@ import { ResultCacheService } from '../../mcp/core/cache/ResultCacheService.js';
 import {
   AdmissionPolicy,
   CacheScope,
+  type CachePolicyConfig,
   type CacheOperationType,
   type CacheScopeContext,
   type ResolvedCachePolicy,
 } from '../../mcp/core/cache/types.js';
+import type { ServerConfigCapabilities } from '../../mcp/types/mcp.js';
+import { ServerRepository } from '../../repositories/ServerRepository.js';
 import { MCPEventLogType } from '../../types/enums.js';
 import { AdminError, AdminErrorCode, type AdminRequest } from '../../types/admin.types.js';
 
@@ -35,31 +38,60 @@ export class CacheHandler {
     const serverId = typeof data?.serverId === 'string' ? data.serverId : undefined;
 
     const config = cacheService.getConfigSnapshot();
+    const globalConfig = {
+      enabled: config.enabled,
+      backend: config.backend,
+      defaultTtlSeconds: config.defaultTtlSeconds,
+      defaultAdmissionPolicy: config.defaultAdmissionPolicy,
+      defaultAdmissionWindowSeconds: config.defaultAdmissionWindowSeconds,
+      maxEntryBytes: config.maxEntryBytes,
+    };
 
     if (!serverId) {
-      return {
-        globalConfig: {
-          enabled: config.enabled,
-          backend: config.backend,
-          defaultTtlSeconds: config.defaultTtlSeconds,
-          defaultAdmissionPolicy: config.defaultAdmissionPolicy,
-          defaultAdmissionWindowSeconds: config.defaultAdmissionWindowSeconds,
-          maxEntryBytes: config.maxEntryBytes,
-        },
-      };
+      return { globalConfig };
     }
 
-    return {
-      serverId,
-      globalConfig: {
-        enabled: config.enabled,
-        backend: config.backend,
-        defaultTtlSeconds: config.defaultTtlSeconds,
-        defaultAdmissionPolicy: config.defaultAdmissionPolicy,
-        defaultAdmissionWindowSeconds: config.defaultAdmissionWindowSeconds,
-        maxEntryBytes: config.maxEntryBytes,
-      },
-    };
+    const result: Record<string, unknown> = { serverId, globalConfig };
+
+    try {
+      const server = await ServerRepository.findByServerId(serverId);
+      if (server?.capabilities) {
+        const caps: ServerConfigCapabilities = JSON.parse(server.capabilities);
+        const tools: Record<string, CachePolicyConfig> = {};
+        const prompts: Record<string, CachePolicyConfig> = {};
+        const resources: { exact: Record<string, CachePolicyConfig>; patterns: unknown[] } = {
+          exact: {},
+          patterns: [],
+        };
+
+        for (const [name, toolCfg] of Object.entries(caps.tools ?? {})) {
+          if (toolCfg.cache) {
+            tools[name] = toolCfg.cache;
+          }
+        }
+        for (const [name, promptCfg] of Object.entries(caps.prompts ?? {})) {
+          if (promptCfg.cache) {
+            prompts[name] = promptCfg.cache;
+          }
+        }
+        for (const [uri, resCfg] of Object.entries(caps.resources ?? {})) {
+          if (resCfg.cache) {
+            resources.exact[uri] = resCfg.cache;
+          }
+        }
+        if (caps.resourceCachePolicies?.patterns) {
+          resources.patterns = caps.resourceCachePolicies.patterns;
+        }
+
+        result.tools = tools;
+        result.prompts = prompts;
+        result.resources = resources;
+      }
+    } catch (error) {
+      this.logger.warn({ error, serverId }, 'Failed to extract per-entity cache policies');
+    }
+
+    return result;
   }
 
   async handlePurgeGlobal(_request: AdminRequest): Promise<unknown> {

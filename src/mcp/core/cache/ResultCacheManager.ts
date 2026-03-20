@@ -116,8 +116,13 @@ export class ResultCacheManager {
     if (!entry) {
       this.metrics.errors += 1;
       this.metrics.bypasses += 1;
-      this.metrics.misses += 1;
       this.logger.warn({ entryKey }, 'Result cache deserialize failed');
+
+      // Best-effort delete the corrupt entry to prevent repeated bad reads
+      this.cacheStore.delete(entryKey).catch((deleteError) => {
+        this.logger.debug({ error: deleteError, entryKey }, 'Failed to delete corrupt cache entry');
+      });
+
       return { hit: false, bypassReason: 'deserialization_failed' };
     }
 
@@ -600,7 +605,6 @@ export class ResultCacheManager {
 
   private bypass(reason: CacheBypassReason): CacheLookupResult {
     this.metrics.bypasses += 1;
-    this.metrics.misses += 1;
     return { hit: false, bypassReason: reason };
   }
 

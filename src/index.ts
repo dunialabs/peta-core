@@ -463,32 +463,33 @@ export async function startApplication() {
       }),
     );
 
-    const cacheConfig = loadResultCacheConfig();
-    if (!cacheConfig.enabled) {
+    const requestedCacheConfig = loadResultCacheConfig();
+    let effectiveCacheConfig = requestedCacheConfig;
+
+    if (!requestedCacheConfig.enabled) {
       appLogger.info('Result cache is disabled');
       resultCacheStore = new NoopResultCacheStore();
     } else {
-      resultCacheStore = await createResultCacheStore(cacheConfig);
-      // Track effective backend for health reporting
-      const effectiveBackend =
-        resultCacheStore instanceof NoopResultCacheStore ? 'noop' : cacheConfig.backend;
-      if (effectiveBackend !== cacheConfig.backend) {
+      resultCacheStore = await createResultCacheStore(requestedCacheConfig);
+      const fellBackToNoop = resultCacheStore instanceof NoopResultCacheStore;
+      if (fellBackToNoop) {
         appLogger.warn(
-          { configured: cacheConfig.backend, effective: effectiveBackend },
+          { configured: requestedCacheConfig.backend, effective: 'noop' },
           'Cache backend fell back to noop - check logs above for initialization errors',
         );
+        effectiveCacheConfig = { ...requestedCacheConfig, backend: 'noop' as const };
       } else {
-        appLogger.info({ backend: cacheConfig.backend }, 'Result cache store initialized');
+        appLogger.info({ backend: requestedCacheConfig.backend }, 'Result cache store initialized');
       }
     }
 
     const resultCacheManager = new ResultCacheManager(
       resultCacheStore,
-      cacheConfig,
+      effectiveCacheConfig,
       createLogger('ResultCacheManager'),
     );
     const resultCacheService = ResultCacheService.initialize(
-      cacheConfig,
+      effectiveCacheConfig,
       resultCacheStore,
       resultCacheManager,
     );

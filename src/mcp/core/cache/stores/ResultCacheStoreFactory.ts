@@ -27,16 +27,17 @@ export async function createResultCacheStore(config: ResultCacheConfig): Promise
       return new NoopResultCacheStore();
 
     case 'db': {
+      const dbStore = new DbResultCacheStore();
       try {
-        const dbStore = new DbResultCacheStore();
-        dbStore.startSweeper(config.dbSweepIntervalSeconds, config.dbSweepBatchSize);
         const health = await dbStore.healthcheck();
         if (!health.ok) {
           throw new Error(health.details ?? 'db cache healthcheck failed');
         }
+        dbStore.startSweeper(config.dbSweepIntervalSeconds, config.dbSweepBatchSize);
         logger.info('Created DB result cache store');
         return dbStore;
       } catch (error) {
+        await dbStore.close?.();
         logger.error({ error }, 'Failed to initialize DB result cache store');
         if (config.strictStartup) {
           throw error;

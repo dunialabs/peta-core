@@ -2,16 +2,18 @@ import { resultCacheConfig, type ResultCacheConfig } from '../../../config/resul
 import { createLogger, type Logger } from '../../../logger/index.js';
 import type { DangerLevel } from '../../../types/enums.js';
 import type { ServerConfigCapabilities } from '../../types/mcp.js';
+import { CacheKeyBuilder } from './CacheKeyBuilder.js';
 import { CachePolicyResolver } from './CachePolicyResolver.js';
 import { ResultCacheManager } from './ResultCacheManager.js';
 import { SingleflightRegistry } from './SingleflightRegistry.js';
 import { NoopResultCacheStore } from './stores/NoopResultCacheStore.js';
 import type { ResultCacheStore } from './stores/ResultCacheStore.js';
-import type {
-  CacheLookupResult,
-  CacheOperationType,
-  CacheScopeContext,
-  ResolvedCachePolicy,
+import {
+  AdmissionPolicy,
+  type CacheLookupResult,
+  type CacheOperationType,
+  type CacheScopeContext,
+  type ResolvedCachePolicy,
 } from './types.js';
 
 export class ResultCacheService {
@@ -20,6 +22,7 @@ export class ResultCacheService {
   private readonly manager: ResultCacheManager;
   private readonly policyResolver: CachePolicyResolver;
   private readonly singleflight: SingleflightRegistry;
+  private readonly keyBuilder: CacheKeyBuilder;
   private readonly config: ResultCacheConfig;
   private readonly logger: Logger;
   private readonly store: ResultCacheStore;
@@ -35,6 +38,7 @@ export class ResultCacheService {
     this.manager = manager ?? new ResultCacheManager(this.store, config, this.logger);
     this.policyResolver = new CachePolicyResolver();
     this.singleflight = new SingleflightRegistry();
+    this.keyBuilder = new CacheKeyBuilder();
 
     this.logger.info(
       { enabled: config.enabled, backend: config.backend },
@@ -108,6 +112,19 @@ export class ResultCacheService {
     requestParams: unknown,
     result: unknown,
   ): Promise<boolean> {
+    if (policy.admissionPolicy === AdmissionPolicy.Immediate) {
+      return this.manager.store(
+        operation,
+        serverId,
+        entityId,
+        scopeContext,
+        policy,
+        requestParams,
+        result,
+        0,
+      );
+    }
+
     const admissionCount = await this.manager.recordAdmission(
       operation,
       serverId,
@@ -132,8 +149,6 @@ export class ResultCacheService {
       admissionCount,
     );
 
-    // Clear admission counter after successful promotion (best-effort)
-    // This prevents stale admission state from causing immediate re-promotion after TTL expiry
     if (stored) {
       this.manager
         .clearAdmission(operation, serverId, entityId, scopeContext, policy, requestParams)
@@ -171,11 +186,18 @@ export class ResultCacheService {
       return { result: lookupResult.entry.payload as T, cacheHit: true };
     }
 
-    const scopeId = scopeContext.tenantId ?? scopeContext.userId ?? 'anonymous';
-    const sortedParams = requestParams
-      ? JSON.stringify(requestParams, Object.keys(requestParams).sort())
-      : 'null';
-    const cacheKeyForSingleflight = `${operation}:${serverId}:${entityId}:${scopeId}:${sortedParams}`;
+    const scopeIdentity =
+      policy.scope === 'global'
+        ? 'global'
+        : policy.scope === 'tenant'
+          ? (scopeContext.tenantId ?? 'none')
+          : (scopeContext.userId ?? 'none');
+    const requestHash = this.keyBuilder.canonicalizeParams(
+      requestParams,
+      policy.denyFields,
+      policy.allowFields,
+    );
+    const cacheKeyForSingleflight = `sf:${operation}:${serverId}:${entityId}:${scopeIdentity}:${requestHash}`;
     const { result, isLeader } = await this.singleflight.execute(cacheKeyForSingleflight, factory);
 
     if (isLeader) {
