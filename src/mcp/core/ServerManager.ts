@@ -509,6 +509,20 @@ export class ServerManager {
         };
         break;
 
+      case ServerAuthType.PipedriveAuth: {
+        const apiDomain = launchConfig.oauth?.apiDomain;
+        if (!apiDomain || typeof apiDomain !== 'string') {
+          throw new Error('[ServerManager] Missing apiDomain for server auth type PipedriveAuth');
+        }
+
+        launchConfig.env = {
+          ...launchConfig.env,
+          apiDomain: apiDomain,
+          accessToken: accessToken,
+        };
+        break;
+      }
+
       default:
         break;
     }
@@ -1324,6 +1338,7 @@ export class ServerManager {
       case ServerAuthType.GithubAuth:
       case ServerAuthType.CanvaAuth:
       case ServerAuthType.ZendeskAuth:
+      case ServerAuthType.PipedriveAuth:
         serverContext.userToken = token;
         await this.initializeOAuthWithRefresh(serverContext, launchConfig);
         break;
@@ -1366,6 +1381,15 @@ export class ServerManager {
     ) {
       throw new Error(
         `[ServerManager] Missing OAuth tokenUrl for server ${serverContext.serverID} (ZendeskAuth)`
+      );
+    }
+
+    if (
+      authType === ServerAuthType.PipedriveAuth &&
+      (!launchConfig.oauth.apiDomain || typeof launchConfig.oauth.apiDomain !== 'string')
+    ) {
+      throw new Error(
+        `[ServerManager] Missing OAuth apiDomain for server ${serverContext.serverID} (PipedriveAuth)`
       );
     }
 

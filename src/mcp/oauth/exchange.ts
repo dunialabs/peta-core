@@ -96,6 +96,10 @@ export async function exchangeAuthorizationCode(
   // Extract tokens from response
   const accessToken = data.access_token as string;
   const refreshToken = data.refresh_token as string | undefined;
+  const apiDomain =
+    typeof data.api_domain === 'string' && data.api_domain.trim() !== ''
+      ? data.api_domain
+      : undefined;
 
   // Resolve expiration
   const responseExpiresIn =
@@ -108,6 +112,7 @@ export async function exchangeAuthorizationCode(
   return {
     accessToken,
     refreshToken,
+    apiDomain,
     expiresIn,
     expiresAt,
     raw: data,

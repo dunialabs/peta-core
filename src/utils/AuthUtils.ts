@@ -243,6 +243,8 @@ export class AuthUtils {
         return 'canva';
       case ServerAuthType.ZendeskAuth:
         return 'zendesk';
+      case ServerAuthType.PipedriveAuth:
+        return 'pipedrive';
       case ServerAuthType.ApiKey:
         return undefined;
       default:

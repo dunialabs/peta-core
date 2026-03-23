@@ -15,6 +15,7 @@ import { stripeAdapter } from './stripe.js';
 import { zendeskAdapter } from './zendesk.js';
 import { canvasAdapter } from './canvas.js';
 import { canvaAdapter } from './canva.js';
+import { pipedriveAdapter } from './pipedrive.js';
 
 /**
  * Map of provider names to their adapters
@@ -28,6 +29,7 @@ const providers: Map<string, ProviderAdapter> = new Map([
   ['zendesk', zendeskAdapter],
   ['canvas', canvasAdapter],
   ['canva', canvaAdapter],
+  ['pipedrive', pipedriveAdapter],
 ]);
 
 /**

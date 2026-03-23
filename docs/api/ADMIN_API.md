@@ -216,6 +216,7 @@ interface AdminResponse<T = any> {
 - `11` GoogleDocsAuth
 - `12` GoogleSheetsAuth
 - `13` GoogleFormsAuth
+- `14` PipedriveAuth
 
 
 **ServerStatus**
