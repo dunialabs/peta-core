@@ -391,7 +391,7 @@ export class ProxySession {
     let approvalRequestId: string | null = null;
     let approvalHeartbeatTimer: NodeJS.Timeout | null = null;
 
-    const result = this.clientSession.parseName(toolName);
+    const result = this.clientSession.resolveToolName(toolName);
 
     if (!result) {
       const errorTime = Date.now();
@@ -1177,6 +1177,78 @@ export class ProxySession {
     return firstText.text.slice(0, 180);
   }
 
+  private rewriteAppResourceResult(
+    serverResult: ReadResourceResult,
+    targetServerId: string,
+  ): ReadResourceResult {
+    // Rewrite app resource payloads into the upstream proxy namespace so embedded tool/resource
+    // references continue to work after namespacing multiple downstream servers.
+    const targetServer = ServerManager.instance.getServerContext(
+      targetServerId,
+      this.clientSession.userId,
+    );
+
+    if (!targetServer) {
+      return serverResult;
+    }
+
+    const replaceMap = new Map<string, string>();
+
+    const toolsData = targetServer.tools?.tools ?? targetServer.cachedTools?.tools ?? [];
+    for (const tool of toolsData) {
+      replaceMap.set(tool.name, this.clientSession.generateNewName(targetServer.id, tool.name));
+    }
+
+    const resourcesData =
+      targetServer.resources?.resources ?? targetServer.cachedResources?.resources ?? [];
+    for (const resource of resourcesData) {
+      replaceMap.set(
+        resource.uri,
+        this.clientSession.generateNewName(targetServer.id, resource.uri),
+      );
+    }
+
+    const replacements = Array.from(replaceMap.entries()).sort((a, b) => b[0].length - a[0].length);
+
+    const rewrittenContents = serverResult.contents.map((content) => {
+      const rewrittenUri =
+        typeof content.uri === 'string'
+          ? this.clientSession.generateNewName(targetServer.id, content.uri)
+          : content.uri;
+
+      if ('text' in content && typeof content.text === 'string') {
+        let rewrittenText = content.text;
+        if (
+          typeof content.mimeType === 'string' &&
+          content.mimeType.startsWith('text/html')
+        ) {
+          // The current MCP Apps we proxy embed references directly in HTML bundles, so a targeted
+          // string replacement is sufficient here. If app assets become more dynamic, this logic
+          // should be replaced with a more structured rewrite strategy.
+          for (const [originalValue, proxiedValue] of replacements) {
+            rewrittenText = rewrittenText.split(originalValue).join(proxiedValue);
+          }
+        }
+
+        return {
+          ...content,
+          uri: rewrittenUri,
+          text: rewrittenText,
+        };
+      }
+
+      return {
+        ...content,
+        uri: rewrittenUri,
+      };
+    });
+
+    return {
+      ...serverResult,
+      contents: rewrittenContents,
+    };
+  }
+
   /**
    * Handle resources/list request - aggregate resources from all servers
    */
@@ -1246,7 +1318,7 @@ export class ProxySession {
     const uniformRequestId = LogService.getInstance().generateUniformRequestId(this.sessionId);
     const originalRequestId = extra.requestId;
 
-    const result = this.clientSession.parseName(resourceUri);
+    const result = this.clientSession.resolveResourceUri(resourceUri);
 
     if (!result) {
       const errorTime = Date.now();
@@ -1347,6 +1419,8 @@ export class ProxySession {
     };
 
     const requestCopy = JSON.parse(JSON.stringify(request));
+    // Downstream servers expect their original resource URI, while the upstream client may use the
+    // proxied URI exposed by this gateway.
     requestCopy.params.uri = result.originalName;
     requestCopy.params._meta = {
       ...requestCopy.params._meta,
@@ -1361,6 +1435,7 @@ export class ProxySession {
         signal: extra.signal, // Pass cancellation signal
         relatedRequestId: proxyRequestId, // Use proxyRequestId as related ID
       });
+      const rewrittenResult = this.rewriteAppResourceResult(serverResult, result.serverID);
 
       targetServer.clearTimeout();
 
@@ -1372,7 +1447,7 @@ export class ProxySession {
           upstreamRequestId: String(originalRequestId),
           uniformRequestId: uniformRequestId,
           requestParams: request.params,
-          responseResult: serverResult,
+          responseResult: rewrittenResult,
           duration: Date.now() - startTime,
           statusCode: 200,
         });
@@ -1380,7 +1455,7 @@ export class ProxySession {
         this.logger.error({ error }, 'Error logging resource read response');
       }
 
-      return serverResult;
+      return rewrittenResult;
     } catch (error) {
       this.logger.error({ error }, 'Error handling resource read');
       isReconnected = await targetServer.recordTimeout(error);
