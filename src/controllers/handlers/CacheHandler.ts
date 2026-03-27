@@ -171,6 +171,19 @@ export class CacheHandler {
     const policy = await this.resolvePurgeExactPolicy(cacheService, operation, serverId, entityId, data);
     const scopeContext = this.parseScopeContext(data.scopeContext);
 
+    if (policy.scope === CacheScope.User && !scopeContext.userId) {
+      throw new AdminError(
+        'scopeContext.userId is required for user-scoped exact purge',
+        AdminErrorCode.INVALID_REQUEST,
+      );
+    }
+    if (policy.scope === CacheScope.Tenant && !scopeContext.tenantId) {
+      throw new AdminError(
+        'scopeContext.tenantId is required for tenant-scoped exact purge',
+        AdminErrorCode.INVALID_REQUEST,
+      );
+    }
+
     await cacheService.purgeExact(
       operation,
       serverId,
