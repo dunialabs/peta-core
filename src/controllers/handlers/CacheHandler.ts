@@ -35,7 +35,10 @@ export class CacheHandler {
   async handleGetPolicy(request: AdminRequest): Promise<unknown> {
     const cacheService = this.requireService();
     const data = request.data as Record<string, unknown> | undefined;
-    const serverId = typeof data?.serverId === 'string' ? data.serverId : undefined;
+    let serverId: string | undefined;
+    if (data?.serverId !== undefined) {
+      serverId = this.requireNonEmptyString(data.serverId, 'serverId');
+    }
 
     const config = cacheService.getConfigSnapshot();
     const globalConfig = {
@@ -121,11 +124,8 @@ export class CacheHandler {
   async handlePurgeServer(request: AdminRequest): Promise<unknown> {
     const cacheService = this.requireService();
     const data = this.requireObject(request.data);
-    const { serverId } = data;
+    const serverId = this.requireNonEmptyString(data.serverId, 'serverId');
     const reason = this.parseOptionalReason(data.reason);
-    if (typeof serverId !== 'string' || serverId.trim() === '') {
-      throw new AdminError('Missing required field: serverId', AdminErrorCode.INVALID_REQUEST);
-    }
 
     await cacheService.purgeServer(serverId);
     await this.logPurgeAction('server', { serverId }, reason);
@@ -281,7 +281,7 @@ export class CacheHandler {
     if (typeof value !== 'string' || value.trim() === '') {
       throw new AdminError(`Missing required field: ${fieldName}`, AdminErrorCode.INVALID_REQUEST);
     }
-    return value;
+    return value.trim();
   }
 
   private parseOptionalReason(value: unknown): string | undefined {
