@@ -227,7 +227,10 @@ export class ResultCacheService {
       policy.denyFields,
       policy.allowFields,
     );
-    const cacheKeyForSingleflight = `sf:${operation}:${serverId}:${entityId}:${scopeIdentity}:${requestHash}`;
+    const versionSuffix = lookupResult.lookupVersions
+      ? `:${lookupResult.lookupVersions.globalVersion}:${lookupResult.lookupVersions.serverVersion}:${lookupResult.lookupVersions.entityVersion}`
+      : '';
+    const cacheKeyForSingleflight = `sf:${operation}:${serverId}:${entityId}:${scopeIdentity}:${requestHash}${versionSuffix}`;
     const { result, isLeader, requestCount } = await this.singleflight.execute(
       cacheKeyForSingleflight,
       factory,
