@@ -508,7 +508,8 @@ export class AuthMiddleware {
       launchConfigs: user.launchConfigs,
       authenticatedAt: session.authContext.authenticatedAt,
       expiresAt: user.expiresAt && user.expiresAt > 0 ? user.expiresAt : null,
-      rateLimit: user.ratelimit
+      rateLimit: user.ratelimit,
+      tenantId: user.proxyId > 0 ? String(user.proxyId) : undefined,
     };
 
     // Update authentication context in session
