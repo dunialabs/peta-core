@@ -55,10 +55,17 @@ export interface ResolvedCachePolicy {
   maxEntryBytes: number;
 }
 
+export type CacheNamespaceVersions = {
+  globalVersion: number;
+  serverVersion: number;
+  entityVersion: number;
+};
+
 export interface CacheLookupResult {
   hit: boolean;
   entry?: CacheEntryEnvelope;
   bypassReason?: CacheBypassReason;
+  lookupVersions?: CacheNamespaceVersions;
 }
 
 export type CacheBypassReason =

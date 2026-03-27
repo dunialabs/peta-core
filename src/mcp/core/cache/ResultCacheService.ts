@@ -13,6 +13,7 @@ import {
   CacheScope,
   type CacheBypassReason,
   type CacheLookupResult,
+  type CacheNamespaceVersions,
   type CacheOperationType,
   type CacheScopeContext,
   type ResolvedCachePolicy,
@@ -113,7 +114,7 @@ export class ResultCacheService {
     policy: ResolvedCachePolicy,
     requestParams: unknown,
     result: unknown,
-    options?: { observationIncrement?: number },
+    options?: { observationIncrement?: number; capturedVersions?: CacheNamespaceVersions },
   ): Promise<boolean> {
     if (operation === 'tool' && !this.isToolResultCacheable(result)) {
       this.recordStoreBypass('errors_not_cacheable');
@@ -130,6 +131,7 @@ export class ResultCacheService {
         requestParams,
         result,
         0,
+        options?.capturedVersions,
       );
     }
 
@@ -143,6 +145,7 @@ export class ResultCacheService {
         scopeContext,
         policy,
         requestParams,
+        options?.capturedVersions,
       );
     }
 
@@ -159,6 +162,7 @@ export class ResultCacheService {
       requestParams,
       result,
       admissionCount,
+      options?.capturedVersions,
     );
 
     if (stored) {
@@ -240,7 +244,10 @@ export class ResultCacheService {
         policy,
         requestParams,
         result,
-        { observationIncrement },
+        {
+          observationIncrement,
+          capturedVersions: lookupResult.lookupVersions,
+        },
       ).catch((error) => {
         this.logger.warn({ error, operation, serverId, entityId }, 'Background cache store failed');
       });

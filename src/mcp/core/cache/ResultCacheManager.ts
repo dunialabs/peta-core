@@ -8,16 +8,13 @@ import {
   CacheScope,
   type CacheBypassReason,
   type CacheLookupResult,
+  type CacheNamespaceVersions,
   type CacheOperationType,
   type CacheScopeContext,
   type ResolvedCachePolicy,
 } from './types.js';
 
-type VersionSet = {
-  globalVersion: number;
-  serverVersion: number;
-  entityVersion: number;
-};
+type VersionSet = CacheNamespaceVersions;
 
 type ResolvedRuntimeContext = {
   scopeIdentity: string;
@@ -105,11 +102,11 @@ export class ResultCacheManager {
     } catch (error) {
       this.metrics.errors += 1;
       this.logger.warn({ error, entryKey }, 'Result cache get failed');
-      return this.bypass('backend_unavailable');
+      return this.bypass('backend_unavailable', runtime.versions);
     }
 
     if (!buffer) {
-      return this.miss();
+      return this.miss(runtime.versions);
     }
 
     const entry = this.serializer.deserialize(buffer);
@@ -123,7 +120,7 @@ export class ResultCacheManager {
         this.logger.debug({ error: deleteError, entryKey }, 'Failed to delete corrupt cache entry');
       });
 
-      return { hit: false, bypassReason: 'deserialization_failed' };
+      return { hit: false, bypassReason: 'deserialization_failed', lookupVersions: runtime.versions };
     }
 
     this.metrics.hits += 1;
@@ -139,6 +136,7 @@ export class ResultCacheManager {
     requestParams: unknown,
     result: unknown,
     admissionObservations: number,
+    capturedVersions?: CacheNamespaceVersions,
   ): Promise<boolean> {
     if (!this.config.enabled || !policy.enabled) {
       this.metrics.bypasses += 1;
@@ -152,6 +150,7 @@ export class ResultCacheManager {
       scopeContext,
       policy,
       requestParams,
+      capturedVersions,
     );
     if (runtimeResult.bypassReason) {
       this.metrics.bypasses += 1;
@@ -237,6 +236,7 @@ export class ResultCacheManager {
     scopeContext: CacheScopeContext,
     policy: ResolvedCachePolicy,
     requestParams: unknown,
+    capturedVersions?: CacheNamespaceVersions,
   ): Promise<number> {
     if (!this.config.enabled || !policy.enabled) {
       return 0;
@@ -249,6 +249,7 @@ export class ResultCacheManager {
       scopeContext,
       policy,
       requestParams,
+      capturedVersions,
     );
     if (runtimeResult.bypassReason) {
       return 0;
@@ -470,6 +471,7 @@ export class ResultCacheManager {
     scopeContext: CacheScopeContext,
     policy: ResolvedCachePolicy,
     requestParams: unknown,
+    capturedVersions?: CacheNamespaceVersions,
   ): Promise<
     | { context: ResolvedRuntimeContext; bypassReason?: never }
     | { context: null; bypassReason: CacheBypassReason }
@@ -495,20 +497,24 @@ export class ResultCacheManager {
     const namespaceKeys = this.getNamespaceKeys(operation, serverId, entityId);
 
     let versions: VersionSet;
-    try {
-      const [globalVersion, serverVersion, entityVersion] = await Promise.all([
-        this.cacheStore.getNamespaceVersion(namespaceKeys.global),
-        this.cacheStore.getNamespaceVersion(namespaceKeys.server),
-        this.cacheStore.getNamespaceVersion(namespaceKeys.entity),
-      ]);
-      versions = { globalVersion, serverVersion, entityVersion };
-    } catch (error) {
-      this.metrics.errors += 1;
-      this.logger.warn(
-        { error, operation, serverId, entityId },
-        'Result cache namespace resolution failed',
-      );
-      return { context: null, bypassReason: 'backend_unavailable' };
+    if (capturedVersions) {
+      versions = capturedVersions;
+    } else {
+      try {
+        const [globalVersion, serverVersion, entityVersion] = await Promise.all([
+          this.cacheStore.getNamespaceVersion(namespaceKeys.global),
+          this.cacheStore.getNamespaceVersion(namespaceKeys.server),
+          this.cacheStore.getNamespaceVersion(namespaceKeys.entity),
+        ]);
+        versions = { globalVersion, serverVersion, entityVersion };
+      } catch (error) {
+        this.metrics.errors += 1;
+        this.logger.warn(
+          { error, operation, serverId, entityId },
+          'Result cache namespace resolution failed',
+        );
+        return { context: null, bypassReason: 'backend_unavailable' };
+      }
     }
 
     return {
@@ -603,18 +609,23 @@ export class ResultCacheManager {
     }
   }
 
-  private bypass(reason: CacheBypassReason): CacheLookupResult {
+  private bypass(
+    reason: CacheBypassReason,
+    lookupVersions?: CacheNamespaceVersions,
+  ): CacheLookupResult {
     this.metrics.bypasses += 1;
-    return { hit: false, bypassReason: reason };
+    return lookupVersions
+      ? { hit: false, bypassReason: reason, lookupVersions }
+      : { hit: false, bypassReason: reason };
   }
 
   recordBypass(_reason: CacheBypassReason): void {
     this.metrics.bypasses += 1;
   }
 
-  private miss(): CacheLookupResult {
+  private miss(lookupVersions: CacheNamespaceVersions): CacheLookupResult {
     this.metrics.misses += 1;
-    return { hit: false };
+    return { hit: false, lookupVersions };
   }
 
   private estimatePayloadBytes(value: unknown): number | null {
