@@ -132,6 +132,7 @@ export class ResultCacheService {
         result,
         0,
         options?.capturedVersions,
+        false,
       );
     }
 
@@ -163,6 +164,7 @@ export class ResultCacheService {
       result,
       admissionCount,
       options?.capturedVersions,
+      true,
     );
 
     if (stored) {

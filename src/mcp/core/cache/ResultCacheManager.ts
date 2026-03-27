@@ -137,6 +137,7 @@ export class ResultCacheManager {
     result: unknown,
     admissionObservations: number,
     capturedVersions?: CacheNamespaceVersions,
+    countAsPromotion = false,
   ): Promise<boolean> {
     if (!this.config.enabled || !policy.enabled) {
       this.metrics.bypasses += 1;
@@ -219,7 +220,9 @@ export class ResultCacheManager {
     try {
       await this.cacheStore.set(entryKey, serialized, policy.ttlSeconds);
       this.metrics.sets += 1;
-      this.metrics.admission_promoted += 1;
+      if (countAsPromotion) {
+        this.metrics.admission_promoted += 1;
+      }
       return true;
     } catch (error) {
       this.metrics.errors += 1;

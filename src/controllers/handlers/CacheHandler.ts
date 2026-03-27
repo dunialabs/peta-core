@@ -108,23 +108,27 @@ export class CacheHandler {
     return result;
   }
 
-  async handlePurgeGlobal(_request: AdminRequest): Promise<unknown> {
+  async handlePurgeGlobal(request: AdminRequest): Promise<unknown> {
     const cacheService = this.requireService();
+    const data = this.parseOptionalObject(request.data);
+    const reason = this.parseOptionalReason(data.reason);
     await cacheService.purgeGlobal();
-    await this.logPurgeAction('global', {});
+    await this.logPurgeAction('global', {}, reason);
     this.logger.info('Result cache global purge requested');
     return { purged: true, scope: 'global' };
   }
 
   async handlePurgeServer(request: AdminRequest): Promise<unknown> {
     const cacheService = this.requireService();
-    const { serverId } = this.requireObject(request.data);
+    const data = this.requireObject(request.data);
+    const { serverId } = data;
+    const reason = this.parseOptionalReason(data.reason);
     if (typeof serverId !== 'string' || serverId.trim() === '') {
       throw new AdminError('Missing required field: serverId', AdminErrorCode.INVALID_REQUEST);
     }
 
     await cacheService.purgeServer(serverId);
-    await this.logPurgeAction('server', { serverId });
+    await this.logPurgeAction('server', { serverId }, reason);
     return { purged: true, scope: 'server', serverId };
   }
 
@@ -133,9 +137,10 @@ export class CacheHandler {
     const data = this.requireObject(request.data);
     const serverId = this.requireNonEmptyString(data.serverId, 'serverId');
     const toolName = this.requireNonEmptyString(data.toolName, 'toolName');
+    const reason = this.parseOptionalReason(data.reason);
 
     await cacheService.purgeTool(serverId, toolName);
-    await this.logPurgeAction('tool', { serverId, toolName });
+    await this.logPurgeAction('tool', { serverId, toolName }, reason);
     return { purged: true, scope: 'tool', serverId, toolName };
   }
 
@@ -144,9 +149,10 @@ export class CacheHandler {
     const data = this.requireObject(request.data);
     const serverId = this.requireNonEmptyString(data.serverId, 'serverId');
     const promptName = this.requireNonEmptyString(data.promptName, 'promptName');
+    const reason = this.parseOptionalReason(data.reason);
 
     await cacheService.purgePrompt(serverId, promptName);
-    await this.logPurgeAction('prompt', { serverId, promptName });
+    await this.logPurgeAction('prompt', { serverId, promptName }, reason);
     return { purged: true, scope: 'prompt', serverId, promptName };
   }
 
@@ -155,9 +161,10 @@ export class CacheHandler {
     const data = this.requireObject(request.data);
     const serverId = this.requireNonEmptyString(data.serverId, 'serverId');
     const uri = this.requireNonEmptyString(data.uri, 'uri');
+    const reason = this.parseOptionalReason(data.reason);
 
     await cacheService.purgeResource(serverId, uri);
-    await this.logPurgeAction('resource', { serverId, uri });
+    await this.logPurgeAction('resource', { serverId, uri }, reason);
     return { purged: true, scope: 'resource', serverId, uri };
   }
 
@@ -168,6 +175,7 @@ export class CacheHandler {
     const operation = this.parseOperation(data.operation);
     const serverId = this.requireNonEmptyString(data.serverId, 'serverId');
     const entityId = this.requireNonEmptyString(data.entityId, 'entityId');
+    const reason = this.parseOptionalReason(data.reason);
     const policy = await this.resolvePurgeExactPolicy(cacheService, operation, serverId, entityId, data);
     const scopeContext = this.parseScopeContext(data.scopeContext);
 
@@ -193,7 +201,7 @@ export class CacheHandler {
       data.requestParams,
     );
 
-    await this.logPurgeAction('exact', { operation, serverId, entityId });
+    await this.logPurgeAction('exact', { operation, serverId, entityId }, reason);
     return { purged: true, scope: 'exact', operation, serverId, entityId };
   }
 
@@ -262,11 +270,30 @@ export class CacheHandler {
     return value as Record<string, unknown>;
   }
 
+  private parseOptionalObject(value: unknown): Record<string, unknown> {
+    if (value === undefined) {
+      return {};
+    }
+    return this.requireObject(value);
+  }
+
   private requireNonEmptyString(value: unknown, fieldName: string): string {
     if (typeof value !== 'string' || value.trim() === '') {
       throw new AdminError(`Missing required field: ${fieldName}`, AdminErrorCode.INVALID_REQUEST);
     }
     return value;
+  }
+
+  private parseOptionalReason(value: unknown): string | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (typeof value !== 'string') {
+      throw new AdminError('Invalid field: reason', AdminErrorCode.INVALID_REQUEST);
+    }
+
+    const trimmed = value.trim();
+    return trimmed === '' ? undefined : trimmed;
   }
 
   private parseOperation(value: unknown): CacheOperationType {
@@ -358,10 +385,18 @@ export class CacheHandler {
     return value;
   }
 
-  private async logPurgeAction(scope: string, payload: Record<string, unknown>): Promise<void> {
+  private async logPurgeAction(
+    scope: string,
+    payload: Record<string, unknown>,
+    reason?: string,
+  ): Promise<void> {
     await LogService.getInstance().enqueueLog({
       action: MCPEventLogType.AdminServerEdit,
-      requestParams: JSON.stringify({ cachePurgeScope: scope, ...payload }),
+      requestParams: JSON.stringify({
+        cachePurgeScope: scope,
+        ...(reason ? { reason } : {}),
+        ...payload,
+      }),
     });
   }
 }
