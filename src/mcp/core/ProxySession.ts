@@ -127,10 +127,13 @@ export class ProxySession {
   private static readonly APPROVAL_POLL_INTERVAL_MS = 3_000;
   private static readonly APPROVAL_WAIT_TIMEOUT_MS = 55_000;
 
+  private get tenantId(): string | undefined {
+    return this.clientSession.authContext.tenantId;
+  }
+
   constructor(
     private sessionId: string,
     private userId: string,
-    private tenantId: string | undefined,
     private clientSession: ClientSession,
     private sessionLogger: SessionLogger,
     eventStore: PersistentEventStore,

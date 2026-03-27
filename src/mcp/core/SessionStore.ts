@@ -79,7 +79,6 @@ export class SessionStore {
     const proxySession = new ProxySession(
       sessionId,
       userId,
-      authContext.tenantId,
       clientSession,
       sessionLogger,
       eventStore,

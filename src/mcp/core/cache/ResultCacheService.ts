@@ -10,6 +10,7 @@ import { NoopResultCacheStore } from './stores/NoopResultCacheStore.js';
 import type { ResultCacheStore } from './stores/ResultCacheStore.js';
 import {
   AdmissionPolicy,
+  CacheScope,
   type CacheBypassReason,
   type CacheLookupResult,
   type CacheOperationType,
@@ -197,12 +198,26 @@ export class ResultCacheService {
       return { result: lookupResult.entry.payload as T, cacheHit: true };
     }
 
+    // When the required scope identity is missing, skip singleflight entirely.
+    // Using a 'none' fallback key would coalesce requests from different users into
+    // the same in-flight call and return the wrong result (data leak). Since
+    // ResultCacheManager will bypass storage for missing identities anyway, there is
+    // no value in deduplication here.
+    const identityMissing =
+      (policy.scope === CacheScope.Tenant && !scopeContext.tenantId) ||
+      (policy.scope === CacheScope.User && !scopeContext.userId);
+
+    if (identityMissing) {
+      const result = await factory();
+      return { result, cacheHit: false };
+    }
+
     const scopeIdentity =
-      policy.scope === 'global'
+      policy.scope === CacheScope.Global
         ? 'global'
-        : policy.scope === 'tenant'
-          ? (scopeContext.tenantId ?? 'none')
-          : (scopeContext.userId ?? 'none');
+        : policy.scope === CacheScope.Tenant
+          ? scopeContext.tenantId!
+          : scopeContext.userId!;
     const requestHash = this.keyBuilder.canonicalizeParams(
       requestParams,
       policy.denyFields,
