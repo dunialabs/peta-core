@@ -608,6 +608,10 @@ export class ResultCacheManager {
     return { hit: false, bypassReason: reason };
   }
 
+  recordBypass(_reason: CacheBypassReason): void {
+    this.metrics.bypasses += 1;
+  }
+
   private miss(): CacheLookupResult {
     this.metrics.misses += 1;
     return { hit: false };

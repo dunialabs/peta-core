@@ -579,6 +579,7 @@ export class ProxySession {
       args: (request.params.arguments ?? {}) as Record<string, unknown>,
       dangerLevel,
     });
+    const approvalRequiredByPolicy = policyResult.decision === PolicyDecision.RequireApproval;
 
     if (policyResult.decision === PolicyDecision.Deny) {
       const errorTime = Date.now();
@@ -851,11 +852,28 @@ export class ProxySession {
       }
 
       const cacheServiceForStore = ResultCacheService.instance;
-      const storeCachePolicy = cacheServiceForStore.resolveToolPolicy(
-        targetServerContext.capabilitiesConfig,
-        result.originalName,
-      );
+      const shouldCacheToolResult =
+        !approvalRequiredByPolicy && dangerLevel < DangerLevel.Approval;
+      const storeCachePolicy = shouldCacheToolResult
+        ? cacheServiceForStore.resolveToolPolicy(
+            targetServerContext.capabilitiesConfig,
+            result.originalName,
+          )
+        : null;
       const storeScopeCtx: CacheScopeContext = { userId: this.userId, tenantId: this.tenantId };
+
+      if (!shouldCacheToolResult) {
+        this.logger.debug(
+          {
+            toolName: result.originalName,
+            serverId: result.serverID,
+            'cache.bypass_reason': approvalRequiredByPolicy
+              ? 'policy_gated'
+              : 'non_cacheable_dangerous_tool',
+          },
+          'Tool cache store path bypassed due to approval gating',
+        );
+      }
 
       // Use executeWithCache with singleflight for deduplication
       const serverResult = storeCachePolicy

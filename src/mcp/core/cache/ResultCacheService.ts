@@ -10,6 +10,7 @@ import { NoopResultCacheStore } from './stores/NoopResultCacheStore.js';
 import type { ResultCacheStore } from './stores/ResultCacheStore.js';
 import {
   AdmissionPolicy,
+  type CacheBypassReason,
   type CacheLookupResult,
   type CacheOperationType,
   type CacheScopeContext,
@@ -111,7 +112,13 @@ export class ResultCacheService {
     policy: ResolvedCachePolicy,
     requestParams: unknown,
     result: unknown,
+    options?: { observationIncrement?: number },
   ): Promise<boolean> {
+    if (operation === 'tool' && !this.isToolResultCacheable(result)) {
+      this.recordStoreBypass('errors_not_cacheable');
+      return false;
+    }
+
     if (policy.admissionPolicy === AdmissionPolicy.Immediate) {
       return this.manager.store(
         operation,
@@ -125,14 +132,18 @@ export class ResultCacheService {
       );
     }
 
-    const admissionCount = await this.manager.recordAdmission(
-      operation,
-      serverId,
-      entityId,
-      scopeContext,
-      policy,
-      requestParams,
-    );
+    const observationIncrement = Math.max(1, options?.observationIncrement ?? 1);
+    let admissionCount = 0;
+    for (let i = 0; i < observationIncrement; i += 1) {
+      admissionCount = await this.manager.recordAdmission(
+        operation,
+        serverId,
+        entityId,
+        scopeContext,
+        policy,
+        requestParams,
+      );
+    }
 
     if (!this.manager.shouldPromote(admissionCount, policy)) {
       return false;
@@ -198,9 +209,14 @@ export class ResultCacheService {
       policy.allowFields,
     );
     const cacheKeyForSingleflight = `sf:${operation}:${serverId}:${entityId}:${scopeIdentity}:${requestHash}`;
-    const { result, isLeader } = await this.singleflight.execute(cacheKeyForSingleflight, factory);
+    const { result, isLeader, requestCount } = await this.singleflight.execute(
+      cacheKeyForSingleflight,
+      factory,
+    );
 
     if (isLeader) {
+      const observationIncrement =
+        policy.admissionPolicy === AdmissionPolicy.SecondHit ? Math.max(1, requestCount) : 1;
       this.storeResult(
         operation,
         serverId,
@@ -209,12 +225,30 @@ export class ResultCacheService {
         policy,
         requestParams,
         result,
+        { observationIncrement },
       ).catch((error) => {
         this.logger.warn({ error, operation, serverId, entityId }, 'Background cache store failed');
       });
     }
 
     return { result, cacheHit: false };
+  }
+
+  private isToolResultCacheable(result: unknown): boolean {
+    if (!result || typeof result !== 'object') {
+      return true;
+    }
+
+    if (!('isError' in result)) {
+      return true;
+    }
+
+    return (result as { isError?: unknown }).isError !== true;
+  }
+
+  private recordStoreBypass(reason: CacheBypassReason): void {
+    this.manager.recordBypass(reason);
+    this.logger.debug({ reason }, 'Result cache store bypassed');
   }
 
   async invalidateResource(serverId: string, uri: string): Promise<void> {

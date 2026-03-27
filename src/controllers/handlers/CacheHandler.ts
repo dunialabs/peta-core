@@ -59,8 +59,13 @@ export class CacheHandler {
         const caps: ServerConfigCapabilities = JSON.parse(server.capabilities);
         const tools: Record<string, CachePolicyConfig> = {};
         const prompts: Record<string, CachePolicyConfig> = {};
-        const resources: { exact: Record<string, CachePolicyConfig>; patterns: unknown[] } = {
+        const resources: {
+          exact: Record<string, CachePolicyConfig>;
+          inline: Record<string, CachePolicyConfig>;
+          patterns: unknown[];
+        } = {
           exact: {},
+          inline: {},
           patterns: [],
         };
 
@@ -74,9 +79,18 @@ export class CacheHandler {
             prompts[name] = promptCfg.cache;
           }
         }
+
+        for (const [uri, exactCfg] of Object.entries(caps.resourceCachePolicies?.exact ?? {})) {
+          const exactCachePolicy: CachePolicyConfig = {
+            ...(exactCfg.cache ?? {}),
+            enabled: exactCfg.cache?.enabled ?? exactCfg.enabled ?? true,
+          };
+          resources.exact[uri] = exactCachePolicy;
+        }
+
         for (const [uri, resCfg] of Object.entries(caps.resources ?? {})) {
           if (resCfg.cache) {
-            resources.exact[uri] = resCfg.cache;
+            resources.inline[uri] = resCfg.cache;
           }
         }
         if (caps.resourceCachePolicies?.patterns) {
@@ -154,7 +168,7 @@ export class CacheHandler {
     const operation = this.parseOperation(data.operation);
     const serverId = this.requireNonEmptyString(data.serverId, 'serverId');
     const entityId = this.requireNonEmptyString(data.entityId, 'entityId');
-    const policy = this.parseResolvedPolicy(data.policy);
+    const policy = await this.resolvePurgeExactPolicy(cacheService, operation, serverId, entityId, data);
     const scopeContext = this.parseScopeContext(data.scopeContext);
 
     await cacheService.purgeExact(
@@ -168,6 +182,54 @@ export class CacheHandler {
 
     await this.logPurgeAction('exact', { operation, serverId, entityId });
     return { purged: true, scope: 'exact', operation, serverId, entityId };
+  }
+
+  private async resolvePurgeExactPolicy(
+    cacheService: ResultCacheService,
+    operation: CacheOperationType,
+    serverId: string,
+    entityId: string,
+    data: Record<string, unknown>,
+  ): Promise<ResolvedCachePolicy> {
+    if (data.policy !== undefined) {
+      return this.parseResolvedPolicy(data.policy);
+    }
+
+    const server = await ServerRepository.findByServerId(serverId);
+    if (!server) {
+      throw new AdminError(`Server not found: ${serverId}`, AdminErrorCode.SERVER_NOT_FOUND);
+    }
+
+    let capabilities: ServerConfigCapabilities = {
+      tools: {},
+      resources: {},
+      prompts: {},
+    };
+    try {
+      capabilities = server.capabilities ? JSON.parse(server.capabilities) : capabilities;
+    } catch {
+      capabilities = {
+        tools: {},
+        resources: {},
+        prompts: {},
+      };
+    }
+
+    const resolvedPolicy =
+      operation === 'tool'
+        ? cacheService.resolveToolPolicy(capabilities, entityId)
+        : operation === 'prompt'
+          ? cacheService.resolvePromptPolicy(capabilities, entityId)
+          : cacheService.resolveResourcePolicy(capabilities, entityId);
+
+    if (!resolvedPolicy) {
+      throw new AdminError(
+        'Cannot resolve cache policy for exact purge. Provide policy explicitly or configure cache policy first.',
+        AdminErrorCode.INVALID_REQUEST,
+      );
+    }
+
+    return resolvedPolicy;
   }
 
   private requireService(): ResultCacheService {
