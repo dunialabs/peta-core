@@ -14,6 +14,7 @@ readonly DOCKERFILE_PATH="."
 readonly DATE_TAG=$(date +%Y%m%d)
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PROJECT_ROOT="$SCRIPT_DIR"
+readonly VERSION_TAG=$(node -e "const fs = require('fs'); const path = require('path'); try { const pkg = JSON.parse(fs.readFileSync(path.join(process.argv[1], 'package.json'), 'utf8')); if (/^\\d+\\.\\d+\\.\\d+$/.test(pkg.version)) { process.stdout.write(pkg.version); } } catch (error) { process.exit(0); }" "$PROJECT_ROOT")
 
 # Thresholds
 readonly MIN_DISK_SPACE_GB=5
@@ -37,6 +38,7 @@ readonly GRAY='\033[90m'
 VERBOSE=false
 CLEAN=false
 FORCE=false
+NON_INTERACTIVE=false
 
 # ============================================================================
 # Logging Functions
@@ -83,6 +85,7 @@ ${BLUE}Options:${RESET}
   -v, --verbose    Enable detailed Docker output
   -c, --clean      Clean old images and build cache before building
   -f, --force      Force mode: skip cleanup confirmation (use with -c)
+  -y, --non-interactive  Fail instead of prompting for input
   -h, --help       Show this help message
 
 ${BLUE}Examples:${RESET}
@@ -91,6 +94,7 @@ ${BLUE}Examples:${RESET}
   ./docker-build-push.sh -c           # Clean then build (with confirmation)
   ./docker-build-push.sh -c -f        # Clean then build (no confirmation)
   ./docker-build-push.sh -v -c -f     # Verbose + clean + force
+  ./docker-build-push.sh -y           # Non-interactive mode
 
 ${BLUE}What this script does:${RESET}
   1. Checks Docker installation and Buildx
@@ -110,6 +114,7 @@ ${BLUE}Supported platforms:${RESET}
 ${BLUE}Tags created:${RESET}
   - ${IMAGE_NAME}:latest
   - ${IMAGE_NAME}:${DATE_TAG}
+$(if [[ -n "$VERSION_TAG" ]]; then echo "  - ${IMAGE_NAME}:${VERSION_TAG}"; fi)
 
 ${BLUE}Docker Hub:${RESET}
   https://hub.docker.com/r/${DOCKER_HUB_REPO}
@@ -133,6 +138,10 @@ function parse_arguments() {
         ;;
       -f|--force)
         FORCE=true
+        shift
+        ;;
+      -y|--non-interactive)
+        NON_INTERACTIVE=true
         shift
         ;;
       -h|--help)
@@ -228,6 +237,12 @@ function check_docker_login() {
 }
 
 function prompt_docker_login() {
+  if [[ "$NON_INTERACTIVE" == true ]]; then
+    log_error "Docker Hub login required, but non-interactive mode is enabled"
+    echo -e "\n${BLUE}Run docker login first, then retry.${RESET}"
+    return 1
+  fi
+
   echo -e "\n${BLUE}Please log in to Docker Hub:${RESET}"
   echo -e "  ${GRAY}docker login${RESET}"
   echo ""
@@ -354,6 +369,11 @@ function clean_docker() {
 
   # If force mode, skip confirmation
   if [[ "$FORCE" != true ]]; then
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+      log_error "Cleanup requires --force when non-interactive mode is enabled"
+      return 1
+    fi
+
     echo -e "${YELLOW}This will remove:${RESET}"
     echo "  - Dangling images (untagged intermediate layers)"
     echo "  - Build cache"
@@ -418,6 +438,9 @@ function build_image() {
   log_info "Tags:"
   echo "  - latest"
   echo "  - ${DATE_TAG}"
+  if [[ -n "$VERSION_TAG" ]]; then
+    echo "  - ${VERSION_TAG}"
+  fi
   echo ""
 
   cd "$PROJECT_ROOT"
@@ -431,6 +454,10 @@ function build_image() {
     "--tag" "${IMAGE_NAME}:${DATE_TAG}"
     "--push"  # Required for multi-arch
   )
+
+  if [[ -n "$VERSION_TAG" ]]; then
+    build_args+=("--tag" "${IMAGE_NAME}:${VERSION_TAG}")
+  fi
 
   # Progress output
   if [[ "$VERBOSE" == true ]]; then
@@ -508,6 +535,10 @@ function verify_image() {
 
   local tags=("latest" "${DATE_TAG}")
 
+  if [[ -n "$VERSION_TAG" ]]; then
+    tags+=("${VERSION_TAG}")
+  fi
+
   for tag in "${tags[@]}"; do
     log_info "Verifying ${IMAGE_NAME}:${tag}..."
 
@@ -555,7 +586,7 @@ ${BRIGHT}Multi-Architecture Build & Push Successful!${RESET}
 
 ${BLUE}Image Details:${RESET}
   Name:          ${IMAGE_NAME}
-  Tags:          latest, ${DATE_TAG}
+  Tags:          latest, ${DATE_TAG}$(if [[ -n "$VERSION_TAG" ]]; then printf ", %s" "$VERSION_TAG"; fi)
   Architectures: linux/amd64, linux/arm64
   Digest:        ${manifest_digest}
 
@@ -563,6 +594,7 @@ ${BLUE}Docker Hub:${RESET}
   Repository: https://hub.docker.com/r/${DOCKER_HUB_REPO}
   Latest:     https://hub.docker.com/r/${DOCKER_HUB_REPO}/tags?name=latest
   Dated:      https://hub.docker.com/r/${DOCKER_HUB_REPO}/tags?name=${DATE_TAG}
+$(if [[ -n "$VERSION_TAG" ]]; then printf "  Versioned:  https://hub.docker.com/r/%s/tags?name=%s\n" "${DOCKER_HUB_REPO}" "${VERSION_TAG}"; fi)
 
 ${BLUE}Next Steps:${RESET}
   ${GREEN}✓${RESET} Pull image:        docker pull ${IMAGE_NAME}:latest
