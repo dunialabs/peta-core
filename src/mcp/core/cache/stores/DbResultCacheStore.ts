@@ -15,7 +15,9 @@ export class DbResultCacheStore implements ResultCacheStore {
     if (!row) {
       return null;
     }
-    return row.payload_blob;
+
+    const blob = row.payload_blob;
+    return Buffer.isBuffer(blob) ? blob : Buffer.from(blob);
   }
 
   async set(entryKey: string, value: Buffer, ttlSeconds: number): Promise<void> {

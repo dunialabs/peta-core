@@ -149,6 +149,8 @@ export function appendStderrTail(
     ? chunk
     : Buffer.isBuffer(chunk)
       ? chunk.toString('utf8')
+      : chunk instanceof Uint8Array
+        ? Buffer.from(chunk).toString('utf8')
       : String(chunk);
 
   const merged = currentTail + chunkText;

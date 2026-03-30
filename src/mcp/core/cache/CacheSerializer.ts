@@ -33,16 +33,17 @@ export class CacheSerializer {
     return useCompression ? gzipSync(jsonBuffer) : jsonBuffer;
   }
 
-  deserialize(buffer: Buffer): CacheEntryEnvelope | null {
+  deserialize(buffer: Buffer | Uint8Array): CacheEntryEnvelope | null {
     if (!buffer || buffer.length === 0) {
       return null;
     }
 
-    let payloadBuffer = buffer;
-    const gzipped = this.isGzipBuffer(buffer);
+    const normalizedBuffer = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+    let payloadBuffer = normalizedBuffer;
+    const gzipped = this.isGzipBuffer(normalizedBuffer);
     if (gzipped) {
       try {
-        payloadBuffer = gunzipSync(buffer);
+        payloadBuffer = gunzipSync(normalizedBuffer);
       } catch {
         return null;
       }

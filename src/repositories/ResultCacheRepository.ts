@@ -1,7 +1,7 @@
 import { prisma } from '../config/prisma.js';
 
 type ResultCacheEntryRow = {
-  payload_blob: Buffer;
+  payload_blob: Buffer | Uint8Array;
   payload_encoding: string;
   expires_at: Date;
 };
