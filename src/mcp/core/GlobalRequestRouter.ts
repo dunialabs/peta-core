@@ -8,16 +8,17 @@ import {
   RequestId,
   ResourceUpdatedNotification,
   McpError,
-  ErrorCode
-} from "@modelcontextprotocol/sdk/types.js";
+  ErrorCode,
+} from '@modelcontextprotocol/sdk/types.js';
 import { LogService } from '../../log/LogService.js';
 import { SessionStore } from './SessionStore.js';
-import { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
-import { MCPEventLogType } from "../../types/enums.js";
+import { RequestOptions } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { MCPEventLogType } from '../../types/enums.js';
 import { socketNotifier } from '../../socket/SocketNotifier.js';
 import { ServerManager } from './ServerManager.js';
 import { ProxyContext } from '../../types/mcp.types.js';
 import { createLogger } from '../../logger/index.js';
+import { ResultCacheService } from './cache/ResultCacheService.js';
 /**
  * Simplified version of RequestHandlerExtra
  * Contains information needed to handle reverse requests
@@ -39,12 +40,12 @@ export class GlobalRequestRouter {
 
   // Record sent notifications for deduplication
   private sentNotifications = new Map<string, Set<string>>(); // sessionId -> Set<notificationKey>
-  
+
   // Logger for GlobalRequestRouter
   private logger = createLogger('GlobalRequestRouter');
-  
+
   private constructor() {}
-  
+
   /**
    * Get singleton instance
    */
@@ -54,25 +55,28 @@ export class GlobalRequestRouter {
     }
     return GlobalRequestRouter.instance;
   }
-  
+
   /**
    * Handle Sampling request from Server
    */
   async handleSamplingRequest(
     serverId: string,
     request: CreateMessageRequest,
-    proxyContext: ProxyContext
+    proxyContext: ProxyContext,
   ): Promise<CreateMessageResult> {
     // Extract sessionId from proxyRequestId (format: "sessionId:originalId:timestamp")
     const sessionId = proxyContext.proxyRequestId.split(':')[0];
 
-    this.logger.debug({
-      serverId,
-      sessionId,
-      proxyRequestId: proxyContext.proxyRequestId,
-      parentUniformRequestId: proxyContext.uniformRequestId,
-      method: 'sampling/createMessage'
-    }, 'Handling sampling request from server');
+    this.logger.debug(
+      {
+        serverId,
+        sessionId,
+        proxyRequestId: proxyContext.proxyRequestId,
+        parentUniformRequestId: proxyContext.uniformRequestId,
+        method: 'sampling/createMessage',
+      },
+      'Handling sampling request from server',
+    );
 
     // Get ProxySession through sessionId
     const proxySession = SessionStore.instance.getProxySession(sessionId);
@@ -80,7 +84,7 @@ export class GlobalRequestRouter {
       this.logger.error({ sessionId }, 'No ProxySession found for sessionId');
       throw new McpError(
         ErrorCode.InvalidRequest,
-        `No ProxySession found for sessionId: ${sessionId}`
+        `No ProxySession found for sessionId: ${sessionId}`,
       );
     }
 
@@ -107,10 +111,7 @@ export class GlobalRequestRouter {
           statusCode: 403,
         });
       }
-      throw new McpError(
-        ErrorCode.InvalidParams,
-        'Client is not allowed to request sampling'
-      );
+      throw new McpError(ErrorCode.InvalidParams, 'Client is not allowed to request sampling');
     }
 
     // Use ProxySession to forward request to Client
@@ -154,25 +155,28 @@ export class GlobalRequestRouter {
       throw error;
     }
   }
-  
+
   /**
    * Handle Roots List request from Server
    */
   async handleRootsListRequest(
     serverId: string,
     request: ListRootsRequest,
-    proxyContext: ProxyContext
+    proxyContext: ProxyContext,
   ): Promise<ListRootsResult> {
     // Extract sessionId from proxyRequestId (format: "sessionId:originalId:timestamp")
     const sessionId = proxyContext.proxyRequestId.split(':')[0];
 
-    this.logger.debug({
-      serverId,
-      sessionId,
-      proxyRequestId: proxyContext.proxyRequestId,
-      parentUniformRequestId: proxyContext.uniformRequestId,
-      method: 'roots/list'
-    }, 'Handling roots list request from server');
+    this.logger.debug(
+      {
+        serverId,
+        sessionId,
+        proxyRequestId: proxyContext.proxyRequestId,
+        parentUniformRequestId: proxyContext.uniformRequestId,
+        method: 'roots/list',
+      },
+      'Handling roots list request from server',
+    );
 
     // Get ProxySession through sessionId
     const proxySession = SessionStore.instance.getProxySession(sessionId);
@@ -180,7 +184,7 @@ export class GlobalRequestRouter {
       this.logger.error({ sessionId }, 'No ProxySession found for sessionId');
       throw new McpError(
         ErrorCode.InvalidRequest,
-        `No ProxySession found for sessionId: ${sessionId}`
+        `No ProxySession found for sessionId: ${sessionId}`,
       );
     }
 
@@ -207,10 +211,7 @@ export class GlobalRequestRouter {
           statusCode: 403,
         });
       }
-      throw new McpError(
-        ErrorCode.MethodNotFound,
-        'Client does not support roots capability'
-      );
+      throw new McpError(ErrorCode.MethodNotFound, 'Client does not support roots capability');
     }
 
     // Use ProxySession to forward request to Client
@@ -254,26 +255,29 @@ export class GlobalRequestRouter {
       throw error;
     }
   }
-  
+
   /**
    * Handle Elicitation request from Server
    */
   async handleElicitationRequest(
     serverId: string,
     request: ElicitRequest,
-    proxyContext: ProxyContext
+    proxyContext: ProxyContext,
   ): Promise<ElicitResult> {
     // Extract sessionId from proxyRequestId (format: "sessionId:originalId:timestamp")
     const sessionId = proxyContext.proxyRequestId.split(':')[0];
 
-    this.logger.debug({
-      serverId,
-      sessionId,
-      proxyRequestId: proxyContext.proxyRequestId,
-      parentUniformRequestId: proxyContext.uniformRequestId,
-      method: 'elicit/input',
-      requestedSchema: request.params
-    }, 'Handling elicitation request from server');
+    this.logger.debug(
+      {
+        serverId,
+        sessionId,
+        proxyRequestId: proxyContext.proxyRequestId,
+        parentUniformRequestId: proxyContext.uniformRequestId,
+        method: 'elicit/input',
+        requestedSchema: request.params,
+      },
+      'Handling elicitation request from server',
+    );
 
     // Get ProxySession through sessionId
     const proxySession = SessionStore.instance.getProxySession(sessionId);
@@ -281,7 +285,7 @@ export class GlobalRequestRouter {
       this.logger.error({ sessionId }, 'No ProxySession found for sessionId');
       throw new McpError(
         ErrorCode.InvalidRequest,
-        `No ProxySession found for sessionId: ${sessionId}`
+        `No ProxySession found for sessionId: ${sessionId}`,
       );
     }
 
@@ -294,10 +298,7 @@ export class GlobalRequestRouter {
 
     // Permission check
     if (!proxySession.canServerRequestElicitation()) {
-      throw new McpError(
-        ErrorCode.InvalidParams,
-        'Client is not allowed to request user input'
-      );
+      throw new McpError(ErrorCode.InvalidParams, 'Client is not allowed to request user input');
     }
 
     // Use ProxySession to forward request to Client
@@ -341,33 +342,32 @@ export class GlobalRequestRouter {
       throw error;
     }
   }
-  
-  
+
   /**
    * Handle tools list changed notification
    */
   async handleToolsListChanged(serverId: string): Promise<void> {
     this.logger.info({ serverId }, 'Broadcasting tools list changed for server');
-    
+
     // Get all sessions
     const sessions = SessionStore.instance.getAllSessions();
     const notificationKey = `tools_changed_${serverId}_${Date.now()}`;
 
     socketNotifier.notifyUserPermissionChangedByServer(serverId);
-    
+
     for (const session of sessions) {
       const sessionId = session.sessionId;
       // Check permissions
       if (!session.canAccessServer(serverId)) {
         continue;
       }
-      
+
       // Check if already sent (deduplication)
       const sent = this.sentNotifications.get(sessionId) || new Set();
       if (sent.has(notificationKey)) {
         continue;
       }
-      
+
       // Send notification
       try {
         session.sendToolListChanged();
@@ -379,39 +379,39 @@ export class GlobalRequestRouter {
         if (sent.size > 100) {
           const array = Array.from(sent);
           sent.clear();
-          array.slice(-100).forEach(k => sent.add(k));
+          array.slice(-100).forEach((k) => sent.add(k));
         }
       } catch (error) {
         this.logger.error({ error, sessionId }, 'Failed to send tools list changed to session');
       }
     }
   }
-  
+
   /**
    * Handle resources list changed notification
    */
   async handleResourcesListChanged(serverId: string): Promise<void> {
     this.logger.info({ serverId }, 'Broadcasting resources list changed for server');
-    
+
     // Get all sessions
     const sessions = SessionStore.instance.getAllSessions();
     const notificationKey = `resources_changed_${serverId}_${Date.now()}`;
 
     socketNotifier.notifyUserPermissionChangedByServer(serverId);
-    
+
     for (const session of sessions) {
       const sessionId = session.sessionId;
       // Check permissions
       if (!session.canAccessServer(serverId)) {
         continue;
       }
-      
+
       // Check if already sent (deduplication)
       const sent = this.sentNotifications.get(sessionId) || new Set();
       if (sent.has(notificationKey)) {
         continue;
       }
-      
+
       // Send notification
       try {
         session.sendResourceListChanged();
@@ -423,7 +423,7 @@ export class GlobalRequestRouter {
         if (sent.size > 100) {
           const array = Array.from(sent);
           sent.clear();
-          array.slice(-100).forEach(k => sent.add(k));
+          array.slice(-100).forEach((k) => sent.add(k));
         }
       } catch (error) {
         this.logger.error({ error, sessionId }, 'Failed to send resources list changed to session');
@@ -434,87 +434,102 @@ export class GlobalRequestRouter {
   /**
    * Handle resource updated notification
    */
-  async handleResourceUpdated(serverId: string, notification: ResourceUpdatedNotification): Promise<void> {
+  async handleResourceUpdated(
+    serverId: string,
+    notification: ResourceUpdatedNotification,
+  ): Promise<void> {
     const resourceUri = notification.params.uri;
     const subscriptionKey = `${serverId}::${resourceUri}`;
 
     // Get subscribers for this resource
     const subscribers = ServerManager.instance.getResourceSubscribers(subscriptionKey);
 
+    try {
+      const cacheService = ResultCacheService.instance;
+      if (cacheService.enabled) {
+        await cacheService.invalidateResource(serverId, resourceUri);
+        this.logger.debug(
+          { serverId, resourceUri },
+          'Result cache invalidated for updated resource',
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        { error, serverId, resourceUri },
+        'Failed to invalidate result cache for resource update',
+      );
+    }
+
     if (subscribers.size === 0) {
       this.logger.debug({ subscriptionKey }, 'No subscribers for resource, skipping notification');
       return;
     }
 
-    this.logger.debug({ serverId, resourceUri, subscriberCount: subscribers.size }, 'Broadcasting resource updated to subscribers');
+    this.logger.debug(
+      { serverId, resourceUri, subscriberCount: subscribers.size },
+      'Broadcasting resource updated to subscribers',
+    );
 
-    // Get all sessions
     const sessions = SessionStore.instance.getAllSessions();
     const notificationKey = `resource_updated_${serverId}_${resourceUri}_${Date.now()}`;
 
     for (const session of sessions) {
       const sessionId = session.sessionId;
 
-      // Only notify sessions that subscribed to this resource
       if (!subscribers.has(sessionId)) {
         continue;
       }
 
-      // Check permissions (additional security check)
       if (!session.canAccessServer(serverId)) {
         continue;
       }
 
-      // Check if already sent (deduplication)
       const sent = this.sentNotifications.get(sessionId) || new Set();
       if (sent.has(notificationKey)) {
         continue;
       }
 
-      // Send notification
       try {
         session.sendResourceUpdated(serverId, notification);
-        // Record as sent
         sent.add(notificationKey);
         this.sentNotifications.set(sessionId, sent);
 
-        // Clean up old notification records (keep last 100)
         if (sent.size > 100) {
           const array = Array.from(sent);
           sent.clear();
-          array.slice(-100).forEach(k => sent.add(k));
+          array.slice(-100).forEach((k) => sent.add(k));
         }
       } catch (error) {
         this.logger.error({ error, sessionId }, 'Failed to send resource updated to session');
       }
     }
   }
-  
+
   /**
    * Handle prompts list changed notification
    */
   async handlePromptsListChanged(serverId: string): Promise<void> {
     this.logger.info({ serverId }, 'Broadcasting prompts list changed for server');
-    
+
     // Get all sessions
     const sessions = SessionStore.instance.getAllSessions();
     const notificationKey = `prompts_changed_${serverId}_${Date.now()}`;
 
     socketNotifier.notifyUserPermissionChangedByServer(serverId);
-    
+
     for (const session of sessions) {
       const sessionId = session.sessionId;
       // Check permissions
       if (!session.canAccessServer(serverId)) {
         continue;
       }
-      
+
       // Check if already sent (deduplication)
       const sent = this.sentNotifications.get(sessionId) || new Set();
       if (sent.has(notificationKey)) {
         continue;
       }
-      
+
       // Send notification
       try {
         session.sendPromptListChanged();
@@ -526,14 +541,14 @@ export class GlobalRequestRouter {
         if (sent.size > 100) {
           const array = Array.from(sent);
           sent.clear();
-          array.slice(-100).forEach(k => sent.add(k));
+          array.slice(-100).forEach((k) => sent.add(k));
         }
       } catch (error) {
         this.logger.error({ error, sessionId }, 'Failed to send prompts list changed to session');
       }
     }
   }
-  
+
   /**
    * Clean up notification records for session
    */
@@ -547,7 +562,7 @@ export class GlobalRequestRouter {
   cleanupAllSessionNotifications(): void {
     this.sentNotifications.clear();
   }
-  
+
   /**
    * Get statistics
    */
@@ -562,10 +577,10 @@ export class GlobalRequestRouter {
 
     return {
       totalSessions: this.sentNotifications.size,
-      totalNotificationKeys: totalKeys
+      totalNotificationKeys: totalKeys,
     };
   }
-  
+
   /**
    * Destroy instance
    */

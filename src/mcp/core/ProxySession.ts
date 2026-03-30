@@ -89,6 +89,8 @@ import { ProxyContext } from '../../types/mcp.types.js';
 import { createLogger } from '../../logger/index.js';
 import { policyEngine } from '../services/PolicyEngine.js';
 import { approvalService, ApprovalRateLimitError } from '../services/ApprovalService.js';
+import { ResultCacheService } from './cache/ResultCacheService.js';
+import type { CacheScopeContext, ResolvedCachePolicy } from './cache/types.js';
 
 /**
  * MCP Proxy Session
@@ -124,6 +126,10 @@ export class ProxySession {
   // Approval wait configuration
   private static readonly APPROVAL_POLL_INTERVAL_MS = 3_000;
   private static readonly APPROVAL_WAIT_TIMEOUT_MS = 55_000;
+
+  private get tenantId(): string | undefined {
+    return this.clientSession.authContext.tenantId;
+  }
 
   constructor(
     private sessionId: string,
@@ -432,6 +438,109 @@ export class ProxySession {
       throw new McpError(ErrorCode.InvalidParams, errorMsg);
     }
 
+    const earlyServerContext = ServerManager.instance.getServerContext(
+      result.serverID,
+      this.clientSession.userId,
+    );
+    if (earlyServerContext) {
+      const cacheService = ResultCacheService.instance;
+      if (cacheService.enabled) {
+        const toolCachePolicy = cacheService.resolveToolPolicy(
+          earlyServerContext.capabilitiesConfig,
+          result.originalName,
+        );
+        const serverDangerLevel = earlyServerContext.getDangerLevel(result.originalName);
+        const userDangerLevel = this.clientSession.getDangerLevel(
+          result.serverID,
+          result.originalName,
+        );
+        const effectiveDangerLevel = userDangerLevel ?? serverDangerLevel ?? DangerLevel.Silent;
+
+        if (toolCachePolicy && effectiveDangerLevel < DangerLevel.Approval) {
+          // Also check policy engine — it can require approval independently of dangerLevel
+          const policyCheck = await policyEngine.evaluate({
+            userId: this.userId,
+            serverId: result.serverID,
+            toolName: result.originalName,
+            args: (request.params.arguments ?? {}) as Record<string, unknown>,
+            dangerLevel: effectiveDangerLevel,
+          });
+          if (
+            policyCheck.decision === PolicyDecision.Deny ||
+            policyCheck.decision === PolicyDecision.RequireApproval
+          ) {
+            this.logger.debug(
+              {
+                toolName,
+                serverId: result.serverID,
+                'cache.bypass_reason': 'policy_gated',
+                policyDecision: policyCheck.decision,
+              },
+              'Cache bypassed: tool requires policy approval or is denied',
+            );
+          } else {
+            const scopeCtx: CacheScopeContext = { userId: this.userId, tenantId: this.tenantId };
+            try {
+              const cached = await cacheService.lookup(
+                'tool',
+                result.serverID,
+                result.originalName,
+                scopeCtx,
+                toolCachePolicy,
+                request.params.arguments,
+              );
+              if (cached.hit && cached.entry) {
+                this.logger.info(
+                  {
+                    'cache.enabled': true,
+                    'cache.backend': cacheService.getConfigSnapshot().backend,
+                    'cache.cacheable': true,
+                    'cache.hit': true,
+                    'cache.scope_type': toolCachePolicy.scope,
+                    'cache.key_hash': cached.entry.requestHash,
+                    'cache.entry_bytes': cached.entry.payloadBytes,
+                    'cache.ttl_seconds': toolCachePolicy.ttlSeconds,
+                    'cache.admission_policy': toolCachePolicy.admissionPolicy,
+                    toolName,
+                    serverId: result.serverID,
+                  },
+                  'Tool call served from cache (fast-path)',
+                );
+                await this.sessionLogger.logClientRequest({
+                  action: MCPEventLogType.ResponseTool,
+                  serverId: result.serverID,
+                  upstreamRequestId: String(originalRequestId),
+                  uniformRequestId,
+                  requestParams: request.params,
+                  responseResult: cached.entry.payload,
+                  duration: Date.now() - startTime,
+                  statusCode: 200,
+                });
+                return cached.entry.payload as CallToolResult;
+              }
+              this.logger.debug(
+                {
+                  'cache.enabled': true,
+                  'cache.hit': false,
+                  'cache.bypass_reason': cached.bypassReason ?? 'miss',
+                  'cache.scope_type': toolCachePolicy.scope,
+                  'cache.admission_policy': toolCachePolicy.admissionPolicy,
+                  toolName,
+                  serverId: result.serverID,
+                },
+                'Tool cache miss',
+              );
+            } catch (cacheError) {
+              this.logger.warn(
+                { error: cacheError, toolName, 'cache.bypass_reason': 'backend_unavailable' },
+                'Cache fast-path lookup failed, continuing normally',
+              );
+            }
+          }
+        }
+      }
+    }
+
     // Ensure server is available (lazy start)
     await ServerManager.instance.ensureServerAvailable(result.serverID, this.clientSession.userId);
 
@@ -473,6 +582,7 @@ export class ProxySession {
       args: (request.params.arguments ?? {}) as Record<string, unknown>,
       dangerLevel,
     });
+    const approvalRequiredByPolicy = policyResult.decision === PolicyDecision.RequireApproval;
 
     if (policyResult.decision === PolicyDecision.Deny) {
       const errorTime = Date.now();
@@ -744,20 +854,62 @@ export class ProxySession {
         }, 30_000);
       }
 
-      // Forward request to downstream server, passing signal and proxyRequestId
-      const serverResult = (await client.callTool(copyParams, CallToolResultSchema, {
-        signal: extra.signal, // Pass cancellation signal
-        relatedRequestId: proxyRequestId, // Use proxyRequestId as related ID
-      })) as CallToolResult;
+      const cacheServiceForStore = ResultCacheService.instance;
+      const shouldCacheToolResult =
+        !approvalRequiredByPolicy && dangerLevel < DangerLevel.Approval;
+      const storeCachePolicy = shouldCacheToolResult
+        ? cacheServiceForStore.resolveToolPolicy(
+            targetServerContext.capabilitiesConfig,
+            result.originalName,
+          )
+        : null;
+      const storeScopeCtx: CacheScopeContext = { userId: this.userId, tenantId: this.tenantId };
 
-      targetServerContext.clearTimeout();
+      if (!shouldCacheToolResult) {
+        this.logger.debug(
+          {
+            toolName: result.originalName,
+            serverId: result.serverID,
+            'cache.bypass_reason': approvalRequiredByPolicy
+              ? 'policy_gated'
+              : 'non_cacheable_dangerous_tool',
+          },
+          'Tool cache store path bypassed due to approval gating',
+        );
+      }
+
+      // Use executeWithCache with singleflight for deduplication
+      const serverResult = storeCachePolicy
+        ? (
+            await cacheServiceForStore.executeWithCache(
+              'tool',
+              result.serverID,
+              result.originalName,
+              storeScopeCtx,
+              storeCachePolicy,
+              request.params.arguments,
+              async () => {
+                // Forward request to downstream server, passing signal and proxyRequestId
+                const rawResult = (await client.callTool(copyParams, CallToolResultSchema, {
+                  signal: extra.signal,
+                  relatedRequestId: proxyRequestId,
+                })) as CallToolResult;
+                targetServerContext.clearTimeout();
+                return rawResult;
+              },
+            )
+          ).result
+        : ((await client.callTool(copyParams, CallToolResultSchema, {
+            signal: extra.signal,
+            relatedRequestId: proxyRequestId,
+          })) as CallToolResult);
 
       // Log response to client
       await this.sessionLogger.logClientRequest({
         action: MCPEventLogType.ResponseTool,
         serverId: targetServerContext.serverEntity.serverId,
         upstreamRequestId: String(originalRequestId),
-        uniformRequestId: uniformRequestId,
+        uniformRequestId,
         requestParams: request.params,
         responseResult: serverResult,
         duration: Date.now() - startTime,
@@ -1357,6 +1509,77 @@ export class ProxySession {
       throw new McpError(ErrorCode.InvalidParams, errorMsg);
     }
 
+    const earlyResContext = ServerManager.instance.getServerContext(
+      result.serverID,
+      this.clientSession.userId,
+    );
+    if (earlyResContext) {
+      const resCacheService = ResultCacheService.instance;
+      if (resCacheService.enabled) {
+        const resCachePolicy = resCacheService.resolveResourcePolicy(
+          earlyResContext.capabilitiesConfig,
+          result.originalName,
+        );
+        if (resCachePolicy) {
+          const resScopeCtx: CacheScopeContext = { userId: this.userId, tenantId: this.tenantId };
+          try {
+            const cached = await resCacheService.lookup(
+              'resource',
+              result.serverID,
+              result.originalName,
+              resScopeCtx,
+              resCachePolicy,
+              request.params,
+            );
+            if (cached.hit && cached.entry) {
+              this.logger.info(
+                {
+                  'cache.enabled': true,
+                  'cache.hit': true,
+                  'cache.scope_type': resCachePolicy.scope,
+                  'cache.key_hash': cached.entry.requestHash,
+                  'cache.entry_bytes': cached.entry.payloadBytes,
+                  'cache.ttl_seconds': resCachePolicy.ttlSeconds,
+                  'cache.admission_policy': resCachePolicy.admissionPolicy,
+                  resourceUri,
+                  serverId: result.serverID,
+                },
+                'Resource read served from cache (fast-path)',
+              );
+              await this.sessionLogger.logClientRequest({
+                action: MCPEventLogType.ResponseResource,
+                serverId: result.serverID,
+                upstreamRequestId: String(originalRequestId),
+                uniformRequestId,
+                requestParams: request.params,
+                responseResult: cached.entry.payload,
+                duration: Date.now() - startTime,
+                statusCode: 200,
+              });
+              return cached.entry.payload as ReadResourceResult;
+            }
+            this.logger.debug(
+              {
+                'cache.enabled': true,
+                'cache.hit': false,
+                'cache.bypass_reason': cached.bypassReason ?? 'miss',
+                'cache.scope_type': resCachePolicy.scope,
+                'cache.admission_policy': resCachePolicy.admissionPolicy,
+                resourceUri,
+                serverId: result.serverID,
+              },
+              'Resource cache miss',
+            );
+          } catch (cacheError) {
+            this.logger.warn(
+              { error: cacheError, resourceUri, 'cache.bypass_reason': 'backend_unavailable' },
+              'Resource cache fast-path failed, continuing normally',
+            );
+          }
+        }
+      }
+    }
+
     // Ensure server is available (lazy start)
     await ServerManager.instance.ensureServerAvailable(result.serverID, this.clientSession.userId);
 
@@ -1430,14 +1653,41 @@ export class ProxySession {
     let isReconnected: boolean | undefined;
 
     try {
-      // Forward request, passing signal and proxyRequestId
-      const serverResult = await client.readResource(requestCopy.params, {
-        signal: extra.signal, // Pass cancellation signal
-        relatedRequestId: proxyRequestId, // Use proxyRequestId as related ID
-      });
-      const rewrittenResult = this.rewriteAppResourceResult(serverResult, result.serverID);
+      const resCacheServiceForStore = ResultCacheService.instance;
+      const storeResCachePolicy = resCacheServiceForStore.resolveResourcePolicy(
+        targetServer.capabilitiesConfig,
+        result.originalName,
+      );
+      const storeResScopeCtx: CacheScopeContext = {
+        userId: this.userId,
+        tenantId: this.tenantId,
+      };
 
-      targetServer.clearTimeout();
+      // Use executeWithCache with singleflight for deduplication
+      const serverResult = storeResCachePolicy
+        ? (
+            await resCacheServiceForStore.executeWithCache(
+              'resource',
+              result.serverID,
+              result.originalName,
+              storeResScopeCtx,
+              storeResCachePolicy,
+              request.params,
+              async () => {
+                // Forward request, passing signal and proxyRequestId
+                const rawResult = await client.readResource(requestCopy.params, {
+                  signal: extra.signal,
+                  relatedRequestId: proxyRequestId,
+                });
+                targetServer.clearTimeout();
+                return rawResult;
+              },
+            )
+          ).result
+        : await client.readResource(requestCopy.params, {
+            signal: extra.signal,
+            relatedRequestId: proxyRequestId,
+          });
 
       try {
         // Log response to client
@@ -1723,6 +1973,80 @@ export class ProxySession {
       throw new McpError(ErrorCode.InvalidParams, `Permission denied for prompt: ${promptName}`);
     }
 
+    const earlyPromptContext = ServerManager.instance.getServerContext(
+      parseResult.serverID,
+      this.clientSession.userId,
+    );
+    if (earlyPromptContext) {
+      const promptCacheService = ResultCacheService.instance;
+      if (promptCacheService.enabled) {
+        const promptCachePolicy = promptCacheService.resolvePromptPolicy(
+          earlyPromptContext.capabilitiesConfig,
+          parseResult.originalName,
+        );
+        if (promptCachePolicy) {
+          const promptScopeCtx: CacheScopeContext = {
+            userId: this.userId,
+            tenantId: this.tenantId,
+          };
+          try {
+            const cached = await promptCacheService.lookup(
+              'prompt',
+              parseResult.serverID,
+              parseResult.originalName,
+              promptScopeCtx,
+              promptCachePolicy,
+              request.params.arguments,
+            );
+            if (cached.hit && cached.entry) {
+              this.logger.info(
+                {
+                  'cache.enabled': true,
+                  'cache.hit': true,
+                  'cache.scope_type': promptCachePolicy.scope,
+                  'cache.key_hash': cached.entry.requestHash,
+                  'cache.entry_bytes': cached.entry.payloadBytes,
+                  'cache.ttl_seconds': promptCachePolicy.ttlSeconds,
+                  'cache.admission_policy': promptCachePolicy.admissionPolicy,
+                  promptName,
+                  serverId: parseResult.serverID,
+                },
+                'Prompt get served from cache (fast-path)',
+              );
+              await this.sessionLogger.logClientRequest({
+                action: MCPEventLogType.ResponsePrompt,
+                serverId: parseResult.serverID,
+                upstreamRequestId: String(extra.requestId),
+                uniformRequestId,
+                requestParams: request.params,
+                responseResult: cached.entry.payload,
+                duration: Date.now() - startTime,
+                statusCode: 200,
+              });
+              return cached.entry.payload as GetPromptResult;
+            }
+            this.logger.debug(
+              {
+                'cache.enabled': true,
+                'cache.hit': false,
+                'cache.bypass_reason': cached.bypassReason ?? 'miss',
+                'cache.scope_type': promptCachePolicy.scope,
+                'cache.admission_policy': promptCachePolicy.admissionPolicy,
+                promptName,
+                serverId: parseResult.serverID,
+              },
+              'Prompt cache miss',
+            );
+          } catch (cacheError) {
+            this.logger.warn(
+              { error: cacheError, promptName, 'cache.bypass_reason': 'backend_unavailable' },
+              'Prompt cache fast-path failed, continuing normally',
+            );
+          }
+        }
+      }
+    }
+
     // Ensure server is available (lazy start)
     await ServerManager.instance.ensureServerAvailable(
       parseResult.serverID,
@@ -1787,12 +2111,42 @@ export class ProxySession {
         ...requestCopy.params._meta,
         proxyContext: proxyContext,
       };
-      // Forward request, passing signal and proxyRequestId
-      const result = await client.getPrompt(requestCopy.params, {
-        signal: extra.signal, // Pass cancellation signal
-        relatedRequestId: proxyRequestId, // Use proxyRequestId as related ID
-      });
-      targetServerContext.clearTimeout();
+
+      const promptCacheServiceForStore = ResultCacheService.instance;
+      const storePromptCachePolicy = promptCacheServiceForStore.resolvePromptPolicy(
+        targetServerContext.capabilitiesConfig,
+        parseResult.originalName,
+      );
+      const storePromptScopeCtx: CacheScopeContext = {
+        userId: this.userId,
+        tenantId: this.tenantId,
+      };
+
+      // Use executeWithCache with singleflight for deduplication
+      const result = storePromptCachePolicy
+        ? (
+            await promptCacheServiceForStore.executeWithCache(
+              'prompt',
+              parseResult.serverID,
+              parseResult.originalName,
+              storePromptScopeCtx,
+              storePromptCachePolicy,
+              request.params.arguments,
+              async () => {
+                // Forward request, passing signal and proxyRequestId
+                const rawResult = await client.getPrompt(requestCopy.params, {
+                  signal: extra.signal,
+                  relatedRequestId: proxyRequestId,
+                });
+                targetServerContext.clearTimeout();
+                return rawResult;
+              },
+            )
+          ).result
+        : await client.getPrompt(requestCopy.params, {
+            signal: extra.signal,
+            relatedRequestId: proxyRequestId,
+          });
 
       try {
         // Log response

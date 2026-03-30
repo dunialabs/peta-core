@@ -6,7 +6,7 @@ import {
   AdminRequest,
   AdminResponse,
   AdminErrorCode,
-  AdminError
+  AdminError,
 } from '../types/admin.types.js';
 import { IpWhitelistService } from '../security/IpWhitelistService.js';
 import { UserHandler } from './handlers/UserHandler.js';
@@ -20,9 +20,11 @@ import { CloudflaredHandler } from './handlers/CloudflaredHandler.js';
 import { SkillsHandler } from './handlers/SkillsHandler.js';
 import { PolicyHandler } from './handlers/PolicyHandler.js';
 import { ApprovalHandler } from './handlers/ApprovalHandler.js';
+import { CacheHandler } from './handlers/CacheHandler.js';
 import { UserRole } from '../types/enums.js';
 import { createLogger } from '../logger/index.js';
 import { SocketService } from '../socket/SocketService.js';
+import { ResultCacheService } from '../mcp/core/cache/ResultCacheService.js';
 
 /**
  * Configuration server management interface
@@ -40,13 +42,12 @@ export class ConfigController {
   private skillsHandler: SkillsHandler;
   private policyHandler: PolicyHandler;
   private approvalHandler: ApprovalHandler;
-  
+  private cacheHandler: CacheHandler;
+
   // Logger for ConfigController
   private logger = createLogger('ConfigController');
 
-  constructor(
-    private ipWhitelistService?: IpWhitelistService,
-  ) {
+  constructor(private ipWhitelistService?: IpWhitelistService) {
     // Initialize all Handlers
     this.userHandler = new UserHandler();
     this.serverHandler = new ServerHandler();
@@ -59,6 +60,7 @@ export class ConfigController {
     this.skillsHandler = new SkillsHandler();
     this.policyHandler = new PolicyHandler();
     this.approvalHandler = new ApprovalHandler();
+    this.cacheHandler = new CacheHandler();
   }
 
   /**
@@ -68,6 +70,14 @@ export class ConfigController {
   setSocketService(socketService: SocketService): void {
     // Update ProxyHandler's socketService reference
     this.proxyHandler.setSocketService(socketService);
+  }
+
+  setCacheHandler(cacheHandler: CacheHandler): void {
+    this.cacheHandler = cacheHandler;
+  }
+
+  setResultCacheService(resultCacheService: ResultCacheService): void {
+    this.cacheHandler.setResultCacheService(resultCacheService);
   }
 
   /**
@@ -85,15 +95,15 @@ export class ConfigController {
   private async handleAdminRequest(req: Request, res: Response): Promise<void> {
     try {
       const adminRequest: AdminRequest<any> = req.body;
-      
+
       // Validate request format
       if (!this.validateAdminRequest(adminRequest)) {
         const errorResponse: AdminResponse = {
           success: false,
           error: {
             code: AdminErrorCode.INVALID_REQUEST,
-            message: 'Invalid admin request format'
-          }
+            message: 'Invalid admin request format',
+          },
         };
         res.status(400).json(errorResponse);
         return;
@@ -101,19 +111,26 @@ export class ConfigController {
 
       const token = req.headers['authorization']?.substring(7);
 
-      if (![AdminActionType.GET_PROXY,
-        AdminActionType.CREATE_PROXY,
-        AdminActionType.CREATE_USER,
-        AdminActionType.GET_OWNER,
-        AdminActionType.RESTORE_DATABASE,
-        AdminActionType.COUNT_USERS,
-        AdminActionType.COUNT_SERVERS].includes(adminRequest.action)) {
+      if (
+        ![
+          AdminActionType.GET_PROXY,
+          AdminActionType.CREATE_PROXY,
+          AdminActionType.CREATE_USER,
+          AdminActionType.GET_OWNER,
+          AdminActionType.RESTORE_DATABASE,
+          AdminActionType.COUNT_USERS,
+          AdminActionType.COUNT_SERVERS,
+        ].includes(adminRequest.action)
+      ) {
         if (!token) {
           throw new AdminError('Token is required', AdminErrorCode.FORBIDDEN);
         }
 
         if (req.authContext?.role !== UserRole.Owner && req.authContext?.role !== UserRole.Admin) {
-          throw new AdminError('Only Owner and Admin role can perform admin operations.', AdminErrorCode.FORBIDDEN);
+          throw new AdminError(
+            'Only Owner and Admin role can perform admin operations.',
+            AdminErrorCode.FORBIDDEN,
+          );
         }
 
         // Cache Owner token for lazy start
@@ -175,14 +192,20 @@ export class ConfigController {
           break;
         case AdminActionType.UPDATE_SERVER_LAUNCH_CMD:
           if (req.authContext?.role !== UserRole.Owner) {
-            throw new AdminError('Only Owner role can update server launch cmd.', AdminErrorCode.FORBIDDEN);
+            throw new AdminError(
+              'Only Owner role can update server launch cmd.',
+              AdminErrorCode.FORBIDDEN,
+            );
           }
           this.validateTargetIdentifier(adminRequest.data);
           result = await this.serverHandler.handleUpdateServerLaunchCmd(adminRequest, token!);
           break;
         case AdminActionType.CONNECT_ALL_SERVERS:
           if (req.authContext?.role !== UserRole.Owner) {
-            throw new AdminError('Only Owner role can connect all servers.', AdminErrorCode.FORBIDDEN);
+            throw new AdminError(
+              'Only Owner role can connect all servers.',
+              AdminErrorCode.FORBIDDEN,
+            );
           }
           result = await this.serverHandler.handleConnectAllServers(adminRequest, token!);
           break;
@@ -279,7 +302,10 @@ export class ConfigController {
         case AdminActionType.SET_LOG_WEBHOOK_URL:
           // Only Owner role can set webhook URL
           if (req.authContext?.role !== UserRole.Owner) {
-            throw new AdminError('Only Owner role can set log webhook URL.', AdminErrorCode.FORBIDDEN);
+            throw new AdminError(
+              'Only Owner role can set log webhook URL.',
+              AdminErrorCode.FORBIDDEN,
+            );
           }
           result = await this.logHandler.handleSetLogWebhookUrl(adminRequest);
           break;
@@ -329,9 +355,71 @@ export class ConfigController {
         case AdminActionType.DELETE_SERVER_SKILLS:
           // Only Owner role can delete server skills
           if (req.authContext?.role !== UserRole.Owner) {
-            throw new AdminError('Only Owner role can delete server skills.', AdminErrorCode.FORBIDDEN);
+            throw new AdminError(
+              'Only Owner role can delete server skills.',
+              AdminErrorCode.FORBIDDEN,
+            );
           }
           result = await this.skillsHandler.handleDeleteServerSkills(adminRequest, token!);
+          break;
+
+        // ==================== Result Cache Operations (11000-11099) ====================
+        case AdminActionType.CACHE_GET_HEALTH:
+          result = await this.cacheHandler.handleGetHealth(adminRequest);
+          break;
+        case AdminActionType.CACHE_GET_POLICY:
+          result = await this.cacheHandler.handleGetPolicy(adminRequest);
+          break;
+        case AdminActionType.CACHE_PURGE_GLOBAL:
+          result = await this.cacheHandler.handlePurgeGlobal(adminRequest);
+          break;
+        case AdminActionType.CACHE_PURGE_SERVER:
+          result = await this.cacheHandler.handlePurgeServer(adminRequest);
+          break;
+        case AdminActionType.CACHE_PURGE_TOOL:
+          result = await this.cacheHandler.handlePurgeTool(adminRequest);
+          break;
+        case AdminActionType.CACHE_PURGE_PROMPT:
+          result = await this.cacheHandler.handlePurgePrompt(adminRequest);
+          break;
+        case AdminActionType.CACHE_PURGE_RESOURCE:
+          result = await this.cacheHandler.handlePurgeResource(adminRequest);
+          break;
+        case AdminActionType.CACHE_PURGE_EXACT:
+          result = await this.cacheHandler.handlePurgeExact(adminRequest);
+          
+        // ==================== Policy Operations (9100-9199) ====================
+        case AdminActionType.CREATE_POLICY_SET:
+          result = await this.policyHandler.handleCreatePolicySet(adminRequest);
+          break;
+        case AdminActionType.GET_POLICY_SETS:
+          result = await this.policyHandler.handleGetPolicySets(adminRequest);
+          break;
+        case AdminActionType.UPDATE_POLICY_SET:
+          result = await this.policyHandler.handleUpdatePolicySet(adminRequest);
+          break;
+        case AdminActionType.DELETE_POLICY_SET:
+          result = await this.policyHandler.handleDeletePolicySet(adminRequest);
+          break;
+        case AdminActionType.GET_EFFECTIVE_POLICY:
+          result = await this.policyHandler.handleGetEffectivePolicy(adminRequest);
+          break;
+
+        // ==================== Approval Operations (9200-9299) ====================
+        case AdminActionType.LIST_APPROVAL_REQUESTS:
+          result = await this.approvalHandler.handleListApprovalRequests(adminRequest);
+          break;
+        case AdminActionType.GET_APPROVAL_REQUEST:
+          result = await this.approvalHandler.handleGetApprovalRequest(adminRequest);
+          break;
+        case AdminActionType.DECIDE_APPROVAL_REQUEST:
+          result = await this.approvalHandler.handleDecideApprovalRequest(
+            adminRequest,
+            req.authContext,
+          );
+          break;
+        case AdminActionType.GET_PENDING_APPROVALS_COUNT:
+          result = await this.approvalHandler.handleGetPendingApprovalsCount(adminRequest);
           break;
 
         // ==================== Policy Operations (9100-9199) ====================
@@ -368,25 +456,25 @@ export class ConfigController {
           result = await this.approvalHandler.handleGetPendingApprovalsCount(adminRequest);
           break;
 
-        default:
+        default: {
           const errorResponse: AdminResponse = {
             success: false,
             error: {
               code: AdminErrorCode.INVALID_REQUEST,
-              message: `Unknown action type: ${adminRequest.action}`
-            }
+              message: `Unknown action type: ${adminRequest.action}`,
+            },
           };
           res.status(400).json(errorResponse);
           return;
+        }
       }
 
       // Return success response
       const successResponse: AdminResponse = {
         success: true,
-        data: result ?? {}
+        data: result ?? {},
       };
       res.json(successResponse);
-
     } catch (error) {
       const action = req.body.action;
       this.logger.error({ action, error }, 'Admin request error');
@@ -398,8 +486,8 @@ export class ConfigController {
         success: false,
         error: {
           code: code,
-          message: error instanceof Error ? error.message : 'Internal server error'
-        }
+          message: error instanceof Error ? error.message : 'Internal server error',
+        },
       };
       res.status(500).json(errorResponse);
     }
@@ -418,7 +506,7 @@ export class ConfigController {
     if (!Object.values(AdminActionType).includes(request.action)) {
       return false;
     }
-  
+
     return true;
   }
 
@@ -427,16 +515,28 @@ export class ConfigController {
    */
   private validateTargetIdentifier(data: any): void {
     if (data === null || data === undefined) {
-      throw new AdminError('Invalid target identifier: data is null or undefined', AdminErrorCode.INVALID_REQUEST);
+      throw new AdminError(
+        'Invalid target identifier: data is null or undefined',
+        AdminErrorCode.INVALID_REQUEST,
+      );
     }
     if (typeof data !== 'object') {
-      throw new AdminError('Invalid target identifier: data is not an object', AdminErrorCode.INVALID_REQUEST);
+      throw new AdminError(
+        'Invalid target identifier: data is not an object',
+        AdminErrorCode.INVALID_REQUEST,
+      );
     }
     if (!('targetId' in data)) {
-      throw new AdminError('Invalid target identifier: missing targetId field', AdminErrorCode.INVALID_REQUEST);
+      throw new AdminError(
+        'Invalid target identifier: missing targetId field',
+        AdminErrorCode.INVALID_REQUEST,
+      );
     }
     if (typeof data.targetId !== 'string') {
-      throw new AdminError('Invalid target identifier: targetId is not a string', AdminErrorCode.INVALID_REQUEST);
+      throw new AdminError(
+        'Invalid target identifier: targetId is not a string',
+        AdminErrorCode.INVALID_REQUEST,
+      );
     }
   }
 }

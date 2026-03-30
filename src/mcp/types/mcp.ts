@@ -1,5 +1,5 @@
-import { DangerLevel, ServerAuthType, ServerCategory, ServerStatus } from '../../types/enums';
-
+import { DangerLevel, ServerAuthType, ServerCategory, ServerStatus } from '../../types/enums.js';
+import type { CachePolicyConfig, ResourceCachePolicies } from '../core/cache/types.js';
 
 // Base capability configuration (common part)
 export type BaseCapabilityConfig = {
@@ -10,19 +10,25 @@ export type BaseCapabilityConfig = {
 // Tool capability configuration (extends base configuration, adds danger level)
 export type ToolCapabilityConfig = BaseCapabilityConfig & {
   dangerLevel?: DangerLevel;
+  cache?: CachePolicyConfig;
 };
 
 // Resource capability configuration (currently same as base configuration, for future extension)
-export type ResourceCapabilityConfig = BaseCapabilityConfig;
+export type ResourceCapabilityConfig = BaseCapabilityConfig & {
+  cache?: CachePolicyConfig;
+};
 
 // Prompt capability configuration (currently same as base configuration, for future extension)
-export type PromptCapabilityConfig = BaseCapabilityConfig;
+export type PromptCapabilityConfig = BaseCapabilityConfig & {
+  cache?: CachePolicyConfig;
+};
 
 // Base capability configuration definition
 export type ServerConfigCapabilities = {
   tools: { [toolName: string]: ToolCapabilityConfig };
   resources: { [resourceName: string]: ResourceCapabilityConfig };
   prompts: { [promptName: string]: PromptCapabilityConfig };
+  resourceCachePolicies?: ResourceCachePolicies;
 };
 
 // Server configuration with enabled status (extends base configuration)
@@ -32,8 +38,8 @@ export type ServerConfigWithEnabled = ServerConfigCapabilities & {
   allowUserInput: boolean;
   authType: ServerAuthType;
   category?: ServerCategory;
-  configTemplate: string;      // JSON string format
-  configured: boolean;          // Whether user has configured this Server
+  configTemplate: string; // JSON string format
+  configured: boolean; // Whether user has configured this Server
   status?: ServerStatus;
 };
 
@@ -75,7 +81,7 @@ export type EventId = string;
  * JSON-RPC message type (imported from MCP SDK)
  */
 export interface JSONRPCMessage {
-  jsonrpc: "2.0";
+  jsonrpc: '2.0';
   id?: string | number | null;
   method?: string;
   params?: any;

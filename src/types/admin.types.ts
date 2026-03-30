@@ -7,83 +7,92 @@
  */
 export enum AdminActionType {
   // User operations (1000-1999)
-  DISABLE_USER = 1001,                    // Disable access permissions for specified user
-  UPDATE_USER_PERMISSIONS = 1002,         // Update user permissions
-  CREATE_USER = 1010,                     // Create user
-  GET_USERS = 1011,                       // Query user list
-  UPDATE_USER = 1012,                     // Update user
-  DELETE_USER = 1013,                     // Delete user
-  DELETE_USERS_BY_PROXY = 1014,           // Batch delete users by proxy
-  COUNT_USERS = 1015,                     // Count number of users
-  GET_OWNER = 1016,                       // Get Owner information
+  DISABLE_USER = 1001, // Disable access permissions for specified user
+  UPDATE_USER_PERMISSIONS = 1002, // Update user permissions
+  CREATE_USER = 1010, // Create user
+  GET_USERS = 1011, // Query user list
+  UPDATE_USER = 1012, // Update user
+  DELETE_USER = 1013, // Delete user
+  DELETE_USERS_BY_PROXY = 1014, // Batch delete users by proxy
+  COUNT_USERS = 1015, // Count number of users
+  GET_OWNER = 1016, // Get Owner information
 
   // Server operations (2000-2999)
-  START_SERVER = 2001,                    // Start specified server
-  STOP_SERVER = 2002,                     // Stop specified server
-  UPDATE_SERVER_CAPABILITIES = 2003,      // Update server capabilities configuration
-  UPDATE_SERVER_LAUNCH_CMD = 2004,        // Update launch command
-  CONNECT_ALL_SERVERS = 2005,             // Connect all servers
-  CREATE_SERVER = 2010,                   // Create server
-  GET_SERVERS = 2011,                     // Query server list
-  UPDATE_SERVER = 2012,                   // Update server
-  DELETE_SERVER = 2013,                   // Delete server
-  DELETE_SERVERS_BY_PROXY = 2014,         // Batch delete servers by proxy
-  COUNT_SERVERS = 2015,                   // Count number of servers
+  START_SERVER = 2001, // Start specified server
+  STOP_SERVER = 2002, // Stop specified server
+  UPDATE_SERVER_CAPABILITIES = 2003, // Update server capabilities configuration
+  UPDATE_SERVER_LAUNCH_CMD = 2004, // Update launch command
+  CONNECT_ALL_SERVERS = 2005, // Connect all servers
+  CREATE_SERVER = 2010, // Create server
+  GET_SERVERS = 2011, // Query server list
+  UPDATE_SERVER = 2012, // Update server
+  DELETE_SERVER = 2013, // Delete server
+  DELETE_SERVERS_BY_PROXY = 2014, // Batch delete servers by proxy
+  COUNT_SERVERS = 2015, // Count number of servers
 
   // Query operations (3000-3999)
   GET_AVAILABLE_SERVERS_CAPABILITIES = 3002, // Get all server capabilities configuration
   GET_USER_AVAILABLE_SERVERS_CAPABILITIES = 3003, // Get user accessible server capabilities configuration
-  GET_SERVERS_STATUS = 3004,              // Get all server status
-  GET_SERVERS_CAPABILITIES = 3005,        // Get specified server capabilities configuration
+  GET_SERVERS_STATUS = 3004, // Get all server status
+  GET_SERVERS_CAPABILITIES = 3005, // Get specified server capabilities configuration
 
   // IP whitelist operations (4000-4999)
-  UPDATE_IP_WHITELIST = 4001,             // Replace mode: Delete all existing IPs, save new IP list to database and load into memory
-  GET_IP_WHITELIST = 4002,                // Query IP whitelist
-  DELETE_IP_WHITELIST = 4003,             // Delete specified IP whitelist
-  ADD_IP_WHITELIST = 4004,                // Append mode: Add IP to whitelist (without deleting existing IPs)
-  SPECIAL_IP_WHITELIST_OPERATION = 4005,  // IP filter switch: allow-all disables filtering/deny-all enables filtering
+  UPDATE_IP_WHITELIST = 4001, // Replace mode: Delete all existing IPs, save new IP list to database and load into memory
+  GET_IP_WHITELIST = 4002, // Query IP whitelist
+  DELETE_IP_WHITELIST = 4003, // Delete specified IP whitelist
+  ADD_IP_WHITELIST = 4004, // Append mode: Add IP to whitelist (without deleting existing IPs)
+  SPECIAL_IP_WHITELIST_OPERATION = 4005, // IP filter switch: allow-all disables filtering/deny-all enables filtering
 
   // Proxy operations (5000-5099)
-  GET_PROXY = 5001,                       // Query proxy information
-  CREATE_PROXY = 5002,                    // Create proxy
-  UPDATE_PROXY = 5003,                    // Update proxy
-  DELETE_PROXY = 5004,                    // Delete proxy
-  STOP_PROXY   = 5005,                    // Stop all servers for proxy
+  GET_PROXY = 5001, // Query proxy information
+  CREATE_PROXY = 5002, // Create proxy
+  UPDATE_PROXY = 5003, // Update proxy
+  DELETE_PROXY = 5004, // Delete proxy
+  STOP_PROXY = 5005, // Stop all servers for proxy
 
   // Backup and restore (6000-6099)
-  BACKUP_DATABASE = 6001,                 // Full database backup
-  RESTORE_DATABASE = 6002,                // Full database restore
+  BACKUP_DATABASE = 6001, // Full database backup
+  RESTORE_DATABASE = 6002, // Full database restore
 
   // Log operations (7000-7099)
-  SET_LOG_WEBHOOK_URL = 7001,             // Set log sync webhook URL
-  GET_LOGS = 7002,                        // Get log records
+  SET_LOG_WEBHOOK_URL = 7001, // Set log sync webhook URL
+  GET_LOGS = 7002, // Get log records
 
   // Cloudflared operations (8000-8099)
-  UPDATE_CLOUDFLARED_CONFIG = 8001,       // Update cloudflared configuration
-  GET_CLOUDFLARED_CONFIGS = 8002,         // Query cloudflared configuration list
-  DELETE_CLOUDFLARED_CONFIG = 8003,       // Delete cloudflared configuration
-  RESTART_CLOUDFLARED = 8004,             // Restart cloudflared
-  STOP_CLOUDFLARED = 8005,                // Stop cloudflared
+  UPDATE_CLOUDFLARED_CONFIG = 8001, // Update cloudflared configuration
+  GET_CLOUDFLARED_CONFIGS = 8002, // Query cloudflared configuration list
+  DELETE_CLOUDFLARED_CONFIG = 8003, // Delete cloudflared configuration
+  RESTART_CLOUDFLARED = 8004, // Restart cloudflared
+  STOP_CLOUDFLARED = 8005, // Stop cloudflared
 
   // Skills operations (10040-10043)
-  LIST_SKILLS = 10040,                    // List all skills
-  UPLOAD_SKILL = 10041,                   // Upload skill (ZIP file)
-  DELETE_SKILL = 10042,                   // Delete skill
-  DELETE_SERVER_SKILLS = 10043,           // Delete all skills for a server
+  LIST_SKILLS = 10040, // List all skills
+  UPLOAD_SKILL = 10041, // Upload skill (ZIP file)
+  DELETE_SKILL = 10042, // Delete skill
+  DELETE_SERVER_SKILLS = 10043, // Delete all skills for a server
+
+  // Result cache operations (11000-11099)
+  CACHE_GET_HEALTH = 11001,
+  CACHE_GET_POLICY = 11002,
+  CACHE_PURGE_GLOBAL = 11010,
+  CACHE_PURGE_SERVER = 11011,
+  CACHE_PURGE_TOOL = 11012,
+  CACHE_PURGE_PROMPT = 11013,
+  CACHE_PURGE_RESOURCE = 11014,
+  CACHE_PURGE_EXACT = 11015,
 
   // Policy operations (9100-9199)
-  CREATE_POLICY_SET = 9101,               // Create a new tool policy set
-  GET_POLICY_SETS = 9102,                 // List tool policy sets
-  UPDATE_POLICY_SET = 9103,               // Update a tool policy set
-  DELETE_POLICY_SET = 9104,               // Delete a tool policy set
-  GET_EFFECTIVE_POLICY = 9105,            // Get the effective (merged) policy for evaluation
+  CREATE_POLICY_SET = 9101, // Create a new tool policy set
+  GET_POLICY_SETS = 9102, // List tool policy sets
+  UPDATE_POLICY_SET = 9103, // Update a tool policy set
+  DELETE_POLICY_SET = 9104, // Delete a tool policy set
+  GET_EFFECTIVE_POLICY = 9105, // Get the effective (merged) policy for evaluation
 
   // Approval operations (9200-9299)
-  LIST_APPROVAL_REQUESTS = 9201,          // List approval requests (with filters)
-  GET_APPROVAL_REQUEST = 9202,            // Get a single approval request by ID
-  DECIDE_APPROVAL_REQUEST = 9203,         // Approve or reject an approval request
-  GET_PENDING_APPROVALS_COUNT = 9204,     // Get count of pending approval requests
-
+  LIST_APPROVAL_REQUESTS = 9201, // List approval requests (with filters)
+  GET_APPROVAL_REQUEST = 9202, // Get a single approval request by ID
+  DECIDE_APPROVAL_REQUEST = 9203, // Approve or reject an approval request
+  GET_PENDING_APPROVALS_COUNT = 9204, // Get count of pending approval requests
 }
 
 /**
@@ -98,7 +107,7 @@ export interface TargetIdentifier {
  */
 export interface AdminRequest<T = any> {
   action: AdminActionType;
-  data: T;  // Uses generic type T, defaults to any type
+  data: T; // Uses generic type T, defaults to any type
 }
 
 /**
@@ -172,7 +181,10 @@ export enum AdminErrorCode {
 
 // Extended Error class that includes AdminErrorCode
 export class AdminError extends Error {
-  constructor(message: string, public code: AdminErrorCode) {
+  constructor(
+    message: string,
+    public code: AdminErrorCode,
+  ) {
     super(message);
   }
 }

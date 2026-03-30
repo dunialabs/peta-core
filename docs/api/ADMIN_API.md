@@ -84,6 +84,16 @@ DELETE_CLOUDFLARED_CONFIG = 8003, // Delete cloudflared configuration
 RESTART_CLOUDFLARED = 8004, // Restart cloudflared
 STOP_CLOUDFLARED = 8005, // Stop cloudflared
 
+// Result cache operations (11000-11099)
+CACHE_GET_HEALTH = 11001,
+CACHE_GET_POLICY = 11002,
+CACHE_PURGE_GLOBAL = 11010,
+CACHE_PURGE_SERVER = 11011,
+CACHE_PURGE_TOOL = 11012,
+CACHE_PURGE_PROMPT = 11013,
+CACHE_PURGE_RESOURCE = 11014,
+CACHE_PURGE_EXACT = 11015,
+
 // Policy operations (9100-9199)
 CREATE_POLICY_SET = 9101, // Create policy set
 GET_POLICY_SETS = 9102, // Get policy sets
@@ -1950,6 +1960,262 @@ null
 - For complete cleanup, use `DELETE_CLOUDFLARED_CONFIG (8003)`
 
 ---
+
+---
+
+### Result Cache Operations (11000-11099)
+
+Result-cache APIs are admin-facing controls used to inspect cache status/policies and purge cache entries by scope.
+
+#### 11001 CACHE_GET_HEALTH
+
+**Permission**: Owner + Admin
+**Function**: Get result-cache health and metric snapshot.
+
+**Request Parameters** (data):
+
+```json
+{}
+```
+
+**Return Result** (data):
+
+```json
+{
+  "enabled": true,
+  "health": {
+    "ok": true,
+    "backend": "db",
+    "details": "healthy"
+  },
+  "metrics": {
+    "lookup": 10,
+    "hit": 7,
+    "miss": 3,
+    "purge": 1
+  }
+}
+```
+
+---
+
+#### 11002 CACHE_GET_POLICY
+
+**Permission**: Owner + Admin
+**Function**: Get cache policy configuration.
+
+**Request Parameters** (data):
+
+- `serverId` (string, optional):
+  - omitted → return global cache config only
+  - provided → return global config + server-level policy projection
+
+**Return Result** (data):
+
+```json
+{
+  "serverId": "github",
+  "globalConfig": {
+    "enabled": true,
+    "backend": "db",
+    "defaultTtlSeconds": 30,
+    "defaultAdmissionPolicy": "immediate",
+    "defaultAdmissionWindowSeconds": 300,
+    "maxEntryBytes": 262144
+  },
+  "tools": {
+    "create_issue": { "enabled": true, "ttlSeconds": 30 }
+  },
+  "prompts": {
+    "summarize": { "enabled": true, "ttlSeconds": 30 }
+  },
+  "resources": {
+    "exact": {
+      "repo://owner/repo": { "enabled": true, "ttlSeconds": 30 }
+    },
+    "inline": {
+      "repo://owner/repo": { "enabled": true, "ttlSeconds": 30 }
+    },
+    "patterns": [
+      {
+        "pattern": "repo://owner/*",
+        "enabled": true,
+        "cache": { "enabled": true, "ttlSeconds": 30 }
+      }
+    ]
+  }
+}
+```
+
+**Resource policy layers**:
+
+- `tools`, `prompts`, and `resources` are projected fields and may be omitted when Core cannot load/parse stored capabilities for `serverId`.
+- `resources.exact`: normalized projection of `resourceCachePolicies.exact` (highest-priority exact match), returned as cache-policy objects (`{ ...cache, enabled }`) rather than raw `{ enabled?, cache? }` entries.
+- `resources.inline`: from `capabilities.resources[uri].cache` (fallback per-resource cache)
+- `resources.patterns`: from `resourceCachePolicies.patterns` (pattern-based fallback)
+
+---
+
+#### 11010 CACHE_PURGE_GLOBAL
+
+**Permission**: Owner + Admin
+**Function**: Purge all cache entries.
+
+**Request Parameters** (data):
+
+- `reason` (string, optional): optional audit context
+
+**Return Result** (data):
+
+```json
+{
+  "purged": true,
+  "scope": "global"
+}
+```
+
+---
+
+#### 11011 CACHE_PURGE_SERVER
+
+**Permission**: Owner + Admin
+**Function**: Purge all cache entries for a server.
+
+**Request Parameters** (data):
+
+- `serverId` (string, required)
+- `reason` (string, optional)
+
+**Return Result** (data):
+
+```json
+{
+  "purged": true,
+  "scope": "server",
+  "serverId": "github"
+}
+```
+
+---
+
+#### 11012 CACHE_PURGE_TOOL
+
+**Permission**: Owner + Admin
+**Function**: Purge cache for one tool on a server.
+
+**Request Parameters** (data):
+
+- `serverId` (string, required)
+- `toolName` (string, required)
+- `reason` (string, optional)
+
+**Return Result** (data):
+
+```json
+{
+  "purged": true,
+  "scope": "tool",
+  "serverId": "github",
+  "toolName": "create_issue"
+}
+```
+
+---
+
+#### 11013 CACHE_PURGE_PROMPT
+
+**Permission**: Owner + Admin
+**Function**: Purge cache for one prompt on a server.
+
+**Request Parameters** (data):
+
+- `serverId` (string, required)
+- `promptName` (string, required)
+- `reason` (string, optional)
+
+**Return Result** (data):
+
+```json
+{
+  "purged": true,
+  "scope": "prompt",
+  "serverId": "github",
+  "promptName": "summarize"
+}
+```
+
+---
+
+#### 11014 CACHE_PURGE_RESOURCE
+
+**Permission**: Owner + Admin
+**Function**: Purge cache for one resource URI on a server.
+
+**Request Parameters** (data):
+
+- `serverId` (string, required)
+- `uri` (string, required)
+- `reason` (string, optional)
+
+**Return Result** (data):
+
+```json
+{
+  "purged": true,
+  "scope": "resource",
+  "serverId": "github",
+  "uri": "repo://owner/repo"
+}
+```
+
+---
+
+#### 11015 CACHE_PURGE_EXACT
+
+**Permission**: Owner + Admin
+**Function**: Purge a single exact cache key computed from operation/server/entity/scope/request params.
+
+**Request Parameters** (data):
+
+- `operation` (string, required): one of `tool`, `resource`, `prompt`
+- `serverId` (string, required)
+- `entityId` (string, required):
+  - `tool` operation → tool name
+  - `prompt` operation → prompt name
+  - `resource` operation → resource URI
+- `policy` (object, optional): resolved cache policy object.
+  - if omitted, server resolves effective policy from stored `server.capabilities` in Core
+  - explicit `policy` must follow `ResolvedCachePolicy` shape:
+    - `enabled` (boolean)
+    - `ttlSeconds` (number)
+    - `scope` (`global` | `user` | `tenant`)
+    - `admissionPolicy` (`immediate` | `second_hit`)
+    - `admissionWindowSeconds` (number)
+    - `denyFields` (string[])
+    - `allowFields` (string[], optional)
+    - `maxEntryBytes` (number)
+  - this shape is different from `CACHE_GET_POLICY` entity configs (`CachePolicyConfig`, including nested `key.denyFields` / `key.allowFields`)
+- `scopeContext` (object, optional): `{ userId?: string, tenantId?: string }`
+- `requestParams` (unknown, optional): request payload used in cache-key canonicalization
+- `reason` (string, optional)
+
+**Scope validation rules**:
+
+- if resolved scope is `user`, `scopeContext.userId` is required
+- if resolved scope is `tenant`, `scopeContext.tenantId` is required
+- if `policy` is omitted and server/policy cannot be resolved for the target entity, the request fails
+
+**Return Result** (data):
+
+```json
+{
+  "purged": true,
+  "scope": "exact",
+  "operation": "tool",
+  "serverId": "github",
+  "entityId": "create_issue"
+}
+```
 
 ---
 

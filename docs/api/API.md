@@ -242,6 +242,7 @@ Admin API provides user management, server configuration, IP whitelist, log quer
 | **Backup & Restore** | Database backup and restore | Owner/Admin |
 | **Log Management** | Query audit logs | Owner |
 | **Cloudflared** | Manage Cloudflare Tunnel | Owner/Admin |
+| **Result Cache** | Health, policy inspection, and scoped purge (global/server/tool/prompt/resource/exact) | Owner/Admin |
 
 #### Unified Request Format
 
@@ -278,8 +279,11 @@ curl -X POST http://localhost:3002/admin \
 | Get Server Status | `3004` | GET_SERVERS_STATUS |
 | Get IP Whitelist | `4002` | GET_IP_WHITELIST |
 | Update IP Whitelist | `4001` | UPDATE_IP_WHITELIST |
+| Get Cache Health | `11001` | CACHE_GET_HEALTH |
+| Get Cache Policy | `11002` | CACHE_GET_POLICY |
+| Purge Cache (Scoped) | `11010` ~ `11015` | CACHE_PURGE_* |
 
-**Detailed Documentation**: See [ADMIN_API.md](./ADMIN_API.md) for all 80+ admin operations.
+**Detailed Documentation**: See [ADMIN_API.md](./ADMIN_API.md) for all admin operations including result-cache health/policy/purge APIs.
 
 ---
 
@@ -630,6 +634,6 @@ socket.on('notification', (data) => {
 
 ---
 
-**Version**: 2.0
-**Last Updated**: 2025-01-15
-**Change Notes**: Refactored into navigation index document, detailed content separated into specialized documents
+**Version**: 2.1
+**Last Updated**: 2026-03-28
+**Change Notes**: Added result-cache admin API coverage (`11001`, `11002`, `11010`-`11015`) and updated admin quick reference.

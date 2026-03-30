@@ -66,6 +66,12 @@ Peta Core is one component of the Peta MCP stack:
 - Human-in-the-loop approvals. Durable approval queue with explicit lifecycle states and replay-safe retries.
 - Rate limiting and network controls. Per-user quotas with sliding window enforcement. Optional IP allow-lists per workspace.
 
+### Result Cache
+
+- Configurable result caching with per-entity policy controls (`tools`, `prompts`, `resources.inline`, `resources.exact`, `resources.patterns`).
+- Safe-by-default behavior for tool results: approval-gated or error results are not promoted into cache.
+- Scope-aware cache keys and purge controls, including exact purge with operation/entity-level targeting.
+
 ### Audit & Observability
 
 - Audit trail. Records caller identity, tool name, policy decision, approval status, and outcome for every tool call. Secrets are excluded from log payloads.
