@@ -1688,6 +1688,7 @@ export class ProxySession {
             signal: extra.signal,
             relatedRequestId: proxyRequestId,
           });
+      const rewrittenResult = this.rewriteAppResourceResult(serverResult, result.serverID);
 
       try {
         // Log response to client
