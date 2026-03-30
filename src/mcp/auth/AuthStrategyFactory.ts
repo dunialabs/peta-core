@@ -6,6 +6,7 @@ import { FigmaAuthStrategy } from './FigmaAuthStrategy.js';
 import { GithubAuthStrategy } from './GithubAuthStrategy.js';
 import { CanvaAuthStrategy } from './CanvaAuthStrategy.js';
 import { ZendeskAuthStrategy } from './ZendeskAuthStrategy.js';
+import { PipedriveAuthStrategy } from './PipedriveAuthStrategy.js';
 import { createLogger } from '../../logger/index.js';
 
 // Logger for AuthStrategyFactory
@@ -28,6 +29,10 @@ export class AuthStrategyFactory {
     switch (authType) {
       case ServerAuthType.GoogleAuth:
       case ServerAuthType.GoogleCalendarAuth:
+      case ServerAuthType.GmailAuth:
+      case ServerAuthType.GoogleDocsAuth:
+      case ServerAuthType.GoogleSheetsAuth:
+      case ServerAuthType.GoogleFormsAuth:
         return new GoogleAuthStrategy({
           clientId: config.clientId,
           clientSecret: config.clientSecret,
@@ -83,6 +88,16 @@ export class AuthStrategyFactory {
           refreshTokenExpiresAt: config.refreshTokenExpiresAt,
           expiresInSeconds: config.expiresInSeconds,
           refreshTokenExpiresInSeconds: config.refreshTokenExpiresInSeconds,
+        });
+
+      case ServerAuthType.PipedriveAuth:
+        return new PipedriveAuthStrategy({
+          clientId: config.clientId,
+          clientSecret: config.clientSecret,
+          refreshToken: config.refreshToken,
+          accessToken: config.accessToken,
+          expiresAt: config.expiresAt,
+          apiDomain: config.apiDomain,
         });
 
       case ServerAuthType.ApiKey:

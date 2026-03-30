@@ -412,6 +412,15 @@ export class UserRequestHandler {
                   refreshToken: exchangeResult.refreshToken,
                   expiresAt: expiresAt,
                 };
+                if (server.authType === ServerAuthType.PipedriveAuth) {
+                  if (!exchangeResult.apiDomain) {
+                    throw new UserError(
+                      'Pipedrive OAuth response missing api_domain',
+                      UserErrorCode.SERVER_CONFIG_INVALID,
+                    );
+                  }
+                  decryptedLaunchConfigValue.oauth.apiDomain = exchangeResult.apiDomain;
+                }
                 if ([ServerAuthType.ZendeskAuth].includes(server.authType)) {
                   decryptedLaunchConfigValue.oauth.tokenUrl = oauthConfig.tokenUrl;
                 }

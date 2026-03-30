@@ -71,6 +71,7 @@ export enum AdminActionType {
   DELETE_SKILL = 10042, // Delete skill
   DELETE_SERVER_SKILLS = 10043, // Delete all skills for a server
 
+  // Result cache operations (11000-11099)
   CACHE_GET_HEALTH = 11001,
   CACHE_GET_POLICY = 11002,
   CACHE_PURGE_GLOBAL = 11010,

@@ -431,6 +431,7 @@ export async function startApplication() {
         .end();
     });
 
+
     // ==================== General middleware ====================
 
     // Body parser middleware - must be before middleware that needs to access req.body

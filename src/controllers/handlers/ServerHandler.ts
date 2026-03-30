@@ -432,6 +432,12 @@ export class ServerHandler {
                     refreshToken: exchangeResult.refreshToken,
                     expiresAt: expiresAt,
                   };
+                  if (authType === ServerAuthType.PipedriveAuth) {
+                    if (!exchangeResult.apiDomain) {
+                      throw new AdminError('Pipedrive OAuth response missing api_domain', AdminErrorCode.INVALID_REQUEST);
+                    }
+                    decryptedLaunchConfigValue.oauth.apiDomain = exchangeResult.apiDomain;
+                  }
                   if ([ServerAuthType.ZendeskAuth].includes(authType)) {
                     decryptedLaunchConfigValue.oauth.tokenUrl = oauthConfig.tokenUrl;
                   }
@@ -1156,6 +1162,11 @@ export class ServerHandler {
             temporaryServer.clearConnectionState(ServerStatus.Sleeping);
           }
         }
+        if (lazyStartEnabled === true && existingServer.lazyStartEnabled === false) {
+          if (temporaryServer.status !== ServerStatus.Online && temporaryServer.status !== ServerStatus.Connecting) {
+            temporaryServer.clearConnectionState(ServerStatus.Sleeping);
+          }
+        }
       }
     } else {
       const context = ServerManager.instance.getServerContext(serverId);
@@ -1174,6 +1185,11 @@ export class ServerHandler {
             context.status !== ServerStatus.Online &&
             context.status !== ServerStatus.Connecting
           ) {
+            context.clearConnectionState(ServerStatus.Sleeping);
+          }
+        }
+        if (lazyStartEnabled === true && existingServer.lazyStartEnabled === false) {
+          if (context.status !== ServerStatus.Online && context.status !== ServerStatus.Connecting) {
             context.clearConnectionState(ServerStatus.Sleeping);
           }
         }

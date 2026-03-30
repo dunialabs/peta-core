@@ -475,6 +475,10 @@ export class ServerManager {
     switch (authType) {
       case ServerAuthType.GoogleAuth:
       case ServerAuthType.GoogleCalendarAuth:
+      case ServerAuthType.GmailAuth:
+      case ServerAuthType.GoogleDocsAuth:
+      case ServerAuthType.GoogleSheetsAuth:
+      case ServerAuthType.GoogleFormsAuth:
       case ServerAuthType.FigmaAuth:
       case ServerAuthType.GithubAuth:
       case ServerAuthType.CanvaAuth:
@@ -504,6 +508,20 @@ export class ServerManager {
           notionToken: accessToken,
         };
         break;
+
+      case ServerAuthType.PipedriveAuth: {
+        const apiDomain = launchConfig.oauth?.apiDomain;
+        if (!apiDomain || typeof apiDomain !== 'string') {
+          throw new Error('[ServerManager] Missing apiDomain for server auth type PipedriveAuth');
+        }
+
+        launchConfig.env = {
+          ...launchConfig.env,
+          apiDomain: apiDomain,
+          accessToken: accessToken,
+        };
+        break;
+      }
 
       default:
         break;
@@ -1311,11 +1329,16 @@ export class ServerManager {
     switch (authType) {
       case ServerAuthType.GoogleAuth:
       case ServerAuthType.GoogleCalendarAuth:
+      case ServerAuthType.GmailAuth:
+      case ServerAuthType.GoogleDocsAuth:
+      case ServerAuthType.GoogleSheetsAuth:
+      case ServerAuthType.GoogleFormsAuth:
       case ServerAuthType.NotionAuth:
       case ServerAuthType.FigmaAuth:
       case ServerAuthType.GithubAuth:
       case ServerAuthType.CanvaAuth:
       case ServerAuthType.ZendeskAuth:
+      case ServerAuthType.PipedriveAuth:
         serverContext.userToken = token;
         await this.initializeOAuthWithRefresh(serverContext, launchConfig);
         break;
@@ -1358,6 +1381,15 @@ export class ServerManager {
     ) {
       throw new Error(
         `[ServerManager] Missing OAuth tokenUrl for server ${serverContext.serverID} (ZendeskAuth)`
+      );
+    }
+
+    if (
+      authType === ServerAuthType.PipedriveAuth &&
+      (!launchConfig.oauth.apiDomain || typeof launchConfig.oauth.apiDomain !== 'string')
+    ) {
+      throw new Error(
+        `[ServerManager] Missing OAuth apiDomain for server ${serverContext.serverID} (PipedriveAuth)`
       );
     }
 
