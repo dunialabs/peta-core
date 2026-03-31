@@ -73,4 +73,9 @@ describe('CustomStdioRunner helpers', () => {
   test('keeps only stderr tail up to max length', () => {
     expect(appendStderrTail('', 'abcdefghij', 5)).toBe('fghij');
   });
+
+  test('decodes Uint8Array stderr chunks as utf8 text', () => {
+    const chunk = new Uint8Array(Buffer.from('stderr text', 'utf8'));
+    expect(appendStderrTail('', chunk, 100)).toBe('stderr text');
+  });
 });

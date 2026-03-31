@@ -1,140 +1,101 @@
-# AGENTS.md - Codex Development Guidelines
+# Peta Core Agent Entry Point
 
-This file provides Codex with project development guidelines and knowledge base references.
+Use this file as a routing layer, not as a full manual. Start here, then read the smallest set of deeper docs needed for the task.
 
-## Project Overview
+## Read Order
 
-Peta Core is an MCP protocol proxy service that provides authentication, rate limiting, session management, event persistence, and OAuth 2.0 support.
+1. `START_HERE_FOR_AI.md`
+2. `docs/agent-harness/README.md`
+3. `docs/source-of-truth.md`
+4. The relevant architecture, security, API, or deployment doc
+5. The specific code files you plan to change
 
-### Tech Stack
-- TypeScript + ESM (imports use `.js` extension)
-- PostgreSQL + Prisma ORM
-- Express + Socket.IO
-- MCP Protocol
+## Product Snapshot
 
-### Core Directory Structure
+- Peta Core is the MCP gateway and control-plane runtime in the Peta stack.
+- Core responsibilities: upstream MCP compatibility, downstream server lifecycle, OAuth and token flows, policy enforcement, approval workflows, credential injection, and audit logging.
+- Runtime shape: Node.js + TypeScript ESM service with Express, Socket.IO, Prisma/Postgres, and MCP transports.
 
-```
-src/
-├── mcp/           # MCP proxy core
-│   ├── core/      # ProxySession, ServerManager, SessionStore
-│   ├── services/  # Business services
-│   └── controllers/
-├── oauth/         # OAuth 2.0 implementation
-├── socket/        # Socket.IO real-time communication
-├── security/      # Authentication & authorization
-├── middleware/    # Middleware
-├── repositories/  # Data access layer
-└── logger/        # Pino logging
-```
+## Repo Map
 
----
+- `src/mcp/`: gateway core, downstream server management, request routing, cache, transport handling.
+- `src/oauth/`: OAuth 2.0 endpoints, token issuance, and related services.
+- `src/security/`: auth, permission, and network/policy helpers.
+- `src/socket/`: real-time notification and approval channel.
+- `src/controllers/`, `src/controllers/handlers/`: external and admin-facing HTTP request handling.
+- `src/repositories/`: database access layer.
+- `src/config/`: env loading and runtime configuration.
+- `prisma/`: schema and migrations. Treat schema changes as cross-cutting work.
+- `scripts/`: startup, release, DB bootstrap, and local tooling helpers.
+- `docs/`: public-facing architecture, API, security, deployment, and reference docs.
+- `CLAUDE.md`, `PROJECT_COLLABORATION.md`, `mcp-tools-guide.md`: deeper internal reference docs.
 
-## Knowledge Base Locations
+## Task Routing
 
-| What to Know | Read File |
-|-------------|-----------|
-| Project architecture, module details | `CLAUDE.md` |
-| Tool capabilities list | `mcp-tools-guide.md` |
-| Multi-agent collaboration workflow | `PROJECT_COLLABORATION.md` |
-| Database Schema | `prisma/schema.prisma` |
+- MCP runtime, downstream transports, lazy start, cache, event persistence:
+  - `src/mcp/core/*`
+  - `src/mcp/services/*`
+  - `docs/architecture.md`
+  - `CLAUDE.md`
 
-### API Documentation
-- `docs/api/API.md` - MCP API endpoints
-- `docs/api/ADMIN_API.md` - Admin API endpoints
-- `docs/api/SOCKET_USAGE.md` - Socket.IO usage guide
+- Authentication, OAuth, permissions, approvals:
+  - `src/oauth/*`
+  - `src/security/*`
+  - `src/middleware/*`
+  - `src/mcp/auth/*`
+  - `docs/security.md`
+  - `docs/api/API.md`
 
-### Architecture Design
-- `docs/architecture/EVENTSTORE_README.md` - EventStore architecture
-- `docs/architecture/MCP_PROXY_REQUESTID_SOLUTION.md` - RequestId mapping design
-- `docs/architecture/MCP_ADVANCED_FEATURES.md` - MCP advanced features
+- Admin API, user management, external control surface:
+  - `src/controllers/*`
+  - `src/controllers/handlers/*`
+  - `src/user/*`
+  - `docs/api/ADMIN_API.md`
+  - `docs/reference.md`
 
-### Implementation Records
-- `docs/implementation/` - Feature implementation documentation
+- Socket.IO and real-time workflows:
+  - `src/socket/*`
+  - `docs/api/SOCKET_USAGE.md`
+  - `docs/reference.md`
 
-### Migration Guides
-- `docs/migration/` - Migration-related documentation
+- Database, audit persistence, schema:
+  - `prisma/schema.prisma`
+  - `src/repositories/*`
+  - `docs/architecture.md`
+  - `docs/reference.md`
 
----
+- Runtime, startup, and deployment:
+  - `src/config/*`
+  - `src/index.ts`
+  - `scripts/*`
+  - `Dockerfile`
+  - `docker-compose.yml`
+  - `docs/deployment.md`
+  - `docs/DOCKER_DEPLOYMENT.md`
 
-## Development Guidelines
+## Working Rules
 
-### Code Style
-- 2-space indentation, single quotes
-- Class names `PascalCase`, functions/variables `camelCase`
-- Relative imports use `.js` extension
-- Environment variables `UPPER_SNAKE_CASE`
-- Configuration in `.env` file, no hardcoded secrets
+- Prefer minimal, targeted edits over broad rewrites.
+- Preserve upstream MCP compatibility and avoid silent contract drift.
+- Keep security, approval, and audit behavior explicit; do not weaken guardrails accidentally.
+- When changing schema, request/response shapes, auth behavior, deployment flow, or runtime commands, update docs and types in the same task.
+- Any change that affects user-visible behavior, API contracts, schema, runtime commands, deployment flow, permissions, approvals, or operator workflow must either update the relevant docs in the same task or explicitly state why no doc update is needed.
+- Treat stale documentation as a defect. If you find conflicting docs, update the source-of-truth document first and then reconcile or remove downstream duplicates.
+- Avoid touching generated output under `dist/` unless the task explicitly targets built artifacts.
+- For non-trivial work, create a short execution plan from `docs/agent-harness/EXEC_PLAN_TEMPLATE.md` before editing.
 
-### Logging Guidelines
-```typescript
-import { createLogger } from '../logger/index.js';
-const logger = createLogger('ModuleName');
+## Verification
 
-// Log levels: trace < debug < info < warn < error < fatal
-logger.info({ userId, requestId }, 'Processing request');
-logger.error({ error }, 'Failed to process');
-```
+- Docs gate: `npm run docs:check`
+- Fast path: `npm run verify:fast`
+- Smoke path: `npm run verify:smoke`
+- Full path: `npm run verify:full`
+- Database changes: also run `npm run db:generate`
 
-### Error Handling
-- Use structured error types (AuthError, McpError)
-- Logs include context (userId, sessionId, requestId)
+## Done Definition
 
----
-
-## Post-Development Update Workflow
-
-1. **Documentation Updates**
-   - New modules/interfaces → Update `CLAUDE.md` architecture description
-   - API changes → Update `docs/api/API.md`
-   - New features → Create `FeatureName_IMPLEMENTATION.md` in `docs/implementation/`
-
-2. **Knowledge Sharing**
-   - Complex implementations → Add to "Implementation Patterns" in `CLAUDE.md`
-   - Lessons learned → Add to "Common Pitfalls" in `CLAUDE.md`
-
-3. **Testing & Verification**
-   - Run `npm test` to verify
-   - Run `npm run build` to ensure compilation succeeds
-
----
-
-## Documentation Management Principles
-
-- ❌ Do not create duplicate documents
-- ✅ Update existing documents, maintain single source of truth
-- ✅ Check for existing related documents before modifying
-
----
-
-## Common Commands
-
-### Development
-```bash
-npm run dev              # Start development server
-npm run dev:backend-only # Start backend only
-npm run build            # Compile TypeScript
-npm run rebuild          # Clean and rebuild
-```
-
-### Database
-```bash
-npm run db:start         # Start PostgreSQL
-npm run db:init          # Initialize database
-npm run db:studio        # Open Prisma Studio
-npm run db:migrate:deploy # Apply migrations
-```
-
-### Testing
-```bash
-npm test                 # Run all tests
-npm test -- --testPathPattern=filename  # Run specific test
-```
-
----
-
-## Reference Documentation
-
-- `CLAUDE.md` - Complete project architecture (**Required reading**)
-- `PROJECT_COLLABORATION.md` - Multi-agent collaboration documentation
-- `README.md` - Project introduction
+- Behavior change is summarized clearly.
+- Relevant verification commands are run, or skipped with a reason.
+- Cross-cutting changes update docs, types, and schema artifacts together.
+- Documentation impact is accounted for explicitly: docs updated, or a written reason explains why no update was needed.
+- Final review covers protocol compatibility, failure paths, observability impact, and rollback/mitigation notes.

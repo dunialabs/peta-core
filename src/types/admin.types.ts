@@ -71,6 +71,16 @@ export enum AdminActionType {
   DELETE_SKILL = 10042, // Delete skill
   DELETE_SERVER_SKILLS = 10043, // Delete all skills for a server
 
+  // Result cache operations (11000-11099)
+  CACHE_GET_HEALTH = 11001,
+  CACHE_GET_POLICY = 11002,
+  CACHE_PURGE_GLOBAL = 11010,
+  CACHE_PURGE_SERVER = 11011,
+  CACHE_PURGE_TOOL = 11012,
+  CACHE_PURGE_PROMPT = 11013,
+  CACHE_PURGE_RESOURCE = 11014,
+  CACHE_PURGE_EXACT = 11015,
+
   // Policy operations (9100-9199)
   CREATE_POLICY_SET = 9101, // Create a new tool policy set
   GET_POLICY_SETS = 9102, // List tool policy sets

@@ -91,6 +91,7 @@ export class OAuthTokenValidator {
         // OAuth-specific fields
         oauthClientId: decoded.client_id,
         oauthScopes: decoded.scopes,
+        tenantId: user.proxyId > 0 ? String(user.proxyId) : undefined,
       };
 
       return { valid: true, authContext };

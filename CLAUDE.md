@@ -295,6 +295,9 @@ npm start
 # Build and push to Docker Hub
 ./docker-build-push.sh
 
+# Build and push non-interactively (fails instead of prompting)
+./docker-build-push.sh --non-interactive
+
 # With verbose output
 ./docker-build-push.sh -v
 
@@ -313,7 +316,27 @@ npm start
 
 **Docker Hub Images:**
 - Repository: https://hub.docker.com/r/petaio/peta-core
-- Tags: `latest` (latest build) and `YYYYMMDD` (dated builds)
+- Tags: `latest` (latest build), `YYYYMMDD` (dated builds), and the current `package.json` semver
+
+### Release Automation
+```bash
+# Prepare a patch release from origin/main
+node scripts/release-main.js prepare
+
+# Prepare a specific version
+node scripts/release-main.js prepare --version 1.2.3
+
+# Publish a prepared release after writing notes to the generated notes file
+node scripts/release-main.js publish --manifest /tmp/.../manifest.json
+
+# Clean up a prepared release workspace
+node scripts/release-main.js cleanup --manifest /tmp/.../manifest.json
+```
+
+`scripts/release-main.js` always prepares releases from `origin/main` in a detached temporary worktree so it does not disturb the current branch. It writes:
+- `manifest.json` - release metadata and paths needed for publish/cleanup
+- `release-context.md` - structured commit/PR context for English release notes
+- `release-notes.md` - target file for the final GitHub release notes
 
 **Quick Docker Operations:**
 ```bash

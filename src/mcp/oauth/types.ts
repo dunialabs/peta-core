@@ -40,6 +40,8 @@ export interface ExchangeResult {
   accessToken: string;
   /** Optional refresh token for token renewal */
   refreshToken?: string;
+  /** Optional normalized API domain for providers like Pipedrive */
+  apiDomain?: string;
   /** Token lifetime in seconds (from response) */
   expiresIn?: number;
   /** Calculated expiration timestamp (Unix ms) */

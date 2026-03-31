@@ -226,6 +226,10 @@ export class AuthUtils {
     switch (authType) {
       case ServerAuthType.GoogleAuth:
       case ServerAuthType.GoogleCalendarAuth:
+      case ServerAuthType.GmailAuth:
+      case ServerAuthType.GoogleDocsAuth:
+      case ServerAuthType.GoogleSheetsAuth:
+      case ServerAuthType.GoogleFormsAuth:
         return 'google';
       case ServerAuthType.NotionAuth:
         return 'notion';
@@ -239,6 +243,8 @@ export class AuthUtils {
         return 'canva';
       case ServerAuthType.ZendeskAuth:
         return 'zendesk';
+      case ServerAuthType.PipedriveAuth:
+        return 'pipedrive';
       case ServerAuthType.ApiKey:
         return undefined;
       default:

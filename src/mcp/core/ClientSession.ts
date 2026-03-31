@@ -524,7 +524,7 @@ export class ClientSession {
           return this.canUseToolByServerContext(serverContext, tool.name);
         });
 
-        // Add server ID prefix to each tool
+        // Namespace tool names per server and keep the MCP App view URI in the same proxy namespace.
         const prefixedTools = filteredTools.map((tool: Tool) => {
           const userDangerLevel = this.getDangerLevel(serverContext.serverID, tool.name);
           let dangerLevel = userDangerLevel ?? serverContext.getDangerLevel(tool.name);
@@ -537,9 +537,17 @@ export class ClientSession {
             readonly = true;
             destructiveHint = false;
           }
+
+          const originalResourceUri = this.getToolUiResourceUri(tool);
+          const proxiedResourceUri = originalResourceUri
+            ? this.generateNewName(serverContext.id, originalResourceUri)
+            : undefined;
+          const nextMeta = this.buildToolMetaWithProxiedResourceUri(tool, proxiedResourceUri);
+
           return {
             ...tool,
             name: this.generateNewName(serverContext.id, tool.name),
+            ...(nextMeta ? { _meta: nextMeta } : {}),
             readonly: readonly,
             destructiveHint: destructiveHint
           };
@@ -582,7 +590,7 @@ export class ClientSession {
           return this.canAccessResourceByServerContext(serverContext, resource.name);
         });
 
-        // Add server ID prefix and proxy URI to each resource
+        // Namespace resource URIs per server so identical app resources can coexist safely.
         const prefixedResources = filteredResources.map((resource: Resource) => ({
           ...resource,
           uri: this.generateNewName(serverContext.id, resource.uri)
@@ -678,6 +686,52 @@ export class ClientSession {
     return `${name}_-_${serverID}`;
   }
 
+  // MCP Apps may publish the view URI in either nested or flat _meta fields.
+  private getToolUiResourceUri(tool: Tool): string | undefined {
+    if (
+      typeof tool._meta?.ui === 'object' &&
+      tool._meta?.ui &&
+      'resourceUri' in tool._meta.ui &&
+      typeof tool._meta.ui.resourceUri === 'string'
+    ) {
+      return tool._meta.ui.resourceUri;
+    }
+
+    if (typeof tool._meta?.['ui/resourceUri'] === 'string') {
+      return tool._meta['ui/resourceUri'];
+    }
+
+    return undefined;
+  }
+
+  private buildToolMetaWithProxiedResourceUri(
+    tool: Tool,
+    proxiedResourceUri?: string,
+  ): Tool['_meta'] | undefined {
+    // Keep both _meta.ui.resourceUri and _meta["ui/resourceUri"] aligned with the proxied URI.
+    if (!proxiedResourceUri) {
+      return tool._meta;
+    }
+
+    const nextMeta: NonNullable<Tool['_meta']> = {
+      ...(tool._meta ?? {}),
+      'ui/resourceUri': proxiedResourceUri,
+    };
+
+    if (typeof tool._meta?.ui === 'object' && tool._meta.ui) {
+      nextMeta.ui = {
+        ...tool._meta.ui,
+        resourceUri: proxiedResourceUri,
+      };
+    } else {
+      nextMeta.ui = {
+        resourceUri: proxiedResourceUri,
+      };
+    }
+
+    return nextMeta;
+  }
+
   /**
    * Parse original serverID and name from name
    */
@@ -695,6 +749,88 @@ export class ClientSession {
       serverID: serverContext.serverID,
       originalName: name.slice(0, index)
     };
+  }
+
+  resolveToolName(name: string): { serverID: string; originalName: string } | null {
+    // Accept both proxied names and original names so app hosts can call either form.
+    const parsed = this.parseName(name);
+    if (parsed) {
+      return parsed;
+    }
+
+    let match: { serverID: string; originalName: string } | null = null;
+
+    for (const serverContext of this.getAvailableServers()) {
+      let toolsData: Tool[] | undefined;
+
+      if (serverContext.tools?.tools) {
+        toolsData = serverContext.tools.tools;
+      } else if (serverContext.cachedTools?.tools) {
+        toolsData = serverContext.cachedTools.tools;
+      }
+
+      if (!toolsData) {
+        continue;
+      }
+
+      const tool = toolsData.find((candidate: Tool) => candidate.name === name);
+      if (!tool || !this.canUseToolByServerContext(serverContext, tool.name)) {
+        continue;
+      }
+
+      if (match) {
+        this.logger.warn({ toolName: name, userId: this.userId }, 'Ambiguous tool name across servers');
+        return null;
+      }
+
+      match = {
+        serverID: serverContext.serverID,
+        originalName: tool.name,
+      };
+    }
+
+    return match;
+  }
+
+  resolveResourceUri(uri: string): { serverID: string; originalName: string } | null {
+    // Accept both proxied and original UI resource URIs during app bootstrap and refresh flows.
+    const parsed = this.parseName(uri);
+    if (parsed) {
+      return parsed;
+    }
+
+    let match: { serverID: string; originalName: string } | null = null;
+
+    for (const serverContext of this.getAvailableServers()) {
+      let resourcesData: Resource[] | undefined;
+
+      if (serverContext.resources?.resources) {
+        resourcesData = serverContext.resources.resources;
+      } else if (serverContext.cachedResources?.resources) {
+        resourcesData = serverContext.cachedResources.resources;
+      }
+
+      if (!resourcesData) {
+        continue;
+      }
+
+      const resource = resourcesData.find((candidate: Resource) => candidate.uri === uri);
+      if (!resource || !this.canAccessResourceByServerContext(serverContext, resource.name)) {
+        continue;
+      }
+
+      if (match) {
+        this.logger.warn({ resourceUri: uri, userId: this.userId }, 'Ambiguous resource URI across servers');
+        return null;
+      }
+
+      match = {
+        serverID: serverContext.serverID,
+        originalName: resource.uri,
+      };
+    }
+
+    return match;
   }
 
   /**

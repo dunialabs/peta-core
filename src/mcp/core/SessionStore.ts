@@ -22,7 +22,7 @@ export class SessionStore {
   private userSessions: Map<string, Set<string>> = new Map(); // userId -> sessionIds
   private eventStores: Map<string, PersistentEventStore> = new Map(); // New: Manage EventStore
   private sessionLoggers: Map<string, SessionLogger> = new Map(); // New: Manage SessionLogger
-  
+
   // Logger for SessionStore
   private logger = createLogger('SessionStore');
   private static readonly SESSION_INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000;
@@ -44,23 +44,15 @@ export class SessionStore {
     token: string,
     authContext: AuthContext,
     ip: string,
-    userAgent: string
+    userAgent: string,
   ): Promise<ClientSession> {
     // 1. Create ClientSession
-    const clientSession = new ClientSession(
-      sessionId,
-      userId,
-      token,
-      authContext
-    );
+    const clientSession = new ClientSession(sessionId, userId, token, authContext);
 
     clientSession.updateLastUserInfoRefresh(Date.now());
 
     // 2. Create EventStore instance
-    const eventStore = new PersistentEventStore(
-      sessionId,
-      userId,
-    );
+    const eventStore = new PersistentEventStore(sessionId, userId);
 
     // 3. Store EventStore
     this.eventStores.set(sessionId, eventStore);
@@ -72,7 +64,7 @@ export class SessionStore {
       sessionId,
       tokenMask,
       ip,
-      userAgent
+      userAgent,
     });
 
     // 5. Store SessionLogger
@@ -88,9 +80,9 @@ export class SessionStore {
       sessionId,
       userId,
       clientSession,
-      sessionLogger, // Pass SessionLogger instead of LogService
+      sessionLogger,
       eventStore,
-      (sessionId: string) => this.removeSingleSession(sessionId)
+      (sessionId: string) => this.removeSingleSession(sessionId),
     );
 
     // 7. Associate ProxySession with ClientSession
@@ -106,7 +98,10 @@ export class SessionStore {
     }
     this.userSessions.get(userId)!.add(sessionId);
 
-    this.logger.info({ userId, sessionId }, 'Created complete session with EventStore and SessionLogger');
+    this.logger.info(
+      { userId, sessionId },
+      'Created complete session with EventStore and SessionLogger',
+    );
     return clientSession;
   }
 
@@ -138,7 +133,11 @@ export class SessionStore {
   /**
    * Perform tiered cleanup based on disconnect reason
    */
-  async removeSession(sessionId: string, reason: DisconnectReason, isUserDisconnect: boolean = false): Promise<void> {
+  async removeSession(
+    sessionId: string,
+    reason: DisconnectReason,
+    isUserDisconnect: boolean = false,
+  ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
@@ -153,9 +152,12 @@ export class SessionStore {
    * Specifically handle session termination requests
    * Perform cleanup operations according to MCP protocol specification
    */
-  async terminateSession(sessionId: string, reason: DisconnectReason = DisconnectReason.CLIENT_DISCONNECT): Promise<void> {
+  async terminateSession(
+    sessionId: string,
+    reason: DisconnectReason = DisconnectReason.CLIENT_DISCONNECT,
+  ): Promise<void> {
     this.logger.info({ sessionId, reason }, 'Terminating session');
-    
+
     try {
       // 1. Get session information
       const clientSession = this.sessions.get(sessionId);
@@ -165,19 +167,21 @@ export class SessionStore {
       }
 
       await this.removeSingleSession(sessionId, reason);
-      
+
       this.logger.info({ sessionId }, 'Session terminated successfully');
-      
     } catch (error) {
       this.logger.error({ error, sessionId }, 'Error terminating session');
-      
+
       // Even if error occurs, try to cleanup resources
       try {
         await this.removeSingleSession(sessionId, reason);
       } catch (cleanupError) {
-        this.logger.error({ error: cleanupError, sessionId }, 'Failed to cleanup session after termination error');
+        this.logger.error(
+          { error: cleanupError, sessionId },
+          'Failed to cleanup session after termination error',
+        );
       }
-      
+
       throw error;
     }
   }
@@ -187,7 +191,7 @@ export class SessionStore {
    */
   private async removeSingleSession(
     sessionId: string,
-    reason: DisconnectReason = DisconnectReason.CLIENT_DISCONNECT
+    reason: DisconnectReason = DisconnectReason.CLIENT_DISCONNECT,
   ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
@@ -199,7 +203,10 @@ export class SessionStore {
         try {
           await proxySession.cleanup();
         } catch (error) {
-          this.logger.error({ error, sessionId }, 'Failed to cleanup ProxySession during session removal');
+          this.logger.error(
+            { error, sessionId },
+            'Failed to cleanup ProxySession during session removal',
+          );
         }
       }
 
@@ -238,7 +245,6 @@ export class SessionStore {
 
       await session.close(reason);
       this.logger.debug({ sessionId }, 'Session removed from store');
-
     } catch (error) {
       this.logger.error({ error, sessionId }, 'Error removing session');
       throw error;
@@ -255,7 +261,7 @@ export class SessionStore {
     }
 
     const sessionIds = Array.from(userSessionIds);
-    
+
     // Close all sessions in parallel
     const closePromises = sessionIds.map(async (sessionId) => {
       const session = this.sessions.get(sessionId);
@@ -266,10 +272,13 @@ export class SessionStore {
           try {
             await proxySession.cleanup();
           } catch (error) {
-            this.logger.error({ error, sessionId }, 'Failed to cleanup ProxySession during user session removal');
+            this.logger.error(
+              { error, sessionId },
+              'Failed to cleanup ProxySession during user session removal',
+            );
           }
         }
-        
+
         // Remove from mapping
         this.sessions.delete(sessionId);
         this.proxySessions.delete(sessionId);
@@ -307,7 +316,10 @@ export class SessionStore {
         try {
           await proxySession.cleanup();
         } catch (error) {
-          this.logger.error({ error, sessionId }, 'Failed to cleanup ProxySession during all-session removal');
+          this.logger.error(
+            { error, sessionId },
+            'Failed to cleanup ProxySession during all-session removal',
+          );
         }
       }
       await session.close(DisconnectReason.SERVER_SHUTDOWN);
@@ -352,7 +364,7 @@ export class SessionStore {
    * Get active session count
    */
   getActiveSessionCount(): number {
-    return Array.from(this.sessions.values()).filter(session => session.isSseConnected()).length;
+    return Array.from(this.sessions.values()).filter((session) => session.isSseConnected()).length;
   }
 
   /**
@@ -420,10 +432,16 @@ export class SessionStore {
     }
 
     if (expiredSessions.length > 0) {
-      this.logger.info({ expiredSessions: expiredSessions.join(', ')}, 'Cleaned up expired sessions');
+      this.logger.info(
+        { expiredSessions: expiredSessions.join(', ') },
+        'Cleaned up expired sessions',
+      );
     }
     if (inactiveSessions.length > 0) {
-      this.logger.info({ inactiveSessions: inactiveSessions.join(', ')}, 'Cleaned up inactive sessions');
+      this.logger.info(
+        { inactiveSessions: inactiveSessions.join(', ') },
+        'Cleaned up inactive sessions',
+      );
     }
   }
 
@@ -432,7 +450,7 @@ export class SessionStore {
    */
   startCleanupTimer(): void {
     setInterval(() => {
-      this.cleanupExpiredSessions().catch(error => {
+      this.cleanupExpiredSessions().catch((error) => {
         this.logger.error({ error }, 'Session cleanup error');
       });
     }, 300000); // Clean up every 5 minutes
@@ -473,7 +491,10 @@ export class SessionStore {
       const { toolsChanged, resourcesChanged, promptsChanged } =
         CapabilitiesService.comparePermissions(oldUserPreferences, newUserPreferences);
 
-      this.logger.debug({ toolsChanged, resourcesChanged, promptsChanged, sessionId: session.sessionId }, 'Update User Preferences');
+      this.logger.debug(
+        { toolsChanged, resourcesChanged, promptsChanged, sessionId: session.sessionId },
+        'Update User Preferences',
+      );
 
       // 3.3 Update session's userPreferences
       session.userPreferences = newUserPreferences;
@@ -490,7 +511,10 @@ export class SessionStore {
       }
     }
 
-    this.logger.info({ userId, sessionCount: userSessions.length }, 'Updated user preferences for sessions');
+    this.logger.info(
+      { userId, sessionCount: userSessions.length },
+      'Updated user preferences for sessions',
+    );
   }
 
   private generateSessionId(): string {

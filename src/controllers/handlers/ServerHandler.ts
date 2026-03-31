@@ -6,7 +6,12 @@ import { AdminRequest, AdminError, AdminErrorCode } from '../../types/admin.type
 import { Server } from '@prisma/client';
 import { prisma } from '../../config/prisma.js';
 import { LogService } from '../../log/LogService.js';
-import { MCPEventLogType, ServerAuthType, ServerCategory, ServerStatus } from '../../types/enums.js';
+import {
+  MCPEventLogType,
+  ServerAuthType,
+  ServerCategory,
+  ServerStatus,
+} from '../../types/enums.js';
 import { socketNotifier } from '../../socket/SocketNotifier.js';
 import { ServerContext } from '../../mcp/core/ServerContext.js';
 import UserRepository from '../../repositories/UserRepository.js';
@@ -20,7 +25,6 @@ import { PETA_AUTH_CONFIG } from '../../config/petaAuthConfig.js';
  * Server operation handler (2000-2999)
  */
 export class ServerHandler {
-  
   // Logger for ServerHandler
   private logger = createLogger('ServerHandler');
 
@@ -50,8 +54,13 @@ export class ServerHandler {
         toolsChanged: true,
         resourcesChanged: true,
         promptsChanged: true,
-      }
-      this.notifyUsersOfServerChange(targetId, SessionStore.instance.getSessionsUsingServer(targetId), 'server_started', changed);
+      };
+      this.notifyUsersOfServerChange(
+        targetId,
+        SessionStore.instance.getSessionsUsingServer(targetId),
+        'server_started',
+        changed,
+      );
       return null;
     }
 
@@ -59,7 +68,7 @@ export class ServerHandler {
     if (!serverEntity.launchConfig || serverEntity.launchConfig.trim() === '') {
       throw new AdminError(
         `Cannot start template server ${targetId}. Users must configure it first through client.`,
-        AdminErrorCode.INVALID_REQUEST
+        AdminErrorCode.INVALID_REQUEST,
       );
     }
 
@@ -68,11 +77,16 @@ export class ServerHandler {
     const changed = {
       toolsChanged: (serverContext.tools?.tools?.length ?? 0) > 0,
       resourcesChanged: (serverContext.resources?.resources?.length ?? 0) > 0,
-      promptsChanged: (serverContext.prompts?.prompts?.length ?? 0) > 0
+      promptsChanged: (serverContext.prompts?.prompts?.length ?? 0) > 0,
     };
 
     // Notify related users of server capability changes
-    this.notifyUsersOfServerChange(targetId, SessionStore.instance.getSessionsUsingServer(targetId), 'server_started', changed);
+    this.notifyUsersOfServerChange(
+      targetId,
+      SessionStore.instance.getSessionsUsingServer(targetId),
+      'server_started',
+      changed,
+    );
 
     // Log audit event
     AuthUtils.logAuthEvent('server_started', undefined, targetId, true, JSON.stringify(changed));
@@ -100,7 +114,10 @@ export class ServerHandler {
       throw new AdminError(`Server ${targetId} not found`, AdminErrorCode.SERVER_NOT_FOUND);
     }
 
-    const updatedCapabilities = await this.getUpdatedCapabilities(capabilities, entity.capabilities);
+    const updatedCapabilities = await this.getUpdatedCapabilities(
+      capabilities,
+      entity.capabilities,
+    );
     if (!updatedCapabilities) {
       return null;
     }
@@ -110,7 +127,7 @@ export class ServerHandler {
     // Log admin operation
     LogService.getInstance().enqueueLog({
       action: MCPEventLogType.AdminServerEdit,
-      requestParams: JSON.stringify({ targetId: targetId, capabilities: capabilities })
+      requestParams: JSON.stringify({ targetId: targetId, capabilities: capabilities }),
     });
 
     return null;
@@ -126,7 +143,7 @@ export class ServerHandler {
     // Log admin operation
     LogService.getInstance().enqueueLog({
       action: MCPEventLogType.AdminServerEdit,
-      requestParams: JSON.stringify({ targetId: targetId })
+      requestParams: JSON.stringify({ targetId: targetId }),
     });
 
     return null;
@@ -135,23 +152,34 @@ export class ServerHandler {
   /**
    * Connect all servers (2005)
    */
-  async handleConnectAllServers(request: AdminRequest<any>, token: string): Promise<{ successServers: { serverId: string; serverName: string; proxyId: number }[]; failedServers: { serverId: string; serverName: string; proxyId: number }[] }> {
+  async handleConnectAllServers(
+    request: AdminRequest<any>,
+    token: string,
+  ): Promise<{
+    successServers: { serverId: string; serverName: string; proxyId: number }[];
+    failedServers: { serverId: string; serverName: string; proxyId: number }[];
+  }> {
     const { successServers, failedServers } = await ServerManager.instance.connectAllServers(token);
 
     for (const server of successServers) {
       const serveContext = ServerManager.instance.getServerContext(server.serverId);
-      this.notifyUsersOfServerChange(server.serverId, SessionStore.instance.getSessionsUsingServer(server.serverId), 'server_started', {
-        toolsChanged: (serveContext?.tools?.tools?.length ?? 0) > 0,
-        resourcesChanged: (serveContext?.resources?.resources?.length ?? 0) > 0,
-        promptsChanged: (serveContext?.prompts?.prompts?.length ?? 0) > 0
-      });
+      this.notifyUsersOfServerChange(
+        server.serverId,
+        SessionStore.instance.getSessionsUsingServer(server.serverId),
+        'server_started',
+        {
+          toolsChanged: (serveContext?.tools?.tools?.length ?? 0) > 0,
+          resourcesChanged: (serveContext?.resources?.resources?.length ?? 0) > 0,
+          promptsChanged: (serveContext?.prompts?.prompts?.length ?? 0) > 0,
+        },
+      );
     }
 
     this.logger.debug({ successServers, failedServers }, 'Server batch start result');
 
     return {
       successServers: successServers,
-      failedServers: failedServers
+      failedServers: failedServers,
     };
   }
 
@@ -159,7 +187,25 @@ export class ServerHandler {
    * Create server (2010)
    */
   async handleCreateServer(request: AdminRequest<any>, token: string): Promise<any> {
-    const { serverId, serverName, enabled, launchConfig, capabilities, createdAt, updatedAt, allowUserInput, proxyId, toolTmplId, authType, configTemplate, category, lazyStartEnabled, publicAccess, anonymousAccess, anonymousRateLimit } = request.data;
+    const {
+      serverId,
+      serverName,
+      enabled,
+      launchConfig,
+      capabilities,
+      createdAt,
+      updatedAt,
+      allowUserInput,
+      proxyId,
+      toolTmplId,
+      authType,
+      configTemplate,
+      category,
+      lazyStartEnabled,
+      publicAccess,
+      anonymousAccess,
+      anonymousRateLimit,
+    } = request.data;
 
     if (!serverId) {
       throw new AdminError('Missing required field: serverId', AdminErrorCode.INVALID_REQUEST);
@@ -172,12 +218,22 @@ export class ServerHandler {
     }
 
     // launchConfig must be a string
-    if (typeof launchConfig !== 'string' || launchConfig.trim() === '' || launchConfig.trim() === '{}') {
-      throw new AdminError('launchConfig must be a string and cannot be empty', AdminErrorCode.INVALID_REQUEST);
+    if (
+      typeof launchConfig !== 'string' ||
+      launchConfig.trim() === '' ||
+      launchConfig.trim() === '{}'
+    ) {
+      throw new AdminError(
+        'launchConfig must be a string and cannot be empty',
+        AdminErrorCode.INVALID_REQUEST,
+      );
     }
 
     const authTypeValue = authType ?? ServerAuthType.ApiKey;
-    if (typeof authTypeValue !== 'number' || !Object.values(ServerAuthType).includes(authTypeValue as ServerAuthType)) {
+    if (
+      typeof authTypeValue !== 'number' ||
+      !Object.values(ServerAuthType).includes(authTypeValue as ServerAuthType)
+    ) {
       throw new AdminError('Invalid authType', AdminErrorCode.INVALID_REQUEST);
     }
 
@@ -187,19 +243,38 @@ export class ServerHandler {
       throw new AdminError('Invalid allowUserInput', AdminErrorCode.INVALID_REQUEST);
     }
 
-    if (typeof category !== 'number' || !Object.values(ServerCategory).includes(category as ServerCategory)) {
+    if (
+      typeof category !== 'number' ||
+      !Object.values(ServerCategory).includes(category as ServerCategory)
+    ) {
       throw new AdminError('Invalid category', AdminErrorCode.INVALID_REQUEST);
     }
 
-    if (anonymousRateLimit !== undefined && (typeof anonymousRateLimit !== 'number' || !Number.isInteger(anonymousRateLimit) || anonymousRateLimit < 1 || anonymousRateLimit > 1000)) {
-      throw new AdminError('Invalid anonymousRateLimit: must be an integer between 1 and 1000 (per-source-IP, per-minute)', AdminErrorCode.INVALID_REQUEST);
+    if (
+      anonymousRateLimit !== undefined &&
+      (typeof anonymousRateLimit !== 'number' ||
+        !Number.isInteger(anonymousRateLimit) ||
+        anonymousRateLimit < 1 ||
+        anonymousRateLimit > 1000)
+    ) {
+      throw new AdminError(
+        'Invalid anonymousRateLimit: must be an integer between 1 and 1000 (per-source-IP, per-minute)',
+        AdminErrorCode.INVALID_REQUEST,
+      );
     }
 
-    const configTemplateInvalid = !configTemplate || configTemplate.trim() === '' || configTemplate.trim() === '{}';
-    if ((allowUserInputValue === true || category === ServerCategory.Template || category === ServerCategory.RestApi || category === ServerCategory.Skills) && configTemplateInvalid) {
+    const configTemplateInvalid =
+      !configTemplate || configTemplate.trim() === '' || configTemplate.trim() === '{}';
+    if (
+      (allowUserInputValue === true ||
+        category === ServerCategory.Template ||
+        category === ServerCategory.RestApi ||
+        category === ServerCategory.Skills) &&
+      configTemplateInvalid
+    ) {
       throw new AdminError(
         'configTemplate is required for this server',
-        AdminErrorCode.INVALID_REQUEST
+        AdminErrorCode.INVALID_REQUEST,
       );
     }
     let usePetaOauthConfigValue = true;
@@ -208,8 +283,15 @@ export class ServerHandler {
     if (category === ServerCategory.Template) {
       const configTemplateValue = JSON.parse(configTemplate || '{}');
       const oauthConfig = configTemplateValue.oAuthConfig;
-      if (oauthConfig && typeof oauthConfig.clientId === 'string' && oauthConfig.clientId.trim() !== '') {
-        const decryptedLaunchConfig = await CryptoService.decryptDataFromString(launchConfig, token);
+      if (
+        oauthConfig &&
+        typeof oauthConfig.clientId === 'string' &&
+        oauthConfig.clientId.trim() !== ''
+      ) {
+        const decryptedLaunchConfig = await CryptoService.decryptDataFromString(
+          launchConfig,
+          token,
+        );
         const decryptedLaunchConfigValue = JSON.parse(decryptedLaunchConfig);
         const oauth = decryptedLaunchConfigValue.oauth;
         if (!oauth.clientId || oauth.clientId.trim() === '') {
@@ -247,7 +329,9 @@ export class ServerHandler {
                 code: oauth.code,
                 redirectUri: oauth.redirectUri,
                 codeVerifier: oauth.codeVerifier,
-                scope: [ServerAuthType.ZendeskAuth].includes(authType) ? oauthConfig.scope : undefined
+                scope: [ServerAuthType.ZendeskAuth].includes(authType)
+                  ? oauthConfig.scope
+                  : undefined,
               };
 
               if ((provider === 'zendesk' || provider === 'canvas') && oauthConfig?.tokenUrl) {
@@ -267,31 +351,52 @@ export class ServerHandler {
 
                 const result = await response.json();
                 if (!response.ok || !result?.accessToken || !result?.expiresAt) {
-                  this.logger.warn({
-                    status: response.status,
-                    provider,
-                    clientId: oauth.clientId.substring(0, 10) + '...' + oauth.clientId.substring(oauth.clientId.length - 10)
-                  }, 'Peta OAuth exchange failed');
-                  throw new AdminError('Failed to exchange OAuth code', AdminErrorCode.INVALID_REQUEST);
+                  this.logger.warn(
+                    {
+                      status: response.status,
+                      provider,
+                      clientId:
+                        oauth.clientId.substring(0, 10) +
+                        '...' +
+                        oauth.clientId.substring(oauth.clientId.length - 10),
+                    },
+                    'Peta OAuth exchange failed',
+                  );
+                  throw new AdminError(
+                    'Failed to exchange OAuth code',
+                    AdminErrorCode.INVALID_REQUEST,
+                  );
                 }
 
                 decryptedLaunchConfigValue.oauth = {
                   clientId: oauth.clientId,
                   key: hashKey,
                   accessToken: result.accessToken,
-                  expiresAt: result.expiresAt
+                  expiresAt: result.expiresAt,
                 };
-                const encryptedData = await CryptoService.encryptData(JSON.stringify(decryptedLaunchConfigValue), token);
+                const encryptedData = await CryptoService.encryptData(
+                  JSON.stringify(decryptedLaunchConfigValue),
+                  token,
+                );
                 launchConfigStr = JSON.stringify(encryptedData);
 
-                this.logger.info({
-                  serverId,
-                  provider,
-                  clientId: oauth.clientId.substring(0, 10) + '...' + oauth.clientId.substring(oauth.clientId.length - 10)
-                }, 'Peta OAuth exchange succeeded');
+                this.logger.info(
+                  {
+                    serverId,
+                    provider,
+                    clientId:
+                      oauth.clientId.substring(0, 10) +
+                      '...' +
+                      oauth.clientId.substring(oauth.clientId.length - 10),
+                  },
+                  'Peta OAuth exchange succeeded',
+                );
               } catch (error) {
                 this.logger.error({ err: error }, 'Error exchanging authorization code');
-                throw new AdminError('Failed to exchange OAuth code', AdminErrorCode.INVALID_REQUEST);
+                throw new AdminError(
+                  'Failed to exchange OAuth code',
+                  AdminErrorCode.INVALID_REQUEST,
+                );
               }
             } else {
               usePetaOauthConfigValue = false;
@@ -312,35 +417,57 @@ export class ServerHandler {
                   code: oauth.code,
                   redirectUri: oauth.redirectUri,
                   codeVerifier: oauth.codeVerifier,
-                  scope: [ServerAuthType.ZendeskAuth].includes(authType) ? oauthConfig.scope : undefined
+                  scope: [ServerAuthType.ZendeskAuth].includes(authType)
+                    ? oauthConfig.scope
+                    : undefined,
                 });
 
                 if (exchangeResult.accessToken && exchangeResult.refreshToken) {
-                  const expiresAt = exchangeResult.expiresAt ?? (Date.now() + 30 * 24 * 60 * 60 * 1000);
+                  const expiresAt =
+                    exchangeResult.expiresAt ?? Date.now() + 30 * 24 * 60 * 60 * 1000;
                   decryptedLaunchConfigValue.oauth = {
                     clientId: clientId,
                     clientSecret: clientSecret,
                     accessToken: exchangeResult.accessToken,
                     refreshToken: exchangeResult.refreshToken,
-                    expiresAt: expiresAt
+                    expiresAt: expiresAt,
                   };
+                  if (authType === ServerAuthType.PipedriveAuth) {
+                    if (!exchangeResult.apiDomain) {
+                      throw new AdminError('Pipedrive OAuth response missing api_domain', AdminErrorCode.INVALID_REQUEST);
+                    }
+                    decryptedLaunchConfigValue.oauth.apiDomain = exchangeResult.apiDomain;
+                  }
                   if ([ServerAuthType.ZendeskAuth].includes(authType)) {
                     decryptedLaunchConfigValue.oauth.tokenUrl = oauthConfig.tokenUrl;
                   }
                   if (authType === ServerAuthType.ZendeskAuth) {
                     decryptedLaunchConfigValue.oauth.scope = oauthConfig.scope;
-                    if (exchangeResult.raw.refresh_token_expires_in && typeof exchangeResult.raw.refresh_token_expires_in === 'number') {
-                      decryptedLaunchConfigValue.oauth.refreshTokenExpiresAt = Date.now() + exchangeResult.raw.refresh_token_expires_in * 1000;
+                    if (
+                      exchangeResult.raw.refresh_token_expires_in &&
+                      typeof exchangeResult.raw.refresh_token_expires_in === 'number'
+                    ) {
+                      decryptedLaunchConfigValue.oauth.refreshTokenExpiresAt =
+                        Date.now() + exchangeResult.raw.refresh_token_expires_in * 1000;
                     }
                   }
-                  const encryptedData = await CryptoService.encryptData(JSON.stringify(decryptedLaunchConfigValue), token);
+                  const encryptedData = await CryptoService.encryptData(
+                    JSON.stringify(decryptedLaunchConfigValue),
+                    token,
+                  );
                   launchConfigStr = JSON.stringify(encryptedData);
                 } else {
-                  throw new AdminError('Failed to exchange OAuth code', AdminErrorCode.INVALID_REQUEST);
+                  throw new AdminError(
+                    'Failed to exchange OAuth code',
+                    AdminErrorCode.INVALID_REQUEST,
+                  );
                 }
               } catch (error) {
                 this.logger.error({ err: error }, 'Error exchanging authorization code');
-                throw new AdminError('Failed to exchange OAuth code', AdminErrorCode.INVALID_REQUEST);
+                throw new AdminError(
+                  'Failed to exchange OAuth code',
+                  AdminErrorCode.INVALID_REQUEST,
+                );
               }
             }
           } else {
@@ -356,7 +483,10 @@ export class ServerHandler {
           }
           const key = process.env.JWT_SECRET;
           if (!key) {
-            throw new AdminError('JWT_SECRET environment variable is required', AdminErrorCode.INVALID_REQUEST);
+            throw new AdminError(
+              'JWT_SECRET environment variable is required',
+              AdminErrorCode.INVALID_REQUEST,
+            );
           }
           const encryptedData = await CryptoService.encryptData(decryptedLaunchConfig, key);
           launchConfigStr = JSON.stringify(encryptedData);
@@ -371,7 +501,7 @@ export class ServerHandler {
       serverName: serverName ?? '',
       enabled: enabled ?? true,
       launchConfig: launchConfigStr,
-      capabilities: JSON.stringify({tools: {}, resources: {}, prompts: {}}),
+      capabilities: JSON.stringify({ tools: {}, resources: {}, prompts: {} }),
       createdAt: createdAt ?? Math.floor(Date.now() / 1000),
       updatedAt: updatedAt ?? Math.floor(Date.now() / 1000),
       allowUserInput: allowUserInputValue,
@@ -384,16 +514,16 @@ export class ServerHandler {
       publicAccess: publicAccess ?? false,
       usePetaOauthConfig: usePetaOauthConfigValue,
       anonymousAccess: anonymousAccess ?? false,
-      anonymousRateLimit: anonymousRateLimit ?? 10
+      anonymousRateLimit: anonymousRateLimit ?? 10,
     });
 
     // Log admin operation
     LogService.getInstance().enqueueLog({
       action: MCPEventLogType.AdminServerCreate,
-      requestParams: JSON.stringify({ serverId: serverId, authType: authType })
+      requestParams: JSON.stringify({ serverId: serverId, authType: authType }),
     });
 
-    return { server : server };
+    return { server: server };
   }
 
   /**
@@ -422,14 +552,14 @@ export class ServerHandler {
       usePetaOauthConfig: true,
       transportType: true,
       anonymousAccess: true,
-      anonymousRateLimit: true
+      anonymousRateLimit: true,
     };
 
     // Exact query for specific server
     if (serverId) {
       const server = await prisma.server.findUnique({
         where: { serverId },
-        select
+        select,
       });
       if (server && server.category === ServerCategory.Template) {
         server.configTemplate = null;
@@ -452,14 +582,26 @@ export class ServerHandler {
         server.configTemplate = null;
       }
     }
-    return { servers : servers };
+    return { servers: servers };
   }
 
   /**
    * Update server (2012)
    */
   async handleUpdateServer(request: AdminRequest<any>, token: string): Promise<any> {
-    const { serverId, serverName, launchConfig, capabilities, enabled, allowUserInput, configTemplate, lazyStartEnabled, publicAccess, anonymousAccess, anonymousRateLimit } = request.data;
+    const {
+      serverId,
+      serverName,
+      launchConfig,
+      capabilities,
+      enabled,
+      allowUserInput,
+      configTemplate,
+      lazyStartEnabled,
+      publicAccess,
+      anonymousAccess,
+      anonymousRateLimit,
+    } = request.data;
 
     if (!serverId) {
       throw new AdminError('Missing required field: serverId', AdminErrorCode.INVALID_REQUEST);
@@ -475,14 +617,17 @@ export class ServerHandler {
     if (allowUserInput !== undefined && allowUserInput !== existingServer.allowUserInput) {
       throw new AdminError(
         'allowUserInput field is immutable after server creation',
-        AdminErrorCode.INVALID_REQUEST
+        AdminErrorCode.INVALID_REQUEST,
       );
     }
-    const hasEditableConfigTemplate = existingServer.category === ServerCategory.RestApi || existingServer.category === ServerCategory.CustomRemote || existingServer.category === ServerCategory.CustomStdio;
+    const hasEditableConfigTemplate =
+      existingServer.category === ServerCategory.RestApi ||
+      existingServer.category === ServerCategory.CustomRemote ||
+      existingServer.category === ServerCategory.CustomStdio;
     if (!hasEditableConfigTemplate && configTemplate !== undefined) {
       throw new AdminError(
         'configTemplate field is immutable after server creation',
-        AdminErrorCode.INVALID_REQUEST
+        AdminErrorCode.INVALID_REQUEST,
       );
     }
 
@@ -490,14 +635,31 @@ export class ServerHandler {
     const updateData: any = {};
     if (serverName !== undefined) updateData.serverName = serverName;
     if (launchConfig !== undefined) {
-      updateData.launchConfig = typeof launchConfig === 'string' ? launchConfig : JSON.stringify(launchConfig);
+      updateData.launchConfig =
+        typeof launchConfig === 'string' ? launchConfig : JSON.stringify(launchConfig);
       if (updateData.launchConfig !== existingServer.launchConfig) {
-        if (existingServer.allowUserInput === true && !(existingServer.category === ServerCategory.RestApi || existingServer.category === ServerCategory.CustomRemote || existingServer.category === ServerCategory.CustomStdio)) {
-          throw new AdminError('This type of server does not allow modification of the launch configuration.', AdminErrorCode.INVALID_REQUEST);
+        if (
+          existingServer.allowUserInput === true &&
+          !(
+            existingServer.category === ServerCategory.RestApi ||
+            existingServer.category === ServerCategory.CustomRemote ||
+            existingServer.category === ServerCategory.CustomStdio
+          )
+        ) {
+          throw new AdminError(
+            'This type of server does not allow modification of the launch configuration.',
+            AdminErrorCode.INVALID_REQUEST,
+          );
         }
       }
     }
-    if (hasEditableConfigTemplate && configTemplate !== undefined && configTemplate !== null && configTemplate.trim() !== '' && configTemplate.trim() !== existingServer.configTemplate) {
+    if (
+      hasEditableConfigTemplate &&
+      configTemplate !== undefined &&
+      configTemplate !== null &&
+      configTemplate.trim() !== '' &&
+      configTemplate.trim() !== existingServer.configTemplate
+    ) {
       updateData.configTemplate = configTemplate;
     }
     if (lazyStartEnabled !== undefined && lazyStartEnabled !== existingServer.lazyStartEnabled) {
@@ -510,22 +672,34 @@ export class ServerHandler {
       updateData.anonymousAccess = anonymousAccess;
     }
     if (anonymousRateLimit !== undefined) {
-      if (typeof anonymousRateLimit !== 'number' || !Number.isInteger(anonymousRateLimit) || anonymousRateLimit < 1 || anonymousRateLimit > 1000) {
-        throw new AdminError('Invalid anonymousRateLimit: must be an integer between 1 and 1000 (per-source-IP, per-minute)', AdminErrorCode.INVALID_REQUEST);
+      if (
+        typeof anonymousRateLimit !== 'number' ||
+        !Number.isInteger(anonymousRateLimit) ||
+        anonymousRateLimit < 1 ||
+        anonymousRateLimit > 1000
+      ) {
+        throw new AdminError(
+          'Invalid anonymousRateLimit: must be an integer between 1 and 1000 (per-source-IP, per-minute)',
+          AdminErrorCode.INVALID_REQUEST,
+        );
       }
       if (anonymousRateLimit !== existingServer.anonymousRateLimit) {
         updateData.anonymousRateLimit = anonymousRateLimit;
       }
     }
 
-    const updatedCapabilities = await this.getUpdatedCapabilities(capabilities, existingServer.capabilities);
+    const updatedCapabilities = await this.getUpdatedCapabilities(
+      capabilities,
+      existingServer.capabilities,
+    );
     if (updatedCapabilities) {
       updateData.capabilities = updatedCapabilities;
     }
     updateData.enabled = enabled ?? existingServer.enabled;
 
     // Check if publicAccess will change
-    const willHandlePublicAccessChange = publicAccess !== undefined && publicAccess !== existingServer.publicAccess;
+    const willHandlePublicAccessChange =
+      publicAccess !== undefined && publicAccess !== existingServer.publicAccess;
 
     let server = await ServerRepository.update(serverId, updateData);
     let launchConfigReconnected = false;
@@ -535,14 +709,30 @@ export class ServerHandler {
     if (existingServer.enabled === true && updateData.enabled === true) {
       // Server remains enabled
       if (updateData.capabilities !== undefined && updateData.launchConfig !== undefined) {
-        launchConfigReconnected = await this.updateServerLaunchConfig(serverId, updateData.launchConfig, token);
+        launchConfigReconnected = await this.updateServerLaunchConfig(
+          serverId,
+          updateData.launchConfig,
+          token,
+        );
       } else if (updateData.capabilities !== undefined) {
         await this.updateServerCapabilities(serverId, updateData.capabilities);
-        serverContext = await this.updateLazyStartEnabled(existingServer, server, updateData.lazyStartEnabled);
+        serverContext = await this.updateLazyStartEnabled(
+          existingServer,
+          server,
+          updateData.lazyStartEnabled,
+        );
       } else if (updateData.launchConfig !== undefined) {
-        launchConfigReconnected = await this.updateServerLaunchConfig(serverId, updateData.launchConfig, token);
+        launchConfigReconnected = await this.updateServerLaunchConfig(
+          serverId,
+          updateData.launchConfig,
+          token,
+        );
       } else if (updateData.lazyStartEnabled !== undefined) {
-        serverContext = await this.updateLazyStartEnabled(existingServer, server, updateData.lazyStartEnabled);
+        serverContext = await this.updateLazyStartEnabled(
+          existingServer,
+          server,
+          updateData.lazyStartEnabled,
+        );
       }
       if (existingServer.allowUserInput) {
         const temporaryServers = ServerManager.instance.getTemporaryServers(serverId);
@@ -577,7 +767,6 @@ export class ServerHandler {
       } else {
         serverContext = await ServerManager.instance.removeServer(serverId);
       }
-
     } else if (existingServer.enabled === false && updateData.enabled === true) {
       // Server changed from disabled to enabled
       serverContext = await ServerManager.instance.addServer(server, token);
@@ -594,14 +783,14 @@ export class ServerHandler {
       const changed = {
         toolsChanged: (serverContext?.tools?.tools?.length ?? 0) > 0,
         resourcesChanged: (serverContext?.resources?.resources?.length ?? 0) > 0,
-        promptsChanged: (serverContext?.prompts?.prompts?.length ?? 0) > 0
+        promptsChanged: (serverContext?.prompts?.prompts?.length ?? 0) > 0,
       };
       this.notifyUsersOfServerChange(serverId, affectedSessions, 'server_updated', changed);
     }
     // Log admin operation
     LogService.getInstance().enqueueLog({
       action: MCPEventLogType.AdminServerEdit,
-      requestParams: JSON.stringify({ serverId: serverId })
+      requestParams: JSON.stringify({ serverId: serverId }),
     });
 
     server = structuredClone(server);
@@ -644,12 +833,11 @@ export class ServerHandler {
 
     const affectedSessions = SessionStore.instance.getSessionsUsingServer(serverId);
     await ServerRepository.delete(serverId);
-    
 
     // Log admin operation
     LogService.getInstance().enqueueLog({
       action: MCPEventLogType.AdminServerDelete,
-      requestParams: JSON.stringify({ serverId: serverId })
+      requestParams: JSON.stringify({ serverId: serverId }),
     });
 
     // Notify all related users of server capability changes
@@ -658,14 +846,14 @@ export class ServerHandler {
       changed = {
         toolsChanged: true,
         resourcesChanged: true,
-        promptsChanged: true
+        promptsChanged: true,
       };
     } else {
       const serverContext = await ServerManager.instance.removeServer(serverId);
       changed = {
         toolsChanged: (serverContext?.tools?.tools?.length ?? 0) > 0,
         resourcesChanged: (serverContext?.resources?.resources?.length ?? 0) > 0,
-        promptsChanged: (serverContext?.prompts?.prompts?.length ?? 0) > 0
+        promptsChanged: (serverContext?.prompts?.prompts?.length ?? 0) > 0,
       };
     }
 
@@ -692,17 +880,27 @@ export class ServerHandler {
         const changed = {
           toolsChanged: (serverContext?.tools?.tools?.length ?? 0) > 0,
           resourcesChanged: (serverContext?.resources?.resources?.length ?? 0) > 0,
-          promptsChanged: (serverContext?.prompts?.prompts?.length ?? 0) > 0
+          promptsChanged: (serverContext?.prompts?.prompts?.length ?? 0) > 0,
         };
-        this.notifyUsersOfServerChange(server.serverId, affectedSessions, 'server_deleted', changed);
+        this.notifyUsersOfServerChange(
+          server.serverId,
+          affectedSessions,
+          'server_deleted',
+          changed,
+        );
       } else if (server.allowUserInput) {
         await ServerManager.instance.closeAllTemporaryServersByTemplate(server.serverId);
         const changed = {
           toolsChanged: true,
           resourcesChanged: true,
-          promptsChanged: true
+          promptsChanged: true,
         };
-        this.notifyUsersOfServerChange(server.serverId, affectedSessions, 'server_deleted', changed);
+        this.notifyUsersOfServerChange(
+          server.serverId,
+          affectedSessions,
+          'server_deleted',
+          changed,
+        );
       }
     }
 
@@ -715,7 +913,7 @@ export class ServerHandler {
    */
   async handleCountServers(request: AdminRequest<any>): Promise<any> {
     const count = await ServerRepository.countAll();
-    return { count : count };
+    return { count: count };
   }
 
   // ==================== Helper Methods ====================
@@ -723,7 +921,12 @@ export class ServerHandler {
   /**
    * Notify related users of server changes
    */
-  private async notifyUsersOfServerChange(serverId: string, affectedSessions: ClientSession[], changeType: string, changed: { toolsChanged: boolean, resourcesChanged: boolean, promptsChanged: boolean }): Promise<void> {
+  private async notifyUsersOfServerChange(
+    serverId: string,
+    affectedSessions: ClientSession[],
+    changeType: string,
+    changed: { toolsChanged: boolean; resourcesChanged: boolean; promptsChanged: boolean },
+  ): Promise<void> {
     try {
       this.logger.debug({ serverId, changeType, changed }, 'Notifying users of server change');
 
@@ -755,7 +958,10 @@ export class ServerHandler {
         }
       }
 
-      this.logger.info({ serverId, changeType, sessionCount: affectedSessions.length }, 'Notified sessions about server change');
+      this.logger.info(
+        { serverId, changeType, sessionCount: affectedSessions.length },
+        'Notified sessions about server change',
+      );
     } catch (error) {
       this.logger.error({ error, serverId, changeType }, 'Error notifying users of server change');
     }
@@ -765,7 +971,6 @@ export class ServerHandler {
    * Stop server
    */
   private async stopServer(targetId: string): Promise<void> {
-
     const server = await ServerRepository.findByServerId(targetId);
     if (!server) {
       throw new AdminError(`Server ${targetId} not found`, AdminErrorCode.SERVER_NOT_FOUND);
@@ -777,14 +982,14 @@ export class ServerHandler {
       changed = {
         toolsChanged: true,
         resourcesChanged: true,
-        promptsChanged: true
+        promptsChanged: true,
       };
     } else {
       const serverContext = await ServerManager.instance.removeServer(targetId);
       changed = {
         toolsChanged: (serverContext?.tools?.tools?.length ?? 0) > 0,
         resourcesChanged: (serverContext?.resources?.resources?.length ?? 0) > 0,
-        promptsChanged: (serverContext?.prompts?.prompts?.length ?? 0) > 0
+        promptsChanged: (serverContext?.prompts?.prompts?.length ?? 0) > 0,
       };
     }
 
@@ -793,17 +998,25 @@ export class ServerHandler {
     return;
   }
 
-  private async getUpdatedCapabilities(newCapabilities: any, oldCapabilities: string): Promise<string | undefined> {
+  private async getUpdatedCapabilities(
+    newCapabilities: any,
+    oldCapabilities: string,
+  ): Promise<string | undefined> {
     if (newCapabilities) {
-
-      const newCapabilitiesString = typeof newCapabilities === 'string' ? newCapabilities : JSON.stringify(newCapabilities);
-      const oldCapabilitiesString = typeof oldCapabilities === 'string' ? oldCapabilities : JSON.stringify(oldCapabilities);
+      const newCapabilitiesString =
+        typeof newCapabilities === 'string' ? newCapabilities : JSON.stringify(newCapabilities);
+      const oldCapabilitiesString =
+        typeof oldCapabilities === 'string' ? oldCapabilities : JSON.stringify(oldCapabilities);
       if (newCapabilitiesString === oldCapabilitiesString) {
         return undefined;
       }
-      
-      const newCapabilitiesObj = typeof newCapabilities === 'string' ? JSON.parse(newCapabilities) : newCapabilities;
+
+      const newCapabilitiesObj =
+        typeof newCapabilities === 'string' ? JSON.parse(newCapabilities) : newCapabilities;
       const oldCapabilitiesObj = oldCapabilities ? JSON.parse(oldCapabilities) : {};
+      oldCapabilitiesObj.tools = oldCapabilitiesObj.tools || {};
+      oldCapabilitiesObj.resources = oldCapabilitiesObj.resources || {};
+      oldCapabilitiesObj.prompts = oldCapabilitiesObj.prompts || {};
       let changed = false;
       if (newCapabilitiesObj.tools && Object.keys(newCapabilitiesObj.tools).length > 0) {
         for (const [toolName, toolConfig] of Object.entries(newCapabilitiesObj.tools)) {
@@ -823,6 +1036,13 @@ export class ServerHandler {
         }
         changed = true;
       }
+      if (newCapabilitiesObj.resourceCachePolicies) {
+        oldCapabilitiesObj.resourceCachePolicies = {
+          ...(oldCapabilitiesObj.resourceCachePolicies || {}),
+          ...newCapabilitiesObj.resourceCachePolicies,
+        };
+        changed = true;
+      }
       if (changed) {
         return JSON.stringify(oldCapabilitiesObj);
       } else {
@@ -837,21 +1057,42 @@ export class ServerHandler {
    * Update server capabilities
    */
   private async updateServerCapabilities(targetId: string, capabilities: string): Promise<void> {
-
     await ServerRepository.updateCapabilities(targetId, capabilities);
-    const changed = await ServerManager.instance.updateServerCapabilitiesConfig(targetId, capabilities);
-    this.notifyUsersOfServerChange(targetId, SessionStore.instance.getSessionsUsingServer(targetId), 'capabilities_updated', changed);
+    const changed = await ServerManager.instance.updateServerCapabilitiesConfig(
+      targetId,
+      capabilities,
+    );
+    this.notifyUsersOfServerChange(
+      targetId,
+      SessionStore.instance.getSessionsUsingServer(targetId),
+      'capabilities_updated',
+      changed,
+    );
   }
 
-  private async updateServerLaunchConfig(targetId: string, launchConfig: string, token: string): Promise<boolean> {
+  private async updateServerLaunchConfig(
+    targetId: string,
+    launchConfig: string,
+    token: string,
+  ): Promise<boolean> {
     const entity = await ServerRepository.findByServerId(targetId);
 
     if (!entity) {
       throw new AdminError(`Server ${targetId} not found`, AdminErrorCode.SERVER_NOT_FOUND);
     }
 
-    if (entity.allowUserInput && !(entity.category === ServerCategory.RestApi || entity.category === ServerCategory.CustomRemote || entity.category === ServerCategory.CustomStdio)) {
-      throw new AdminError(`Server ${targetId} is a template server and cannot be updated`, AdminErrorCode.INVALID_REQUEST);
+    if (
+      entity.allowUserInput &&
+      !(
+        entity.category === ServerCategory.RestApi ||
+        entity.category === ServerCategory.CustomRemote ||
+        entity.category === ServerCategory.CustomStdio
+      )
+    ) {
+      throw new AdminError(
+        `Server ${targetId} is a template server and cannot be updated`,
+        AdminErrorCode.INVALID_REQUEST,
+      );
     }
 
     let serverContext = ServerManager.instance.getServerContext(targetId);
@@ -861,7 +1102,7 @@ export class ServerHandler {
       if (entity.category !== ServerCategory.RestApi) {
         return false;
       }
-      
+
       if (entity.configTemplate === serverContext?.serverEntity.configTemplate) {
         return false;
       }
@@ -873,12 +1114,19 @@ export class ServerHandler {
       return false;
     }
     await ServerManager.instance.reconnectServer(newServer, token);
-    await this.notifyUsersOfServerChangeByServerContext(serverContext, SessionStore.instance.getSessionsUsingServer(targetId), 'launch_cmd_updated');
+    await this.notifyUsersOfServerChangeByServerContext(
+      serverContext,
+      SessionStore.instance.getSessionsUsingServer(targetId),
+      'launch_cmd_updated',
+    );
     return true;
   }
 
-  private async updateLazyStartEnabled(existingServer: Server, newServer: Server, lazyStartEnabled?: boolean | undefined): Promise<ServerContext | undefined> {
-
+  private async updateLazyStartEnabled(
+    existingServer: Server,
+    newServer: Server,
+    lazyStartEnabled?: boolean | undefined,
+  ): Promise<ServerContext | undefined> {
     if (lazyStartEnabled === undefined) {
       return undefined;
     }
@@ -895,8 +1143,23 @@ export class ServerHandler {
       for (const temporaryServer of temporaryServers) {
         temporaryServer.serverEntity = newServer;
         if (lazyStartEnabled === false && existingServer.lazyStartEnabled === true) {
-          if (temporaryServer.status === ServerStatus.Sleeping && ServerManager.instance.getOwnerToken()) {
-            ServerManager.instance.reconnectTemporaryServer(temporaryServer.serverEntity, temporaryServer.userId!, temporaryServer.userToken!);
+          if (
+            temporaryServer.status === ServerStatus.Sleeping &&
+            ServerManager.instance.getOwnerToken()
+          ) {
+            ServerManager.instance.reconnectTemporaryServer(
+              temporaryServer.serverEntity,
+              temporaryServer.userId!,
+              temporaryServer.userToken!,
+            );
+          }
+        }
+        if (lazyStartEnabled === true && existingServer.lazyStartEnabled === false) {
+          if (
+            temporaryServer.status !== ServerStatus.Online &&
+            temporaryServer.status !== ServerStatus.Connecting
+          ) {
+            temporaryServer.clearConnectionState(ServerStatus.Sleeping);
           }
         }
         if (lazyStartEnabled === true && existingServer.lazyStartEnabled === false) {
@@ -911,7 +1174,18 @@ export class ServerHandler {
         context.serverEntity = newServer;
         if (lazyStartEnabled === false && existingServer.lazyStartEnabled === true) {
           if (context.status === ServerStatus.Sleeping && ServerManager.instance.getOwnerToken()) {
-            ServerManager.instance.reconnectServer(context.serverEntity, ServerManager.instance.getOwnerToken());
+            ServerManager.instance.reconnectServer(
+              context.serverEntity,
+              ServerManager.instance.getOwnerToken(),
+            );
+          }
+        }
+        if (lazyStartEnabled === true && existingServer.lazyStartEnabled === false) {
+          if (
+            context.status !== ServerStatus.Online &&
+            context.status !== ServerStatus.Connecting
+          ) {
+            context.clearConnectionState(ServerStatus.Sleeping);
           }
         }
         if (lazyStartEnabled === true && existingServer.lazyStartEnabled === false) {
@@ -929,12 +1203,16 @@ export class ServerHandler {
     return serverContext;
   }
 
-  private async notifyUsersOfServerChangeByServerContext(serverContext: ServerContext | undefined, affectedSessions: ClientSession[], changeType: string): Promise<void> {
+  private async notifyUsersOfServerChangeByServerContext(
+    serverContext: ServerContext | undefined,
+    affectedSessions: ClientSession[],
+    changeType: string,
+  ): Promise<void> {
     if (!serverContext) return;
     const changed = {
       toolsChanged: (serverContext?.tools?.tools?.length ?? 0) > 0,
       resourcesChanged: (serverContext?.resources?.resources?.length ?? 0) > 0,
-      promptsChanged: (serverContext?.prompts?.prompts?.length ?? 0) > 0
+      promptsChanged: (serverContext?.prompts?.prompts?.length ?? 0) > 0,
     };
     this.notifyUsersOfServerChange(serverContext.serverID, affectedSessions, changeType, changed);
   }
