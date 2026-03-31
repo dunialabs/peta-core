@@ -390,7 +390,8 @@ export class ConfigController {
           break;
         case AdminActionType.CACHE_PURGE_EXACT:
           result = await this.cacheHandler.handlePurgeExact(adminRequest);
-          
+          break;
+
         // ==================== Policy Operations (9100-9199) ====================
         case AdminActionType.CREATE_POLICY_SET:
           result = await this.policyHandler.handleCreatePolicySet(adminRequest);
@@ -454,6 +455,8 @@ export class ConfigController {
           break;
         case AdminActionType.GET_CATALOG_STATS:
           result = await this.discoveryHandler.handleGetCatalogStats();
+          break;
+
         // ==================== Policy Operations (9100-9199) ====================
         case AdminActionType.CREATE_POLICY_SET:
           result = await this.policyHandler.handleCreatePolicySet(adminRequest);
