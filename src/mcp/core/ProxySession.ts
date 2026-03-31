@@ -393,15 +393,14 @@ export class ProxySession {
           const config = profile.config as DiscoveryProfileConfig | null;
           const rules = config?.directExposureRules;
 
+          // Pre-fetch catalog metadata only when rules exist (needed for category/risk/tags matching).
+          const catalogMap = new Map<string, { category: string | null; riskLevel: string | null; tags: string[] }>();
           if (rules && rules.length > 0) {
-            // Pre-fetch catalog metadata for all tools so exposure rules can match on
-            // category, riskLevel, and tags in addition to serverId.
             const serverIds = new Set<string>();
             for (const tool of allTools.tools) {
               const p = this.clientSession.parseName(tool.name);
               if (p) serverIds.add(p.serverID);
             }
-            const catalogMap = new Map<string, { category: string | null; riskLevel: string | null; tags: string[] }>();
             for (const sid of serverIds) {
               const actions = await CatalogActionRepository.findByServerId(sid);
               for (const action of actions) {
@@ -414,23 +413,26 @@ export class ProxySession {
                 });
               }
             }
-
-            allTools.tools = allTools.tools.filter((tool: Tool) => {
-              const parsed = this.clientSession.parseName(tool.name);
-              if (!parsed) return false;
-              const meta = catalogMap.get(`${parsed.serverID}::${parsed.originalName}`);
-              return evaluateExposureRules(
-                rules,
-                {
-                  serverId: parsed.serverID,
-                  category: meta?.category ?? null,
-                  riskLevel: meta?.riskLevel ?? null,
-                  tags: meta?.tags ?? [],
-                },
-                false,
-              );
-            });
           }
+
+          // Always filter in HYBRID mode — tools are only exposed directly when a rule
+          // explicitly marks them as directCallable. With no rules the default is false,
+          // so all tools are hidden and only the catalog meta-tools remain accessible.
+          allTools.tools = allTools.tools.filter((tool: Tool) => {
+            const parsed = this.clientSession.parseName(tool.name);
+            if (!parsed) return false;
+            const meta = catalogMap.get(`${parsed.serverID}::${parsed.originalName}`);
+            return evaluateExposureRules(
+              rules,
+              {
+                serverId: parsed.serverID,
+                category: meta?.category ?? null,
+                riskLevel: meta?.riskLevel ?? null,
+                tags: meta?.tags ?? [],
+              },
+              false,
+            );
+          });
 
           allTools.tools = [...allTools.tools, ...catalogToolDefs];
         }
