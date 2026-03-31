@@ -144,17 +144,14 @@ export async function handleCatalogDescribe(
   const user = await UserRepository.findByUserId(userId);
   const isAnonymous = !user;
   const authorizedServerIds = await getAuthorizedServerIds(userId, user);
-  let activeProfile;
-  if (input.profileId) {
-    activeProfile = await DiscoveryProfileRepository.findById(input.profileId);
-    if (!activeProfile) {
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ results: [] }) }],
-        structuredContent: toStructuredContent({ results: [] }),
-      };
-    }
-  } else {
-    activeProfile = await discoveryConfigService.getActiveProfile();
+  const activeProfile = input.profileId
+    ? await DiscoveryProfileRepository.findById(input.profileId)
+    : await discoveryConfigService.getActiveProfile();
+  if (input.profileId && !activeProfile) {
+    return {
+      content: [{ type: 'text', text: JSON.stringify({ results: [] }) }],
+      structuredContent: toStructuredContent({ results: [] }),
+    };
   }
   const profileConfig = activeProfile?.config as DiscoveryProfileConfig | null;
   const exposureRules = profileConfig?.directExposureRules;
@@ -199,9 +196,8 @@ export async function handleCatalogDescribe(
           tags: Array.isArray(item.tags)
             ? (item.tags as string[]).filter((t): t is string => typeof t === 'string')
             : [],
-          approvalRequired: item.approvalRequired,
         },
-        true,
+        false,
       ),
       wireName: item.wireName,
       schemaHash: item.schemaHash,
@@ -332,7 +328,7 @@ async function getAuthorizedServerIds(
 
   return ServerManager.instance
     .getAvailableServers()
-    .filter((context) => context.serverEntity.publicAccess || context.serverEntity.anonymousAccess)
+    .filter((context) => context.serverEntity.anonymousAccess)
     .map((context) => context.serverID);
 }
 

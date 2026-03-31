@@ -95,7 +95,6 @@ export interface DiscoveryProfileConfig {
       categories?: string[];
       riskLevels?: string[];
       tags?: string[];
-      requireApproval?: boolean;
     };
     directCallable: boolean;
   }>;
@@ -115,7 +114,6 @@ export function evaluateExposureRules(
     category?: string | null;
     riskLevel?: string | null;
     tags?: string[];
-    approvalRequired?: boolean;
   },
   defaultValue: boolean,
 ): boolean {
@@ -142,10 +140,6 @@ export function evaluateExposureRules(
     if (m.tags?.length) {
       hasCondition = true;
       matched = matched && !!action.tags?.length && m.tags.some((t) => action.tags!.includes(t));
-    }
-    if (m.requireApproval !== undefined && m.requireApproval !== null) {
-      hasCondition = true;
-      matched = matched && action.approvalRequired === m.requireApproval;
     }
 
     if (hasCondition && matched) return rule.directCallable;

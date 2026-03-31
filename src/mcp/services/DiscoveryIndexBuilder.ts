@@ -24,7 +24,8 @@ export class DiscoveryIndexBuilder {
   async buildFullIndex(): Promise<{ indexedActions: number }> {
     const serverContexts = ServerManager.instance
       .getAvailableServers()
-      .filter((context) => context.serverEntity.enabled === true);
+      .filter((context) => context.serverEntity.enabled === true)
+      .filter((context) => !context.userId);
 
     let totalIndexed = 0;
     for (const serverContext of serverContexts) {
@@ -84,6 +85,9 @@ export class DiscoveryIndexBuilder {
   private mapToolToCatalogAction(serverId: string, tool: ToolLike, isPublic = false) {
     const originalToolName = tool.name;
     const actionId = `ppd_${createHash('sha256').update(`${serverId}::${originalToolName}`).digest('hex').slice(0, 16)}`;
+    // wireName is a stable reference identifier (serverId-based), NOT a runtime callable alias.
+    // The actual callable alias uses the runtime serverContext.id which changes across restarts.
+    // Use catalog.execute to call tools; do not call wireName directly.
     const wireName = `${originalToolName}_-_${serverId}`;
     const displayName = `${serverId}.${originalToolName}`;
     const title = tool.title ?? originalToolName;
@@ -113,6 +117,10 @@ export class DiscoveryIndexBuilder {
       tags,
       riskLevel: this.extractRiskLevel(annotations),
       requiredScopes: this.extractRequiredScopes(annotations),
+      // approvalRequired is indexed as false because approval is a runtime policy decision
+      // (evaluated by PolicyEngine from danger level and policy rules at execution time),
+      // not a static property of the tool. This field is a placeholder; do not use it
+      // as an authoritative source of approval requirements.
       approvalRequired: false,
       publicVisible: isPublic,
       enabled: true,
@@ -126,11 +134,23 @@ export class DiscoveryIndexBuilder {
     };
   }
 
+  /**
+   * Extract peta-specific extension field from MCP tool annotations.
+   * NOTE: `category` is NOT part of the MCP SDK ToolAnnotationsSchema.
+   * It is a peta-specific extension that downstream servers may optionally provide.
+   * If not present, falls back to null.
+   */
   private extractCategory(annotations: Record<string, unknown> | null): string | null {
     const value = annotations?.category;
     return typeof value === 'string' && value.trim() !== '' ? value : null;
   }
 
+  /**
+   * Extract peta-specific extension field from MCP tool annotations.
+   * NOTE: `tags` is NOT part of the MCP SDK ToolAnnotationsSchema.
+   * It is a peta-specific extension that downstream servers may optionally provide.
+   * If not present, falls back to an empty array.
+   */
   private extractTags(annotations: Record<string, unknown> | null): string[] {
     const value = annotations?.tags;
     if (!Array.isArray(value)) {
@@ -140,6 +160,12 @@ export class DiscoveryIndexBuilder {
     return value.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0);
   }
 
+  /**
+   * Extract peta-specific extension field from MCP tool annotations.
+   * NOTE: `riskLevel` is NOT part of the MCP SDK ToolAnnotationsSchema.
+   * It is a peta-specific extension that downstream servers may optionally provide.
+   * If not present, falls back to MCP-standard hints (`destructiveHint`, `readOnlyHint`) when available.
+   */
   private extractRiskLevel(annotations: Record<string, unknown> | null): string | null {
     const value = annotations?.riskLevel;
     if (typeof value === 'string' && value.trim() !== '') {
@@ -157,6 +183,12 @@ export class DiscoveryIndexBuilder {
     return null;
   }
 
+  /**
+   * Extract peta-specific extension field from MCP tool annotations.
+   * NOTE: `requiredScopes` is NOT part of the MCP SDK ToolAnnotationsSchema.
+   * It is a peta-specific extension that downstream servers may optionally provide.
+   * If not present, falls back to null.
+   */
   private extractRequiredScopes(annotations: Record<string, unknown> | null): string[] | null {
     const value = annotations?.requiredScopes;
     if (!Array.isArray(value)) {

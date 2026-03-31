@@ -12,7 +12,6 @@ import {
   ListResourceTemplatesResultSchema,
   GetPromptRequestSchema,
   ListPromptsRequestSchema,
-  InitializeRequestSchema,
   CompleteRequestSchema,
   SetLevelRequestSchema,
   PingRequestSchema,
@@ -36,7 +35,6 @@ import {
   type ResourceTemplate,
   type GetPromptRequest,
   type ListPromptsRequest,
-  type InitializeRequest,
   type CompleteRequest,
   type SetLevelRequest,
   type PingRequest,
@@ -58,7 +56,6 @@ import {
   type ListResourcesResult,
   type GetPromptResult,
   type ListPromptsResult,
-  type InitializeResult,
   type CompleteResult,
   type EmptyResult,
   type Tool,
@@ -104,6 +101,7 @@ import {
 import { discoveryConfigService } from '../services/DiscoveryConfigService.js';
 import { ResultCacheService } from './cache/ResultCacheService.js';
 import type { CacheScopeContext, ResolvedCachePolicy } from './cache/types.js';
+import { CatalogActionRepository } from '../../repositories/CatalogActionRepository.js';
 
 /**
  * MCP Proxy Session
@@ -151,6 +149,7 @@ export class ProxySession {
     private sessionLogger: SessionLogger,
     eventStore: PersistentEventStore,
     private onclose: (sessionId: string) => Promise<void>,
+    instructions?: string,
   ) {
     // Initialize logger (needed in constructor because sessionId is required)
     this.logger = createLogger('ProxySession', { sessionId: this.sessionId });
@@ -171,6 +170,7 @@ export class ProxySession {
           completions: {},
           logging: {},
         },
+        ...(instructions ? { instructions } : {}),
       },
     );
     // Set up request handlers
@@ -187,12 +187,6 @@ export class ProxySession {
       this.isInitialized = true;
       this.clientSession.connectionInitialized(this.upstreamServer);
     };
-
-    this.upstreamServer.setRequestHandler(
-      InitializeRequestSchema,
-      async (request: InitializeRequest, extra: RequestHandlerExtra<any, any>) =>
-        this.handleInitialize(request, extra),
-    );
 
     // Tools
     this.upstreamServer.setRequestHandler(
@@ -400,12 +394,41 @@ export class ProxySession {
           const rules = config?.directExposureRules;
 
           if (rules && rules.length > 0) {
+            // Pre-fetch catalog metadata for all tools so exposure rules can match on
+            // category, riskLevel, and tags in addition to serverId.
+            const serverIds = new Set<string>();
+            for (const tool of allTools.tools) {
+              const p = this.clientSession.parseName(tool.name);
+              if (p) serverIds.add(p.serverID);
+            }
+            const catalogMap = new Map<string, { category: string | null; riskLevel: string | null; tags: string[] }>();
+            for (const sid of serverIds) {
+              const actions = await CatalogActionRepository.findByServerId(sid);
+              for (const action of actions) {
+                catalogMap.set(`${action.serverId}::${action.originalName}`, {
+                  category: action.category ?? null,
+                  riskLevel: action.riskLevel ?? null,
+                  tags: Array.isArray(action.tags)
+                    ? (action.tags as unknown[]).filter((t): t is string => typeof t === 'string')
+                    : [],
+                });
+              }
+            }
+
             allTools.tools = allTools.tools.filter((tool: Tool) => {
-              const parts = tool.name.split('_-_');
-              const contextId = parts.length > 1 ? parts[parts.length - 1] : '';
-              const ctx = ServerManager.instance.getServerContextByID(contextId);
-              const serverId = ctx?.serverID ?? contextId;
-              return evaluateExposureRules(rules, { serverId }, false);
+              const parsed = this.clientSession.parseName(tool.name);
+              if (!parsed) return false;
+              const meta = catalogMap.get(`${parsed.serverID}::${parsed.originalName}`);
+              return evaluateExposureRules(
+                rules,
+                {
+                  serverId: parsed.serverID,
+                  category: meta?.category ?? null,
+                  riskLevel: meta?.riskLevel ?? null,
+                  tags: meta?.tags ?? [],
+                },
+                false,
+              );
             });
           }
 
@@ -1136,35 +1159,6 @@ export class ProxySession {
     } as unknown as RequestHandlerExtra<any, any>;
 
     return await this.handleToolCall(request, extra);
-  }
-
-  private async handleInitialize(
-    request: InitializeRequest,
-    extra: RequestHandlerExtra<any, any>,
-  ): Promise<InitializeResult> {
-    void extra;
-
-    const result: InitializeResult = {
-      protocolVersion: request.params.protocolVersion,
-      capabilities: {
-        tools: { listChanged: true },
-        resources: { listChanged: true, subscribe: true },
-        prompts: { listChanged: true },
-        completions: {},
-        logging: {},
-      },
-      serverInfo: {
-        name: APP_INFO.name,
-        version: APP_INFO.version,
-      },
-    };
-
-    const profile = await discoveryConfigService.getActiveProfile(this.clientSession.userId);
-    if (profile && profile.enabled && profile.mode !== 'FLAT' && profile.instructionText) {
-      result.instructions = profile.instructionText;
-    }
-
-    return result;
   }
 
   /**

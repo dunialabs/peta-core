@@ -161,36 +161,34 @@ export class DiscoveryHandler {
   async handlePreviewDiscovery(request: AdminRequest<{ profileId?: string }>): Promise<unknown> {
     const profileId = request.data?.profileId;
 
-    let profile;
-    if (profileId && typeof profileId === 'string') {
-      profile = await DiscoveryProfileRepository.findById(profileId);
-      if (!profile) {
-        throw new AdminError(
-          `Discovery profile not found: ${profileId}`,
-          AdminErrorCode.INVALID_REQUEST,
-        );
-      }
-    } else {
-      profile = await DiscoveryProfileRepository.findDefault();
-      if (!profile) {
-        const allActions = await CatalogActionRepository.search({
-          query: '',
-          limit: 5000,
-          offset: 0,
-        });
-        const flatDirect = allActions.map((a) => ({
-          name: a.wireName ?? a.displayName,
-          serverId: a.serverId,
-        }));
-        return {
-          mode: DiscoveryMode.FLAT,
-          directTools: flatDirect,
-          hiddenTools: [],
-          catalogToolsIncluded: [],
-          totalDirectCount: flatDirect.length,
-          totalHiddenCount: 0,
-        } satisfies DiscoveryPreviewResult;
-      }
+    const profile =
+      profileId && typeof profileId === 'string'
+        ? await DiscoveryProfileRepository.findById(profileId)
+        : await DiscoveryProfileRepository.findDefault();
+    if (profileId && typeof profileId === 'string' && !profile) {
+      throw new AdminError(
+        `Discovery profile not found: ${profileId}`,
+        AdminErrorCode.INVALID_REQUEST,
+      );
+    }
+    if (!profile) {
+      const allActions = await CatalogActionRepository.search({
+        query: '',
+        limit: 5000,
+        offset: 0,
+      });
+      const flatDirect = allActions.map((a) => ({
+        name: a.wireName ?? a.displayName,
+        serverId: a.serverId,
+      }));
+      return {
+        mode: DiscoveryMode.FLAT,
+        directTools: flatDirect,
+        hiddenTools: [],
+        catalogToolsIncluded: [],
+        totalDirectCount: flatDirect.length,
+        totalHiddenCount: 0,
+      } satisfies DiscoveryPreviewResult;
     }
 
     const config = profile.config as DiscoveryProfileConfig | null;
@@ -228,9 +226,8 @@ export class DiscoveryHandler {
             tags: Array.isArray(action.tags)
               ? (action.tags as string[]).filter((t): t is string => typeof t === 'string')
               : [],
-            approvalRequired: action.approvalRequired,
           },
-          true,
+          false,
         );
         if (isDirect) {
           directTools.push({

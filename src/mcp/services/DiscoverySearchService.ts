@@ -91,14 +91,11 @@ export class DiscoverySearchService {
       offset: 0,
     });
 
-    let profile;
-    if (input.profileId) {
-      profile = await DiscoveryProfileRepository.findById(input.profileId);
-      if (!profile) {
-        return { results: [], nextCursor: null, totalCount: 0 };
-      }
-    } else {
-      profile = await discoveryConfigService.getActiveProfile();
+    const profile = input.profileId
+      ? await DiscoveryProfileRepository.findById(input.profileId)
+      : await discoveryConfigService.getActiveProfile();
+    if (input.profileId && !profile) {
+      return { results: [], nextCursor: null, totalCount: 0 };
     }
     const config = profile?.config as DiscoveryProfileConfig | null;
     const exposureRules = config?.directExposureRules;
@@ -134,9 +131,8 @@ export class DiscoverySearchService {
             tags: Array.isArray(action.tags)
               ? action.tags.filter((t): t is string => typeof t === 'string')
               : [],
-            approvalRequired: action.approvalRequired,
           },
-          true,
+          false,
         ),
       );
     }
@@ -171,9 +167,8 @@ export class DiscoverySearchService {
           tags: Array.isArray(action.tags)
             ? action.tags.filter((t): t is string => typeof t === 'string')
             : [],
-          approvalRequired: action.approvalRequired,
         },
-        true,
+        false,
       ),
       schemaHash: action.schemaHash,
     }));
@@ -274,9 +269,7 @@ export class DiscoverySearchService {
     return {
       serverIds: ServerManager.instance
         .getAvailableServers()
-        .filter(
-          (context) => context.serverEntity.publicAccess || context.serverEntity.anonymousAccess,
-        )
+        .filter((context) => context.serverEntity.anonymousAccess)
         .map((context) => context.serverID),
       isAnonymous: true,
     };
