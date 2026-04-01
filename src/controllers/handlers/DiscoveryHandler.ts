@@ -17,6 +17,13 @@ import { discoveryIndexBuilder } from '../../mcp/services/DiscoveryIndexBuilder.
 
 const logger = createLogger('DiscoveryHandler');
 
+function sanitizeDiscoveryProfile<
+  T extends { publicVisible?: unknown; anonymousVisible?: unknown },
+>(profile: T): Omit<T, 'publicVisible' | 'anonymousVisible'> {
+  const { publicVisible: _publicVisible, anonymousVisible: _anonymousVisible, ...rest } = profile;
+  return rest;
+}
+
 export class DiscoveryHandler {
   constructor() {}
 
@@ -63,8 +70,6 @@ export class DiscoveryHandler {
       mode: data.mode,
       enabled: data.enabled,
       isDefault: data.isDefault,
-      publicVisible: data.publicVisible,
-      anonymousVisible: data.anonymousVisible,
       config: data.config as Prisma.JsonValue | undefined,
       instructionText: data.instructionText,
     });
@@ -72,16 +77,17 @@ export class DiscoveryHandler {
     if (data.isDefault) {
       await DiscoveryProfileRepository.setDefault(created.id);
       discoveryConfigService.invalidateCache();
-      return (await DiscoveryProfileRepository.findById(created.id)) ?? created;
+      const refreshed = (await DiscoveryProfileRepository.findById(created.id)) ?? created;
+      return sanitizeDiscoveryProfile(refreshed);
     }
 
     discoveryConfigService.invalidateCache();
-    return created;
+    return sanitizeDiscoveryProfile(created);
   }
 
   async handleGetProfiles(): Promise<unknown> {
     const profiles = await DiscoveryProfileRepository.findAll();
-    return { profiles };
+    return { profiles: profiles.map((profile) => sanitizeDiscoveryProfile(profile)) };
   }
 
   async handleGetProfile(request: AdminRequest<{ id: string }>): Promise<unknown> {
@@ -95,7 +101,7 @@ export class DiscoveryHandler {
       throw new AdminError(`Discovery profile not found: ${id}`, AdminErrorCode.INVALID_REQUEST);
     }
 
-    return profile;
+    return sanitizeDiscoveryProfile(profile);
   }
 
   async handleUpdateProfile(request: AdminRequest<DiscoveryProfileUpdateInput>): Promise<unknown> {
@@ -126,8 +132,6 @@ export class DiscoveryHandler {
       mode: data.mode,
       enabled: data.enabled,
       isDefault: data.isDefault,
-      publicVisible: data.publicVisible,
-      anonymousVisible: data.anonymousVisible,
       config: data.config as Prisma.JsonValue | undefined,
       instructionText: data.instructionText,
     });
@@ -135,11 +139,12 @@ export class DiscoveryHandler {
     if (data.isDefault === true) {
       await DiscoveryProfileRepository.setDefault(data.id);
       discoveryConfigService.invalidateCache();
-      return (await DiscoveryProfileRepository.findById(data.id)) ?? updated;
+      const refreshed = (await DiscoveryProfileRepository.findById(data.id)) ?? updated;
+      return sanitizeDiscoveryProfile(refreshed);
     }
 
     discoveryConfigService.invalidateCache();
-    return updated;
+    return sanitizeDiscoveryProfile(updated);
   }
 
   async handleDeleteProfile(request: AdminRequest<{ id: string }>): Promise<unknown> {
@@ -155,9 +160,13 @@ export class DiscoveryHandler {
 
     const deleted = await DiscoveryProfileRepository.delete(id);
     discoveryConfigService.invalidateCache();
-    return deleted;
+    return sanitizeDiscoveryProfile(deleted);
   }
 
+  /**
+   * Preview uses catalog rows as a discovery index snapshot.
+   * It is not runtime source-of-truth for executable tool routing.
+   */
   async handlePreviewDiscovery(request: AdminRequest<{ profileId?: string }>): Promise<unknown> {
     const profileId = request.data?.profileId;
 
@@ -178,6 +187,7 @@ export class DiscoveryHandler {
         offset: 0,
       });
       const flatDirect = allActions.map((a) => ({
+        // Preview name is the catalog reference name (wireName) when available.
         name: a.wireName ?? a.displayName,
         serverId: a.serverId,
       }));

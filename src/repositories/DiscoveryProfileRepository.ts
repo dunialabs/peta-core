@@ -8,7 +8,15 @@ export interface DiscoveryProfileRecord {
   mode: string;
   enabled: boolean;
   isDefault: boolean;
+  /**
+   * Reserved for future profile-level visibility semantics.
+   * Currently persisted but not enforced in discovery runtime behavior.
+   */
   publicVisible: boolean;
+  /**
+   * Reserved for future anonymous visibility semantics.
+   * Currently persisted but not enforced in discovery runtime behavior.
+   */
   anonymousVisible: boolean;
   config: Prisma.JsonValue | null;
   instructionText: string | null;
