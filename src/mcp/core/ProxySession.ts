@@ -386,9 +386,26 @@ export class ProxySession {
         const { getCatalogToolDefinitions } =
           await import('../services/DiscoveryNativeToolHandlers.js');
         const catalogToolDefs = getCatalogToolDefinitions();
+        const temporaryServerIds = new Set(
+          ServerManager.instance
+            .getAvailableServers()
+            .filter((context) => context.userId != null)
+            .map((context) => context.serverID),
+        );
+
+        const temporaryTools: Tool[] = [];
+        const catalogScopedTools: Tool[] = [];
+        for (const tool of allTools.tools) {
+          const parsed = this.clientSession.parseName(tool.name);
+          if (parsed && temporaryServerIds.has(parsed.serverID)) {
+            temporaryTools.push(tool);
+          } else {
+            catalogScopedTools.push(tool);
+          }
+        }
 
         if (mode === DiscoveryMode.STRICT) {
-          allTools.tools = [...catalogToolDefs];
+          allTools.tools = [...temporaryTools, ...catalogToolDefs];
         } else {
           const config = profile.config as DiscoveryProfileConfig | null;
           const rules = config?.directExposureRules;
@@ -397,7 +414,7 @@ export class ProxySession {
           const catalogMap = new Map<string, { category: string | null; riskLevel: string | null; tags: string[] }>();
           if (rules && rules.length > 0) {
             const serverIds = new Set<string>();
-            for (const tool of allTools.tools) {
+            for (const tool of catalogScopedTools) {
               const p = this.clientSession.parseName(tool.name);
               if (p) serverIds.add(p.serverID);
             }
@@ -418,7 +435,7 @@ export class ProxySession {
           // Always filter in HYBRID mode — tools are only exposed directly when a rule
           // explicitly marks them as directCallable. With no rules the default is false,
           // so all tools are hidden and only the catalog meta-tools remain accessible.
-          allTools.tools = allTools.tools.filter((tool: Tool) => {
+          const filteredCatalogTools = catalogScopedTools.filter((tool: Tool) => {
             const parsed = this.clientSession.parseName(tool.name);
             if (!parsed) return false;
             const meta = catalogMap.get(`${parsed.serverID}::${parsed.originalName}`);
@@ -434,7 +451,7 @@ export class ProxySession {
             );
           });
 
-          allTools.tools = [...allTools.tools, ...catalogToolDefs];
+          allTools.tools = [...filteredCatalogTools, ...temporaryTools, ...catalogToolDefs];
         }
 
         if (allTools._meta) {

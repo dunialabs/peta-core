@@ -76,7 +76,7 @@ export class SessionStore {
       action: MCPEventLogType.SessionInit,
     });
 
-    const profile = await discoveryConfigService.getActiveProfile(userId);
+    const profile = await discoveryConfigService.getActiveProfile();
     const instructions =
       profile && profile.enabled && profile.mode !== 'FLAT' && profile.instructionText
         ? profile.instructionText

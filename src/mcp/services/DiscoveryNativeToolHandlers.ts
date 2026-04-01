@@ -48,10 +48,7 @@ export function getCatalogToolDefinitions(): Tool[] {
           query: { type: 'string' },
           profileId: { type: 'string' },
           serverIds: { type: 'array', items: { type: 'string' } },
-          categories: { type: 'array', items: { type: 'string' } },
-          tags: { type: 'array', items: { type: 'string' } },
           riskMax: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
-          approvalAllowed: { type: 'boolean' },
           directCallableOnly: { type: 'boolean' },
           detail: { type: 'string', enum: ['summary'] },
           limit: { type: 'integer', minimum: 1, maximum: 25, default: 10 },
@@ -142,7 +139,6 @@ export async function handleCatalogDescribe(
 ): Promise<CallToolResult> {
   const input = parseCatalogDescribeInput(args);
   const user = await UserRepository.findByUserId(userId);
-  const isAnonymous = !user;
   const authorizedServerIds = await getAuthorizedServerIds(userId, user);
   const activeProfile = input.profileId
     ? await DiscoveryProfileRepository.findById(input.profileId)
@@ -163,7 +159,6 @@ export async function handleCatalogDescribe(
     .filter((item) =>
       user ? isToolEnabledForUser(user.permissions, item.serverId, item.originalName) : true,
     )
-    .filter((item) => !isAnonymous || item.publicVisible)
     .filter((item) => {
       if (!clientSession) return true;
       return clientSession.canUseTool(item.serverId, item.originalName);
@@ -186,7 +181,6 @@ export async function handleCatalogDescribe(
       requiredScopes: Array.isArray(item.requiredScopes)
         ? item.requiredScopes.filter((scope): scope is string => typeof scope === 'string')
         : null,
-      approvalRequired: item.approvalRequired,
       directCallable: evaluateExposureRules(
         exposureRules,
         {
@@ -199,7 +193,7 @@ export async function handleCatalogDescribe(
         },
         false,
       ),
-      wireName: item.wireName,
+      catalogRefName: item.wireName,
       schemaHash: item.schemaHash,
     }));
 
@@ -228,11 +222,6 @@ export async function handleCatalogExecute(
   const user = await UserRepository.findByUserId(userId);
   const authorizedServerIds = await getAuthorizedServerIds(userId, user);
   if (!authorizedServerIds.includes(action.serverId)) {
-    throw new McpError(ErrorCode.InvalidParams, 'Permission denied for catalog action');
-  }
-
-  const isAnonymous = !user;
-  if (isAnonymous && !action.publicVisible) {
     throw new McpError(ErrorCode.InvalidParams, 'Permission denied for catalog action');
   }
 
@@ -268,10 +257,7 @@ function parseCatalogSearchInput(value: unknown): CatalogSearchInput {
     query: value.query,
     profileId: asOptionalString(value.profileId),
     serverIds: asOptionalStringArray(value.serverIds),
-    categories: asOptionalStringArray(value.categories),
-    tags: asOptionalStringArray(value.tags),
     riskMax: asOptionalRiskLevel(value.riskMax),
-    approvalAllowed: asOptionalBoolean(value.approvalAllowed),
     directCallableOnly: asOptionalBoolean(value.directCallableOnly),
     detail: value.detail === 'summary' ? 'summary' : undefined,
     limit: asOptionalNumber(value.limit),

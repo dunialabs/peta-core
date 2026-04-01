@@ -25,9 +25,7 @@ export class DiscoveryConfigService {
     return this.enabled;
   }
 
-  async getActiveProfile(userId?: string): Promise<DiscoveryProfileLike> {
-    void userId;
-
+  async getActiveProfile(): Promise<DiscoveryProfileLike> {
     const now = Date.now();
     if (this.cachedProfile !== undefined && now < this.cacheExpiry) {
       this.enabled = Boolean(this.cachedProfile?.enabled);

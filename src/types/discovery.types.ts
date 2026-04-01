@@ -18,10 +18,7 @@ export interface CatalogSearchInput {
   query: string;
   profileId?: string;
   serverIds?: string[];
-  categories?: string[];
-  tags?: string[];
   riskMax?: 'low' | 'medium' | 'high' | 'critical';
-  approvalAllowed?: boolean;
   directCallableOnly?: boolean;
   detail?: 'summary';
   limit?: number;
@@ -37,7 +34,6 @@ export interface CatalogSearchResultItem {
   category: string | null;
   tags: string[];
   riskLevel: string | null;
-  approvalRequired: boolean;
   directCallable: boolean;
   schemaHash: string;
 }
@@ -68,9 +64,8 @@ export interface CatalogDescribeResultItem {
   examples: unknown[] | null;
   riskLevel: string | null;
   requiredScopes: string[] | null;
-  approvalRequired: boolean;
   directCallable: boolean;
-  wireName: string | null;
+  catalogRefName: string | null;
   schemaHash: string;
 }
 
@@ -85,10 +80,6 @@ export interface CatalogExecuteInput {
 }
 
 export interface DiscoveryProfileConfig {
-  searchDefaults?: {
-    preferReadOnly?: boolean;
-    rankHotPathHigher?: boolean;
-  };
   directExposureRules?: Array<{
     match: {
       serverIds?: string[];
@@ -159,8 +150,6 @@ export interface DiscoveryProfileCreateInput {
   mode: DiscoveryMode;
   enabled?: boolean;
   isDefault?: boolean;
-  publicVisible?: boolean;
-  anonymousVisible?: boolean;
   config?: DiscoveryProfileConfig;
   instructionText?: string;
 }
@@ -172,8 +161,6 @@ export interface DiscoveryProfileUpdateInput {
   mode?: DiscoveryMode;
   enabled?: boolean;
   isDefault?: boolean;
-  publicVisible?: boolean;
-  anonymousVisible?: boolean;
   config?: DiscoveryProfileConfig;
   instructionText?: string;
 }

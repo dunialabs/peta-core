@@ -84,8 +84,6 @@ export class DiscoverySearchService {
     const scanned = await CatalogActionRepository.search({
       query,
       serverIds,
-      categories: input.categories,
-      tags: input.tags,
       riskMax: input.riskMax,
       limit: MAX_SCAN_SIZE,
       offset: 0,
@@ -100,9 +98,7 @@ export class DiscoverySearchService {
     const config = profile?.config as DiscoveryProfileConfig | null;
     const exposureRules = config?.directExposureRules;
 
-    const visibilityFiltered = authCtx.isAnonymous
-      ? scanned.filter((action) => action.publicVisible)
-      : scanned;
+    const visibilityFiltered = scanned;
 
     const toolPermissionFiltered = user
       ? visibilityFiltered.filter((action) =>
@@ -115,10 +111,6 @@ export class DiscoverySearchService {
       : toolPermissionFiltered;
 
     let filtered = callbackFiltered;
-
-    if (input.approvalAllowed === false) {
-      filtered = filtered.filter((action) => !action.approvalRequired);
-    }
 
     if (input.directCallableOnly) {
       filtered = filtered.filter((action) =>
@@ -140,7 +132,7 @@ export class DiscoverySearchService {
     const ranked = filtered
       .map((action) => ({
         action,
-        rank: this.calculateRank(action, query, input.categories ?? []),
+        rank: this.calculateRank(action, query),
       }))
       .sort((a, b) => b.rank - a.rank)
       .map((entry) => entry.action);
@@ -157,7 +149,6 @@ export class DiscoverySearchService {
         ? action.tags.filter((tag): tag is string => typeof tag === 'string')
         : [],
       riskLevel: action.riskLevel,
-      approvalRequired: action.approvalRequired,
       directCallable: evaluateExposureRules(
         exposureRules,
         {
@@ -203,7 +194,6 @@ export class DiscoverySearchService {
       searchText: string | null;
     },
     query: string,
-    requestedCategories: string[],
   ): number {
     const q = query.toLowerCase();
     const displayName = action.displayName.toLowerCase();
@@ -225,7 +215,7 @@ export class DiscoverySearchService {
       rank += 200;
     }
 
-    if (category === q || requestedCategories.some((c) => c.toLowerCase() === category)) {
+    if (category === q) {
       rank += 250;
     }
 
