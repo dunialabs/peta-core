@@ -457,40 +457,6 @@ export class ConfigController {
           result = await this.discoveryHandler.handleGetCatalogStats();
           break;
 
-        // ==================== Policy Operations (9100-9199) ====================
-        case AdminActionType.CREATE_POLICY_SET:
-          result = await this.policyHandler.handleCreatePolicySet(adminRequest);
-          break;
-        case AdminActionType.GET_POLICY_SETS:
-          result = await this.policyHandler.handleGetPolicySets(adminRequest);
-          break;
-        case AdminActionType.UPDATE_POLICY_SET:
-          result = await this.policyHandler.handleUpdatePolicySet(adminRequest);
-          break;
-        case AdminActionType.DELETE_POLICY_SET:
-          result = await this.policyHandler.handleDeletePolicySet(adminRequest);
-          break;
-        case AdminActionType.GET_EFFECTIVE_POLICY:
-          result = await this.policyHandler.handleGetEffectivePolicy(adminRequest);
-          break;
-
-        // ==================== Approval Operations (9200-9299) ====================
-        case AdminActionType.LIST_APPROVAL_REQUESTS:
-          result = await this.approvalHandler.handleListApprovalRequests(adminRequest);
-          break;
-        case AdminActionType.GET_APPROVAL_REQUEST:
-          result = await this.approvalHandler.handleGetApprovalRequest(adminRequest);
-          break;
-        case AdminActionType.DECIDE_APPROVAL_REQUEST:
-          result = await this.approvalHandler.handleDecideApprovalRequest(
-            adminRequest,
-            req.authContext,
-          );
-          break;
-        case AdminActionType.GET_PENDING_APPROVALS_COUNT:
-          result = await this.approvalHandler.handleGetPendingApprovalsCount(adminRequest);
-          break;
-
         default: {
           const errorResponse: AdminResponse = {
             success: false,

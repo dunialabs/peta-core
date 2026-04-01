@@ -8,6 +8,21 @@ type ToolLike = Tool & {
   outputSchema?: Record<string, unknown>;
 };
 
+/**
+ * Builds and maintains the persistent discovery catalog index.
+ *
+ * IMPORTANT: The catalog is a searchable index/cache derived from live server state,
+ * NOT a runtime source of truth. It is used for catalog.search and catalog.describe
+ * to provide keyword-based discovery across all managed server tools.
+ *
+ * Runtime execution (catalog.execute) always resolves through the live ServerContext
+ * and ServerManager, not from catalog rows. Temporary/user-scoped server contexts
+ * are intentionally excluded from this global index.
+ *
+ * The catalog can drift from runtime truth when server configurations, permissions,
+ * or policies change between rebuilds. Invalidation is triggered by tools/listChanged
+ * events and admin-initiated reindex operations.
+ */
 export class DiscoveryIndexBuilder {
   private static instance: DiscoveryIndexBuilder;
   private readonly logger = createLogger('DiscoveryIndexBuilder');
