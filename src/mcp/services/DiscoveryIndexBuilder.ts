@@ -3,6 +3,7 @@ import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { createLogger } from '../../logger/index.js';
 import { ServerManager } from '../core/ServerManager.js';
 import { CatalogActionRepository } from '../../repositories/CatalogActionRepository.js';
+import { inferDiscoveryRiskLevel } from '../../types/discovery.types.js';
 
 type ToolLike = Tool & {
   outputSchema?: Record<string, unknown>;
@@ -81,10 +82,7 @@ export class DiscoveryIndexBuilder {
       this.logger.debug({ serverId }, 'Server has no tools loaded yet, skipping catalog rebuild');
       return { indexedActions: 0 };
     }
-    const isPublic = Boolean(
-      serverContext.serverEntity?.publicAccess || serverContext.serverEntity?.anonymousAccess,
-    );
-    const actions = tools.map((tool) => this.mapToolToCatalogAction(serverId, tool, isPublic));
+    const actions = tools.map((tool) => this.mapToolToCatalogAction(serverId, tool));
 
     await CatalogActionRepository.bulkUpsert(actions);
     const newActionIds = actions.map((a) => a.actionId);
@@ -97,7 +95,7 @@ export class DiscoveryIndexBuilder {
     return { indexedActions: actions.length };
   }
 
-  private mapToolToCatalogAction(serverId: string, tool: ToolLike, isPublic = false) {
+  private mapToolToCatalogAction(serverId: string, tool: ToolLike) {
     const originalToolName = tool.name;
     const actionId = `ppd_${createHash('sha256').update(`${serverId}::${originalToolName}`).digest('hex').slice(0, 16)}`;
     // wireName is a stable reference identifier (serverId-based), NOT a runtime callable alias.
@@ -111,8 +109,7 @@ export class DiscoveryIndexBuilder {
     const inputSchema = (tool.inputSchema ?? {}) as Record<string, unknown>;
     const outputSchema = (tool.outputSchema ?? null) as Record<string, unknown> | null;
     const annotations = (tool.annotations ?? null) as Record<string, unknown> | null;
-    const tags = this.extractTags(annotations);
-    const searchText = [displayName, title, summary, description ?? '', ...tags]
+    const searchText = [displayName, title, summary, description ?? '']
       .join(' ')
       .toLowerCase()
       .trim();
@@ -128,16 +125,7 @@ export class DiscoveryIndexBuilder {
       title,
       summary,
       description,
-      category: this.extractCategory(annotations),
-      tags,
-      riskLevel: this.extractRiskLevel(annotations),
-      requiredScopes: this.extractRequiredScopes(annotations),
-      // approvalRequired is indexed as false because approval is a runtime policy decision
-      // (evaluated by PolicyEngine from danger level and policy rules at execution time),
-      // not a static property of the tool. This field is a placeholder; do not use it
-      // as an authoritative source of approval requirements.
-      approvalRequired: false,
-      publicVisible: isPublic,
+      riskLevel: inferDiscoveryRiskLevel(annotations),
       enabled: true,
       inputSchema,
       outputSchema,
@@ -147,73 +135,6 @@ export class DiscoveryIndexBuilder {
       searchText,
       lastIndexedAt: new Date(),
     };
-  }
-
-  /**
-   * Extract peta-specific extension field from MCP tool annotations.
-   * NOTE: `category` is NOT part of the MCP SDK ToolAnnotationsSchema.
-   * It is a peta-specific extension that downstream servers may optionally provide.
-   * If not present, falls back to null.
-   */
-  private extractCategory(annotations: Record<string, unknown> | null): string | null {
-    const value = annotations?.category;
-    return typeof value === 'string' && value.trim() !== '' ? value : null;
-  }
-
-  /**
-   * Extract peta-specific extension field from MCP tool annotations.
-   * NOTE: `tags` is NOT part of the MCP SDK ToolAnnotationsSchema.
-   * It is a peta-specific extension that downstream servers may optionally provide.
-   * If not present, falls back to an empty array.
-   */
-  private extractTags(annotations: Record<string, unknown> | null): string[] {
-    const value = annotations?.tags;
-    if (!Array.isArray(value)) {
-      return [];
-    }
-
-    return value.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0);
-  }
-
-  /**
-   * Extract peta-specific extension field from MCP tool annotations.
-   * NOTE: `riskLevel` is NOT part of the MCP SDK ToolAnnotationsSchema.
-   * It is a peta-specific extension that downstream servers may optionally provide.
-   * If not present, falls back to MCP-standard hints (`destructiveHint`, `readOnlyHint`) when available.
-   */
-  private extractRiskLevel(annotations: Record<string, unknown> | null): string | null {
-    const value = annotations?.riskLevel;
-    if (typeof value === 'string' && value.trim() !== '') {
-      return value.toLowerCase();
-    }
-
-    if (annotations?.destructiveHint === true) {
-      return 'high';
-    }
-
-    if (annotations?.readOnlyHint === true) {
-      return 'low';
-    }
-
-    return null;
-  }
-
-  /**
-   * Extract peta-specific extension field from MCP tool annotations.
-   * NOTE: `requiredScopes` is NOT part of the MCP SDK ToolAnnotationsSchema.
-   * It is a peta-specific extension that downstream servers may optionally provide.
-   * If not present, falls back to null.
-   */
-  private extractRequiredScopes(annotations: Record<string, unknown> | null): string[] | null {
-    const value = annotations?.requiredScopes;
-    if (!Array.isArray(value)) {
-      return null;
-    }
-
-    const scopes = value.filter(
-      (scope): scope is string => typeof scope === 'string' && scope.trim().length > 0,
-    );
-    return scopes.length > 0 ? scopes : null;
   }
 }
 

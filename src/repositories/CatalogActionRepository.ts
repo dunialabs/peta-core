@@ -11,12 +11,7 @@ export interface CatalogActionRecord {
   title: string;
   summary: string;
   description: string | null;
-  category: string | null;
-  tags: Prisma.JsonValue | null;
   riskLevel: string | null;
-  requiredScopes: Prisma.JsonValue | null;
-  approvalRequired: boolean;
-  publicVisible: boolean;
   enabled: boolean;
   inputSchema: Prisma.JsonValue;
   outputSchema: Prisma.JsonValue | null;
@@ -56,8 +51,6 @@ const catalogActionModel = prisma as unknown as {
 export interface CatalogSearchParams {
   query: string;
   serverIds?: string[];
-  categories?: string[];
-  tags?: string[];
   riskMax?: 'low' | 'medium' | 'high' | 'critical';
   limit: number;
   offset: number;
@@ -72,12 +65,7 @@ type CatalogActionUpsertInput = {
   title: string;
   summary: string;
   description?: string | null;
-  category?: string | null;
-  tags?: unknown[];
   riskLevel?: string | null;
-  requiredScopes?: string[] | null;
-  approvalRequired?: boolean;
-  publicVisible?: boolean;
   enabled?: boolean;
   inputSchema: Record<string, unknown>;
   outputSchema?: Record<string, unknown> | null;
@@ -129,18 +117,6 @@ export class CatalogActionRepository {
       where.serverId = { in: params.serverIds };
     }
 
-    if (params.categories && params.categories.length > 0) {
-      where.category = { in: params.categories };
-    }
-
-    if (params.tags && params.tags.length > 0) {
-      where.OR = params.tags.map((tag) => ({
-        tags: {
-          array_contains: [tag],
-        },
-      }));
-    }
-
     if (params.riskMax) {
       const max = RISK_ORDER[params.riskMax] ?? RISK_ORDER.critical;
       const allowedRisks = Object.entries(RISK_ORDER)
@@ -182,17 +158,7 @@ export class CatalogActionRepository {
           title: action.title,
           summary: action.summary,
           description: action.description ?? null,
-          category: action.category ?? null,
-          tags: action.tags === undefined ? undefined : (action.tags as Prisma.InputJsonValue),
           riskLevel: action.riskLevel ?? null,
-          requiredScopes:
-            action.requiredScopes === undefined
-              ? undefined
-              : action.requiredScopes === null
-                ? Prisma.JsonNull
-                : (action.requiredScopes as Prisma.InputJsonValue),
-          approvalRequired: action.approvalRequired ?? false,
-          publicVisible: action.publicVisible ?? false,
           enabled: action.enabled ?? true,
           inputSchema: action.inputSchema as Prisma.InputJsonValue,
           outputSchema:
