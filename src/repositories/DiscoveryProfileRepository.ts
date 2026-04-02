@@ -8,16 +8,6 @@ export interface DiscoveryProfileRecord {
   mode: string;
   enabled: boolean;
   isDefault: boolean;
-  /**
-   * Reserved for future profile-level visibility semantics.
-   * Currently persisted but not enforced in discovery runtime behavior.
-   */
-  publicVisible: boolean;
-  /**
-   * Reserved for future anonymous visibility semantics.
-   * Currently persisted but not enforced in discovery runtime behavior.
-   */
-  anonymousVisible: boolean;
   config: Prisma.JsonValue | null;
   instructionText: string | null;
   createdAt: Date;
@@ -43,8 +33,6 @@ type DiscoveryProfileDelegate = {
       mode?: string;
       enabled?: boolean;
       isDefault?: boolean;
-      publicVisible?: boolean;
-      anonymousVisible?: boolean;
       config?: Prisma.InputJsonValue | typeof Prisma.JsonNull;
       instructionText?: string | null;
     };
@@ -57,8 +45,6 @@ type DiscoveryProfileDelegate = {
       mode?: string;
       enabled?: boolean;
       isDefault?: boolean;
-      publicVisible?: boolean;
-      anonymousVisible?: boolean;
       config?: Prisma.InputJsonValue | typeof Prisma.JsonNull;
       instructionText?: string | null;
     };
@@ -80,8 +66,6 @@ type DiscoveryProfileCreateData = {
   mode?: string;
   enabled?: boolean;
   isDefault?: boolean;
-  publicVisible?: boolean;
-  anonymousVisible?: boolean;
   config?: Prisma.JsonValue;
   instructionText?: string;
 };
@@ -92,8 +76,6 @@ type DiscoveryProfileUpdateData = {
   mode?: string;
   enabled?: boolean;
   isDefault?: boolean;
-  publicVisible?: boolean;
-  anonymousVisible?: boolean;
   config?: Prisma.JsonValue;
   instructionText?: string;
 };
@@ -126,8 +108,6 @@ export class DiscoveryProfileRepository {
         mode: data.mode,
         enabled: data.enabled,
         isDefault: data.isDefault,
-        publicVisible: data.publicVisible,
-        anonymousVisible: data.anonymousVisible,
         config:
           data.config === undefined
             ? undefined
@@ -151,8 +131,6 @@ export class DiscoveryProfileRepository {
         mode: data.mode,
         enabled: data.enabled,
         isDefault: data.isDefault,
-        publicVisible: data.publicVisible,
-        anonymousVisible: data.anonymousVisible,
         config:
           data.config === undefined
             ? undefined

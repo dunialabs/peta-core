@@ -280,8 +280,6 @@ model DiscoveryProfile {
   mode             String    @default("FLAT") @db.VarChar(20) // FLAT | HYBRID | STRICT
   enabled          Boolean   @default(false)
   isDefault        Boolean   @default(false)
-  publicVisible    Boolean   @default(false) @map("public_visible")
-  anonymousVisible Boolean   @default(false) @map("anonymous_visible")
   config           Json?
   instructionText  String?   @map("instruction_text") @db.Text
   createdAt        DateTime  @default(now()) @map("created_at")
@@ -302,12 +300,7 @@ model CatalogAction {
   title            String
   summary          String    @db.Text
   description      String?   @db.Text
-  category         String?
-  tags             Json?
   riskLevel        String?   @map("risk_level") @db.VarChar(20)
-  requiredScopes   Json?     @map("required_scopes")
-  approvalRequired Boolean   @default(false) @map("approval_required")
-  publicVisible    Boolean   @default(false) @map("public_visible")
   enabled          Boolean   @default(true)
   inputSchema      Json      @map("input_schema")
   outputSchema     Json?     @map("output_schema")
@@ -322,7 +315,6 @@ model CatalogAction {
   profileBindings  CatalogActionProfile[]
 
   @@index([serverId], map: "idx_catalog_action_server_id")
-  @@index([category], map: "idx_catalog_action_category")
   @@map("catalog_action")
 }
 
