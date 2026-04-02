@@ -150,6 +150,20 @@ Peta Core exposes different APIs for different roles:
 
 ---
 
+## Progressive Disclosure Catalog
+
+Peta Core's Progressive Disclosure catalog is a **persistent search index**, not the runtime source of truth for callable tools.
+
+- `catalog.search` and `catalog.describe` read from indexed `CatalogAction` rows for discovery and preview.
+- `catalog.execute` always resolves the live `ServerContext` for the current user and rebuilds the callable alias from the runtime context ID before dispatch.
+- The global catalog excludes temporary or user-scoped server contexts; those tools remain discoverable to the current user through the live runtime surface.
+- HYBRID direct-exposure rules evaluate against live runtime data (`serverId` plus risk inferred from standard MCP hints) so initial startup does not depend on catalog rows already existing.
+- Indexed catalog rows intentionally store only stable metadata that survives the SDK-parsed runtime path. Placeholder fields such as catalog-level approval/public visibility are not treated as authoritative runtime facts.
+
+When you need the exact executable surface for a user, trust the live session/runtime state. When you need cross-server discovery, search, preview counts, or admin reindex/statistics, use the catalog index.
+
+---
+
 ## Tech Stack
 
 - **Runtime**: Node.js (v18+) and TypeScript

@@ -106,6 +106,18 @@ LIST_APPROVAL_REQUESTS = 9201, // List approval requests
 GET_APPROVAL_REQUEST = 9202, // Get approval request
 DECIDE_APPROVAL_REQUEST = 9203, // Decide approval request
 COUNT_PENDING_APPROVALS = 9204 // Count pending approvals
+
+// Discovery / Progressive Disclosure operations (9300-9399)
+GET_DISCOVERY_CONFIG = 9301, // Get global discovery enablement + default profile
+SET_DISCOVERY_CONFIG = 9302, // Update global discovery enablement + default profile
+CREATE_DISCOVERY_PROFILE = 9310, // Create a discovery profile
+GET_DISCOVERY_PROFILES = 9311, // List discovery profiles
+GET_DISCOVERY_PROFILE = 9312, // Get one discovery profile
+UPDATE_DISCOVERY_PROFILE = 9313, // Update a discovery profile
+DELETE_DISCOVERY_PROFILE = 9314, // Delete a discovery profile
+PREVIEW_DISCOVERY = 9320, // Preview direct vs catalog-only tools for a profile
+REINDEX_CATALOG = 9330, // Rebuild the persistent catalog index from live managed servers
+GET_CATALOG_STATS = 9331, // Get catalog row / server count / last-indexed stats
 }
 
 ### Request Examples
@@ -236,6 +248,13 @@ interface AdminResponse<T = any> {
 - `2` Connecting
 - `3` Error
 - `4` Sleeping (lazy start; currently no active connection but can be woken up again)
+
+### Progressive Disclosure Notes
+
+- The discovery catalog is an **index/cache**, not the runtime source of truth for executing tools.
+- `PREVIEW_DISCOVERY`, `REINDEX_CATALOG`, and `GET_CATALOG_STATS` operate on that catalog/index layer.
+- Runtime execution still resolves through the live MCP session and the current `ServerContext`.
+- Temporary or user-scoped server contexts are excluded from the global catalog index.
 
 **DangerLevel**
 
