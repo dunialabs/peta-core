@@ -1333,6 +1333,18 @@ export class ServerManager {
           const tools = await client.listTools();
           if (tools) {
             await serverContext.updateTools(tools);
+
+            if (serverContext.userId == null) {
+              try {
+                const { discoveryIndexBuilder } = await import('../services/DiscoveryIndexBuilder.js');
+                await discoveryIndexBuilder.invalidateServer(serverContext.serverEntity.serverId);
+              } catch (err) {
+                this.logger.warn(
+                  { error: err, serverId: serverContext.serverEntity.serverId },
+                  'Failed to rebuild discovery catalog after initial tools load',
+                );
+              }
+            }
           }
         } catch (error) {
           this.logger.warn(

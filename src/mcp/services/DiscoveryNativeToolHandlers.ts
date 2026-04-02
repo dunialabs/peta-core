@@ -34,6 +34,7 @@ interface ProxySessionLike {
 interface ClientSessionLike {
   userId: string;
   canUseTool(serverID: string, toolName: string): boolean;
+  generateNewName(serverID: string, name: string): string;
 }
 
 export function getCatalogToolDefinitions(): Tool[] {
@@ -135,7 +136,7 @@ export async function handleCatalogSearch(
 export async function handleCatalogDescribe(
   args: unknown,
   userId: string,
-  clientSession?: ClientSessionLike,
+  clientSession: ClientSessionLike,
 ): Promise<CallToolResult> {
   const input = parseCatalogDescribeInput(args);
   const user = await UserRepository.findByUserId(userId);
@@ -156,13 +157,7 @@ export async function handleCatalogDescribe(
 
   const filtered = items
     .filter((item) => authorizedServerIds.includes(item.serverId))
-    .filter((item) =>
-      user ? isToolEnabledForUser(user.permissions, item.serverId, item.originalName) : true,
-    )
-    .filter((item) => {
-      if (!clientSession) return true;
-      return clientSession.canUseTool(item.serverId, item.originalName);
-    })
+    .filter((item) => clientSession.canUseTool(item.serverId, item.originalName))
     .map((item) => ({
       actionId: item.actionId,
       displayName: item.displayName,
@@ -170,7 +165,6 @@ export async function handleCatalogDescribe(
       summary: item.summary,
       description: item.description,
       serverId: item.serverId,
-      category: item.category,
       inputSchema: isRecord(item.inputSchema)
         ? item.inputSchema
         : ({ type: 'object' } as Record<string, unknown>),
@@ -178,18 +172,11 @@ export async function handleCatalogDescribe(
       annotations: isRecord(item.annotations) ? item.annotations : null,
       examples: Array.isArray(item.examples) ? item.examples : null,
       riskLevel: item.riskLevel,
-      requiredScopes: Array.isArray(item.requiredScopes)
-        ? item.requiredScopes.filter((scope): scope is string => typeof scope === 'string')
-        : null,
       directCallable: evaluateExposureRules(
         exposureRules,
         {
           serverId: item.serverId,
-          category: item.category,
           riskLevel: item.riskLevel,
-          tags: Array.isArray(item.tags)
-            ? (item.tags as string[]).filter((t): t is string => typeof t === 'string')
-            : [],
         },
         false,
       ),
@@ -211,7 +198,7 @@ export async function handleCatalogExecute(
   args: unknown,
   userId: string,
   proxySession: ProxySessionLike,
-  clientSession?: ClientSessionLike,
+  clientSession: ClientSessionLike,
 ): Promise<CallToolResult> {
   const input = parseCatalogExecuteInput(args);
   const action = await CatalogActionRepository.findByActionId(input.actionId);
@@ -229,7 +216,7 @@ export async function handleCatalogExecute(
     throw new McpError(ErrorCode.InvalidParams, 'Permission denied for catalog action');
   }
 
-  if (clientSession && !clientSession.canUseTool(action.serverId, action.originalName)) {
+  if (!clientSession.canUseTool(action.serverId, action.originalName)) {
     throw new McpError(ErrorCode.InvalidParams, 'Permission denied for catalog action');
   }
 
@@ -244,7 +231,7 @@ export async function handleCatalogExecute(
   if (!serverContext) {
     throw new McpError(ErrorCode.InvalidParams, 'Server not available for catalog action');
   }
-  const aliasedName = `${action.originalName}_-_${serverContext.id}`;
+  const aliasedName = clientSession.generateNewName(serverContext.id, action.originalName);
   return await proxySession.executeToolCallInternal(aliasedName, input.arguments);
 }
 
