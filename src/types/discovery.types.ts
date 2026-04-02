@@ -31,8 +31,6 @@ export interface CatalogSearchResultItem {
   title: string;
   summary: string;
   serverId: string;
-  category: string | null;
-  tags: string[];
   riskLevel: string | null;
   directCallable: boolean;
   schemaHash: string;
@@ -57,13 +55,11 @@ export interface CatalogDescribeResultItem {
   summary: string;
   description: string | null;
   serverId: string;
-  category: string | null;
   inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown> | null;
   annotations: Record<string, unknown> | null;
   examples: unknown[] | null;
   riskLevel: string | null;
-  requiredScopes: string[] | null;
   directCallable: boolean;
   catalogRefName: string | null;
   schemaHash: string;
@@ -83,9 +79,7 @@ export interface DiscoveryProfileConfig {
   directExposureRules?: Array<{
     match: {
       serverIds?: string[];
-      categories?: string[];
       riskLevels?: string[];
-      tags?: string[];
     };
     directCallable: boolean;
   }>;
@@ -102,9 +96,7 @@ export function evaluateExposureRules(
   rules: ExposureRule[] | null | undefined,
   action: {
     serverId: string;
-    category?: string | null;
     riskLevel?: string | null;
-    tags?: string[];
   },
   defaultValue: boolean,
 ): boolean {
@@ -120,23 +112,29 @@ export function evaluateExposureRules(
       hasCondition = true;
       matched = matched && m.serverIds.includes(action.serverId);
     }
-    if (m.categories?.length) {
-      hasCondition = true;
-      matched = matched && !!action.category && m.categories.includes(action.category);
-    }
     if (m.riskLevels?.length) {
       hasCondition = true;
       matched = matched && !!action.riskLevel && m.riskLevels.includes(action.riskLevel);
-    }
-    if (m.tags?.length) {
-      hasCondition = true;
-      matched = matched && !!action.tags?.length && m.tags.some((t) => action.tags!.includes(t));
     }
 
     if (hasCondition && matched) return rule.directCallable;
   }
 
   return defaultValue;
+}
+
+export function inferDiscoveryRiskLevel(
+  annotations: Record<string, unknown> | null | undefined,
+): string | null {
+  if (annotations?.destructiveHint === true) {
+    return 'high';
+  }
+
+  if (annotations?.readOnlyHint === true) {
+    return 'low';
+  }
+
+  return null;
 }
 
 export interface DiscoveryGlobalConfig {

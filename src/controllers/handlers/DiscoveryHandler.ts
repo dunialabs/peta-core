@@ -17,13 +17,6 @@ import { discoveryIndexBuilder } from '../../mcp/services/DiscoveryIndexBuilder.
 
 const logger = createLogger('DiscoveryHandler');
 
-function sanitizeDiscoveryProfile<
-  T extends { publicVisible?: unknown; anonymousVisible?: unknown },
->(profile: T): Omit<T, 'publicVisible' | 'anonymousVisible'> {
-  const { publicVisible: _publicVisible, anonymousVisible: _anonymousVisible, ...rest } = profile;
-  return rest;
-}
-
 export class DiscoveryHandler {
   constructor() {}
 
@@ -78,16 +71,16 @@ export class DiscoveryHandler {
       await DiscoveryProfileRepository.setDefault(created.id);
       discoveryConfigService.invalidateCache();
       const refreshed = (await DiscoveryProfileRepository.findById(created.id)) ?? created;
-      return sanitizeDiscoveryProfile(refreshed);
+      return refreshed;
     }
 
     discoveryConfigService.invalidateCache();
-    return sanitizeDiscoveryProfile(created);
+    return created;
   }
 
   async handleGetProfiles(): Promise<unknown> {
     const profiles = await DiscoveryProfileRepository.findAll();
-    return { profiles: profiles.map((profile) => sanitizeDiscoveryProfile(profile)) };
+    return { profiles };
   }
 
   async handleGetProfile(request: AdminRequest<{ id: string }>): Promise<unknown> {
@@ -101,7 +94,7 @@ export class DiscoveryHandler {
       throw new AdminError(`Discovery profile not found: ${id}`, AdminErrorCode.INVALID_REQUEST);
     }
 
-    return sanitizeDiscoveryProfile(profile);
+    return profile;
   }
 
   async handleUpdateProfile(request: AdminRequest<DiscoveryProfileUpdateInput>): Promise<unknown> {
@@ -140,11 +133,11 @@ export class DiscoveryHandler {
       await DiscoveryProfileRepository.setDefault(data.id);
       discoveryConfigService.invalidateCache();
       const refreshed = (await DiscoveryProfileRepository.findById(data.id)) ?? updated;
-      return sanitizeDiscoveryProfile(refreshed);
+      return refreshed;
     }
 
     discoveryConfigService.invalidateCache();
-    return sanitizeDiscoveryProfile(updated);
+    return updated;
   }
 
   async handleDeleteProfile(request: AdminRequest<{ id: string }>): Promise<unknown> {
@@ -160,7 +153,7 @@ export class DiscoveryHandler {
 
     const deleted = await DiscoveryProfileRepository.delete(id);
     discoveryConfigService.invalidateCache();
-    return sanitizeDiscoveryProfile(deleted);
+    return deleted;
   }
 
   /**
@@ -231,11 +224,7 @@ export class DiscoveryHandler {
           exposureRules,
           {
             serverId: action.serverId,
-            category: action.category,
             riskLevel: action.riskLevel,
-            tags: Array.isArray(action.tags)
-              ? (action.tags as string[]).filter((t): t is string => typeof t === 'string')
-              : [],
           },
           false,
         );

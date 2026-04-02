@@ -118,11 +118,7 @@ export class DiscoverySearchService {
           exposureRules,
           {
             serverId: action.serverId,
-            category: action.category,
             riskLevel: action.riskLevel,
-            tags: Array.isArray(action.tags)
-              ? action.tags.filter((t): t is string => typeof t === 'string')
-              : [],
           },
           false,
         ),
@@ -144,20 +140,12 @@ export class DiscoverySearchService {
       title: action.title,
       summary: action.summary,
       serverId: action.serverId,
-      category: action.category,
-      tags: Array.isArray(action.tags)
-        ? action.tags.filter((tag): tag is string => typeof tag === 'string')
-        : [],
       riskLevel: action.riskLevel,
       directCallable: evaluateExposureRules(
         exposureRules,
         {
           serverId: action.serverId,
-          category: action.category,
           riskLevel: action.riskLevel,
-          tags: Array.isArray(action.tags)
-            ? action.tags.filter((t): t is string => typeof t === 'string')
-            : [],
         },
         false,
       ),
@@ -190,7 +178,6 @@ export class DiscoverySearchService {
       displayName: string;
       title: string;
       summary: string;
-      category: string | null;
       searchText: string | null;
     },
     query: string,
@@ -199,7 +186,6 @@ export class DiscoverySearchService {
     const displayName = action.displayName.toLowerCase();
     const title = action.title.toLowerCase();
     const summary = action.summary.toLowerCase();
-    const category = action.category?.toLowerCase() ?? '';
     const searchText = action.searchText?.toLowerCase() ?? '';
 
     let rank = 0;
@@ -213,10 +199,6 @@ export class DiscoverySearchService {
       rank += 350;
     } else if (title.includes(q)) {
       rank += 200;
-    }
-
-    if (category === q) {
-      rank += 250;
     }
 
     if (summary.includes(q)) {
