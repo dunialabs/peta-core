@@ -426,6 +426,7 @@ export class ConfigController {
           result = await this.approvalHandler.handleGetPendingApprovalsCount(adminRequest);
           break;
 
+        // ==================== Progressive Disclosure Operations (9300-9399) ====================
         case AdminActionType.GET_DISCOVERY_CONFIG:
           result = await this.discoveryHandler.handleGetConfig();
           break;
