@@ -249,12 +249,41 @@ interface AdminResponse<T = any> {
 - `3` Error
 - `4` Sleeping (lazy start; currently no active connection but can be woken up again)
 
+**DiscoveryMode**
+
+- `FLAT` All tools are directly exposed to the AI client (no catalog overlay)
+- `HYBRID` Some tools are directly exposed, others are catalog-only (based on profile directExposureRules)
+- `STRICT` All tools are catalog-only; AI must use catalog tools to discover and execute
+
 ### Progressive Disclosure Notes
 
 - The discovery catalog is an **index/cache**, not the runtime source of truth for executing tools.
 - `PREVIEW_DISCOVERY`, `REINDEX_CATALOG`, and `GET_CATALOG_STATS` operate on that catalog/index layer.
 - Runtime execution still resolves through the live MCP session and the current `ServerContext`.
 - Temporary or user-scoped server contexts are excluded from the global catalog index.
+
+### DiscoveryProfileConfig (used by CREATE/UPDATE_DISCOVERY_PROFILE)
+
+```typescript
+type DiscoveryProfileConfig = {
+  directExposureRules?: Array<{
+    match: {
+      serverIds?: string[];
+      riskLevels?: string[];  // 'low' | 'medium' | 'high' | 'critical'
+    };
+    directCallable: boolean;
+  }>;
+};
+```
+
+**directExposureRules evaluation**:
+
+- Rules are evaluated in order; the first matching rule wins
+- A rule matches when all non-empty `match` fields match the action
+- Rules with an empty or missing `match` object are skipped (they do not act as catch-all)
+- If no rule matches, the action defaults to catalog-only (not directly callable)
+- Only used in `HYBRID` mode; `FLAT` exposes everything, `STRICT` hides everything
+- **Risk level inference**: Currently only `low` (from `readOnlyHint`) and `high` (from `destructiveHint`) are auto-inferred from MCP annotations. `medium` and `critical` rules will not match unless a custom source populates them.
 
 **DangerLevel**
 
@@ -2563,6 +2592,315 @@ The `dsl` object follows this structure:
 }
 ```
 
+---
+
+### Discovery / Progressive Disclosure Operations (9300-9399)
+
+#### 9301 GET_DISCOVERY_CONFIG
+
+**Permission**: Owner + Admin
+**Function**: Get global discovery enablement and default profile
+
+**Request Parameters** (data):
+
+```json
+{}
+```
+
+**Return Result** (data):
+
+```json
+{
+  "enabled": true,
+  "defaultProfileId": "clxxx...",
+  "mode": "HYBRID"
+}
+```
+
+**Function Description**:
+
+- Returns the current global discovery configuration
+- `enabled` indicates whether progressive disclosure is active
+- `defaultProfileId` is the ID of the default profile (or `null` if none)
+- `mode` is the mode of the default profile (falls back to `FLAT` if no profile exists)
+
+---
+
+#### 9302 SET_DISCOVERY_CONFIG
+
+**Permission**: Owner + Admin
+**Function**: Update global discovery enablement and default profile
+
+**Request Parameters** (data):
+
+- `enabled` (boolean, required): Whether progressive disclosure is enabled
+- `defaultProfileId` (string or null, optional): ID of the default discovery profile
+
+**Return Result** (data):
+
+```json
+{
+  "enabled": true,
+  "defaultProfileId": "clxxx..."
+}
+```
+
+**Function Description**:
+
+- Updates the global discovery configuration
+- The response contains `enabled` and `defaultProfileId` only (does not include `mode`)
+- If `defaultProfileId` is provided and non-null, the referenced profile is set as default
+- If `defaultProfileId` is omitted or `null`, the existing default profile is not cleared
+- The `enabled` flag is persisted on the active default profile record
+
+---
+
+#### 9310 CREATE_DISCOVERY_PROFILE
+
+**Permission**: Owner + Admin
+**Function**: Create a discovery profile
+
+**Request Parameters** (data):
+
+- `name` (string, required): Profile name (must be non-empty)
+- `description` (string, optional): Profile description
+- `mode` (string, required): Discovery mode — `FLAT`, `HYBRID`, or `STRICT`
+- `enabled` (boolean, optional): Whether profile is active
+- `isDefault` (boolean, optional): Whether this is the default profile
+- `config` (object, optional): Profile configuration (DiscoveryProfileConfig)
+- `instructionText` (string, optional): Instruction text for AI clients
+
+**Return Result** (data):
+
+```json
+{
+  "id": "clxxx...",
+  "name": "Production Profile",
+  "description": "Hybrid mode for production",
+  "mode": "HYBRID",
+  "enabled": true,
+  "isDefault": true,
+  "config": {
+    "directExposureRules": []
+  },
+  "instructionText": null,
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}
+```
+
+**Function Description**:
+
+- Creates a new discovery profile
+- If `isDefault` is true, all other profiles are set to non-default
+- Invalidates the discovery config cache after creation
+
+---
+
+#### 9311 GET_DISCOVERY_PROFILES
+
+**Permission**: Owner + Admin
+**Function**: List all discovery profiles
+
+**Request Parameters** (data):
+
+```json
+{}
+```
+
+**Return Result** (data):
+
+```json
+{
+  "profiles": [
+    {
+      "id": "clxxx...",
+      "name": "Production Profile",
+      "description": "Hybrid mode for production",
+      "mode": "HYBRID",
+      "enabled": true,
+      "isDefault": true,
+      "config": {},
+      "instructionText": null,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+**Function Description**:
+
+- Returns all discovery profiles ordered by creation time ascending
+
+---
+
+#### 9312 GET_DISCOVERY_PROFILE
+
+**Permission**: Owner + Admin
+**Function**: Get one discovery profile by ID
+
+**Request Parameters** (data):
+
+- `id` (string, required): Discovery profile ID
+
+**Return Result** (data):
+
+Profile object (same shape as items in GET_DISCOVERY_PROFILES response).
+
+**Function Description**:
+
+- Returns a single discovery profile
+- Returns error if profile not found
+
+---
+
+#### 9313 UPDATE_DISCOVERY_PROFILE
+
+**Permission**: Owner + Admin
+**Function**: Update a discovery profile
+
+**Request Parameters** (data):
+
+- `id` (string, required): Discovery profile ID
+- `name` (string, optional): Profile name (cannot be blank)
+- `description` (string, optional): Profile description
+- `mode` (string, optional): Discovery mode — `FLAT`, `HYBRID`, or `STRICT`
+- `enabled` (boolean, optional): Whether profile is active
+- `isDefault` (boolean, optional): Whether this is the default profile
+- `config` (object, optional): Profile configuration (DiscoveryProfileConfig)
+- `instructionText` (string, optional): Instruction text for AI clients
+
+**Return Result** (data):
+
+The updated profile object.
+
+**Function Description**:
+
+- Updates an existing discovery profile
+- If `isDefault` is set to true, all other profiles are set to non-default
+- Invalidates the discovery config cache after update
+- Returns error if profile not found
+
+---
+
+#### 9314 DELETE_DISCOVERY_PROFILE
+
+**Permission**: Owner + Admin
+**Function**: Delete a discovery profile
+
+**Request Parameters** (data):
+
+- `id` (string, required): Discovery profile ID
+
+**Return Result** (data):
+
+The deleted profile object.
+
+**Function Description**:
+
+- Permanently deletes a discovery profile
+- Returns error if profile not found
+- Invalidates the discovery config cache after deletion
+
+---
+
+#### 9320 PREVIEW_DISCOVERY
+
+**Permission**: Owner + Admin
+**Function**: Preview which tools are directly exposed vs catalog-only for a given profile
+
+**Request Parameters** (data):
+
+- `profileId` (string, optional): Discovery profile ID. If omitted, uses the default profile. If no profile exists, uses FLAT mode.
+
+**Return Result** (data):
+
+```json
+{
+  "mode": "HYBRID",
+  "directTools": [
+    {
+      "name": "github::create_issue",
+      "serverId": "github"
+    }
+  ],
+  "hiddenTools": [
+    {
+      "actionId": "act_xxx",
+      "displayName": "send_email",
+      "serverId": "email"
+    }
+  ],
+  "catalogToolsIncluded": [
+    "peta.catalog.search",
+    "peta.catalog.describe",
+    "peta.catalog.execute"
+  ],
+  "totalDirectCount": 5,
+  "totalHiddenCount": 10
+}
+```
+
+**Function Description**:
+
+- Reads from the catalog index (not live runtime) to preview how tools would be partitioned
+- In `FLAT` mode, all tools are direct and `catalogToolsIncluded` is empty
+- In `STRICT` mode, all tools are hidden
+- In `HYBRID` mode, `directExposureRules` from the profile config determine the split
+- Use `REINDEX_CATALOG (9330)` first to ensure the catalog index is current
+
+---
+
+#### 9330 REINDEX_CATALOG
+
+**Permission**: Owner + Admin
+**Function**: Rebuild the persistent catalog index from live managed servers
+
+**Request Parameters** (data):
+
+```json
+{}
+```
+
+**Return Result** (data):
+
+Index build statistics (varies by implementation).
+
+**Function Description**:
+
+- Triggers a full reindex of the discovery catalog
+- Scans all live managed server contexts and rebuilds the `CatalogAction` rows
+- Temporary or user-scoped server contexts are excluded from the global catalog index
+
+---
+
+#### 9331 GET_CATALOG_STATS
+
+**Permission**: Owner + Admin
+**Function**: Get catalog row count, server count, and last-indexed timestamp
+
+**Request Parameters** (data):
+
+```json
+{}
+```
+
+**Return Result** (data):
+
+```json
+{
+  "totalActions": 42,
+  "serversIndexed": 5,
+  "lastIndexedAt": "2026-01-01T00:00:00.000Z"
+}
+```
+
+**Function Description**:
+
+- Returns aggregate statistics about the discovery catalog index
+- `lastIndexedAt` is `null` if no index build has occurred yet
+
 ## Appendix: Error Code Reference
 
 ### General Errors (1000-1999)
@@ -2641,9 +2979,15 @@ The `dsl` object follows this structure:
 
 ## Version Information
 
-- **Protocol Version**: 2.2
-- **Last Updated**: March 13, 2026
+- **Protocol Version**: 2.3
+- **Last Updated**: April 3, 2026
 - **Update Content**:
+  - Added Discovery / Progressive Disclosure operations (9300-9399): GET/SET_DISCOVERY_CONFIG, CRUD for discovery profiles, PREVIEW_DISCOVERY, REINDEX_CATALOG, GET_CATALOG_STATS
+  - Added DiscoveryMode enum and DiscoveryProfileConfig data structure to reference sections
+
+**Version History**:
+
+- **2.2** (March 13, 2026):
   - Added ServerCategory `Skills (4)` and `CustomStdio (5)` to enum reference
   - Fixed ServerAuthType enum: `CanvasAuth` is `8`, added `CanvaAuth (9)`
   - Added CustomStdio (category=5) input example for CREATE_SERVER (2010)
@@ -2651,8 +2995,6 @@ The `dsl` object follows this structure:
   - Added `anonymousAccess` and `anonymousRateLimit` parameters to CREATE_SERVER (2010) and UPDATE_SERVER (2012)
   - Updated UPDATE_SERVER (2012): `configTemplate` is now also updatable for CustomStdio servers
   - Added custom-stdio launchConfig format to Decrypted launchConfig Structure
-
-**Version History**:
 
 - **2.1** (November 7, 2025):
   - Added Cloudflared operation APIs:

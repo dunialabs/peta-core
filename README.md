@@ -72,6 +72,12 @@ Peta Core is one component of the Peta MCP stack:
 - Safe-by-default behavior for tool results: approval-gated or error results are not promoted into cache.
 - Scope-aware cache keys and purge controls, including exact purge with operation/entity-level targeting.
 
+### Progressive Disclosure
+
+- Configurable tool visibility. Three discovery modes (`FLAT`, `HYBRID`, `STRICT`) control whether tools are directly exposed or discoverable only through a catalog search interface.
+- Discovery profiles. Named profiles with rule-based exposure policies determine which tools are directly callable based on server identity and risk level.
+- Persistent catalog index. A searchable index of all tool capabilities across managed servers, with native `catalog.search`, `catalog.describe`, and `catalog.execute` tools for AI-driven discovery.
+
 ### Audit & Observability
 
 - Audit trail. Records caller identity, tool name, policy decision, approval status, and outcome for every tool call. Secrets are excluded from log payloads.

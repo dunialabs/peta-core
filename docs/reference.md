@@ -152,7 +152,19 @@ Peta Core exposes different APIs for different roles:
 
 ## Progressive Disclosure Catalog
 
-Peta Core's Progressive Disclosure catalog is a **persistent search index**, not the runtime source of truth for callable tools.
+Peta Core's Progressive Disclosure feature controls which tools are directly exposed to AI clients and which are discoverable only through a catalog search interface. Three discovery modes are supported:
+
+| Mode | Behavior |
+|------|----------|
+| **FLAT** | All tools are directly exposed (default, no catalog overlay) |
+| **HYBRID** | Some tools are direct, others are catalog-only (based on profile `directExposureRules`) |
+| **STRICT** | All tools are catalog-only; AI must use `peta.catalog.search`, `peta.catalog.describe`, and `peta.catalog.execute` |
+
+**Admin API**: Discovery operations live under actions 9301-9331. See [ADMIN_API.md](./api/ADMIN_API.md#discovery--progressive-disclosure-operations-9300-9399) for the full reference.
+
+### Catalog Architecture
+
+The catalog is a **persistent search index**, not the runtime source of truth for callable tools.
 
 - `catalog.search` and `catalog.describe` read from indexed `CatalogAction` rows for discovery and preview.
 - `catalog.execute` always resolves the live `ServerContext` for the current user and rebuilds the callable alias from the runtime context ID before dispatch.
@@ -161,6 +173,16 @@ Peta Core's Progressive Disclosure catalog is a **persistent search index**, not
 - Indexed catalog rows intentionally store only stable metadata that survives the SDK-parsed runtime path. Placeholder fields such as catalog-level approval/public visibility are not treated as authoritative runtime facts.
 
 When you need the exact executable surface for a user, trust the live session/runtime state. When you need cross-server discovery, search, preview counts, or admin reindex/statistics, use the catalog index.
+
+### Discovery Profiles
+
+Discovery profiles are named configurations that control tool visibility:
+
+- **Profile fields**: `name`, `description`, `mode`, `enabled`, `isDefault`, `config`, `instructionText`
+- **directExposureRules** (in `config`): Ordered rules evaluated against each tool's `serverId` and `riskLevel`. First match wins. Unmatched tools default to catalog-only.
+- **instructionText**: Optional text injected into the AI client's context to explain the catalog workflow.
+
+Profiles are managed through the Admin API (9310-9314) and the Console UI (Progressive Disclosure page).
 
 ---
 
