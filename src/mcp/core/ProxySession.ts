@@ -997,6 +997,16 @@ export class ProxySession {
         );
       }
 
+      const forwardToolCall = async (): Promise<CallToolResult> => {
+        // Forward request to downstream server, passing signal and proxyRequestId
+        const rawResult = (await client.callTool(copyParams, CallToolResultSchema, {
+          signal: extra.signal,
+          relatedRequestId: proxyRequestId,
+        })) as CallToolResult;
+        targetServerContext.clearTimeout();
+        return rawResult;
+      };
+
       // Use executeWithCache with singleflight for deduplication
       const serverResult = storeCachePolicy
         ? (
@@ -1007,21 +1017,10 @@ export class ProxySession {
               storeScopeCtx,
               storeCachePolicy,
               request.params.arguments,
-              async () => {
-                // Forward request to downstream server, passing signal and proxyRequestId
-                const rawResult = (await client.callTool(copyParams, CallToolResultSchema, {
-                  signal: extra.signal,
-                  relatedRequestId: proxyRequestId,
-                })) as CallToolResult;
-                targetServerContext.clearTimeout();
-                return rawResult;
-              },
+              forwardToolCall,
             )
           ).result
-        : ((await client.callTool(copyParams, CallToolResultSchema, {
-            signal: extra.signal,
-            relatedRequestId: proxyRequestId,
-          })) as CallToolResult);
+        : await forwardToolCall();
 
       // Log response to client
       await this.sessionLogger.logClientRequest({
@@ -1809,6 +1808,16 @@ export class ProxySession {
         tenantId: this.tenantId,
       };
 
+      const forwardResourceRead = async () => {
+        // Forward request, passing signal and proxyRequestId
+        const rawResult = await client.readResource(requestCopy.params, {
+          signal: extra.signal,
+          relatedRequestId: proxyRequestId,
+        });
+        targetServer.clearTimeout();
+        return rawResult;
+      };
+
       // Use executeWithCache with singleflight for deduplication
       const serverResult = storeResCachePolicy
         ? (
@@ -1819,21 +1828,10 @@ export class ProxySession {
               storeResScopeCtx,
               storeResCachePolicy,
               request.params,
-              async () => {
-                // Forward request, passing signal and proxyRequestId
-                const rawResult = await client.readResource(requestCopy.params, {
-                  signal: extra.signal,
-                  relatedRequestId: proxyRequestId,
-                });
-                targetServer.clearTimeout();
-                return rawResult;
-              },
+              forwardResourceRead,
             )
           ).result
-        : await client.readResource(requestCopy.params, {
-            signal: extra.signal,
-            relatedRequestId: proxyRequestId,
-          });
+        : await forwardResourceRead();
       const rewrittenResult = this.rewriteAppResourceResult(serverResult, result.serverID);
 
       try {
@@ -2269,6 +2267,16 @@ export class ProxySession {
         tenantId: this.tenantId,
       };
 
+      const forwardPromptGet = async () => {
+        // Forward request, passing signal and proxyRequestId
+        const rawResult = await client.getPrompt(requestCopy.params, {
+          signal: extra.signal,
+          relatedRequestId: proxyRequestId,
+        });
+        targetServerContext.clearTimeout();
+        return rawResult;
+      };
+
       // Use executeWithCache with singleflight for deduplication
       const result = storePromptCachePolicy
         ? (
@@ -2279,21 +2287,10 @@ export class ProxySession {
               storePromptScopeCtx,
               storePromptCachePolicy,
               request.params.arguments,
-              async () => {
-                // Forward request, passing signal and proxyRequestId
-                const rawResult = await client.getPrompt(requestCopy.params, {
-                  signal: extra.signal,
-                  relatedRequestId: proxyRequestId,
-                });
-                targetServerContext.clearTimeout();
-                return rawResult;
-              },
+              forwardPromptGet,
             )
           ).result
-        : await client.getPrompt(requestCopy.params, {
-            signal: extra.signal,
-            relatedRequestId: proxyRequestId,
-          });
+        : await forwardPromptGet();
 
       try {
         // Log response
