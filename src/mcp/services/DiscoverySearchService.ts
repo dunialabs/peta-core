@@ -240,7 +240,7 @@ export class DiscoverySearchService {
 
     return {
       serverIds: ServerManager.instance
-        .getAvailableServers()
+        .getAvailableServersFromServerContexts()
         .filter((context) => context.serverEntity.anonymousAccess)
         .map((context) => context.serverID),
       isAnonymous: true,

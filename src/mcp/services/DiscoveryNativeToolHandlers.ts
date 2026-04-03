@@ -300,7 +300,7 @@ async function getAuthorizedServerIds(
   }
 
   return ServerManager.instance
-    .getAvailableServers()
+    .getAvailableServersFromServerContexts()
     .filter((context) => context.serverEntity.anonymousAccess)
     .map((context) => context.serverID);
 }

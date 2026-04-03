@@ -39,9 +39,7 @@ export class DiscoveryIndexBuilder {
 
   async buildFullIndex(): Promise<{ indexedActions: number }> {
     const serverContexts = ServerManager.instance
-      .getAvailableServers()
-      .filter((context) => context.serverEntity.enabled === true)
-      .filter((context) => context.userId == null);
+      .getAvailableServersFromServerContexts();
 
     let totalIndexed = 0;
     for (const serverContext of serverContexts) {
@@ -65,9 +63,7 @@ export class DiscoveryIndexBuilder {
   }
 
   async rebuildForServer(serverId: string): Promise<{ indexedActions: number }> {
-    const serverContext = ServerManager.instance
-      .getAvailableServers()
-      .find((context) => context.serverID === serverId && context.userId == null);
+    const serverContext = ServerManager.instance.getServerContext(serverId);
 
     if (!serverContext) {
       this.logger.warn({ serverId }, 'Server context not available for discovery index rebuild');

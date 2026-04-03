@@ -689,15 +689,25 @@ export class ServerManager {
    * Get all available server IDs
    */
   getAvailableServers(): ServerContext[] {
-    const availableServers = Array.from(this.serverContexts.values()).filter(
-      (context) =>
-        context.status === ServerStatus.Online || context.status === ServerStatus.Sleeping,
-    );
-    const temporaryServers = Array.from(this.temporaryServers.values()).filter(
-      (context) =>
-        context.status === ServerStatus.Online || context.status === ServerStatus.Sleeping,
-    );
+    const availableServers = this.getAvailableServersFromServerContexts();
+    const temporaryServers = this.getAvailableServersFromTemporaryServers();
     return [...availableServers, ...temporaryServers];
+  }
+
+  // get all available servers from serverContexts
+  getAvailableServersFromServerContexts(): ServerContext[] {
+    return Array.from(this.serverContexts.values()).filter(
+      (context) =>
+        context.status === ServerStatus.Online || context.status === ServerStatus.Sleeping,
+    );
+  }
+
+  // get all available servers from temporaryServers
+  getAvailableServersFromTemporaryServers(): ServerContext[] {
+    return Array.from(this.temporaryServers.values()).filter(
+      (context) =>
+        context.status === ServerStatus.Online || context.status === ServerStatus.Sleeping,
+    );
   }
 
   getUserAvailableServers(user: User): ServerContext[] {

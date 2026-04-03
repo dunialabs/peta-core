@@ -388,8 +388,7 @@ export class ProxySession {
         const catalogToolDefs = getCatalogToolDefinitions();
         const temporaryServerIds = new Set(
           ServerManager.instance
-            .getAvailableServers()
-            .filter((context) => context.userId != null)
+            .getAvailableServersFromTemporaryServers()
             .map((context) => context.serverID),
         );
 
