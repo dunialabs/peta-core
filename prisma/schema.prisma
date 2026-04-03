@@ -279,7 +279,7 @@ model DiscoveryProfile {
   description      String?
   mode             String    @default("FLAT") @db.VarChar(20) // FLAT | HYBRID | STRICT
   enabled          Boolean   @default(false)
-  isDefault        Boolean   @default(false)
+  isDefault        Boolean   @default(false) @map("is_default")
   config           Json?
   instructionText  String?   @map("instruction_text") @db.Text
   createdAt        DateTime  @default(now()) @map("created_at")
