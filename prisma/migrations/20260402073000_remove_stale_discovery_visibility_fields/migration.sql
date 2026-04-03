@@ -1,8 +1,8 @@
-ALTER TABLE "public"."discovery_profile"
+ALTER TABLE IF EXISTS "public"."discovery_profile"
   DROP COLUMN IF EXISTS "public_visible",
   DROP COLUMN IF EXISTS "anonymous_visible";
 
-ALTER TABLE "public"."catalog_action"
+ALTER TABLE IF EXISTS "public"."catalog_action"
   DROP COLUMN IF EXISTS "category",
   DROP COLUMN IF EXISTS "tags",
   DROP COLUMN IF EXISTS "required_scopes",
