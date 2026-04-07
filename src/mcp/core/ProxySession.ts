@@ -12,7 +12,6 @@ import {
   ListResourceTemplatesResultSchema,
   GetPromptRequestSchema,
   ListPromptsRequestSchema,
-  InitializeRequestSchema,
   CompleteRequestSchema,
   SetLevelRequestSchema,
   PingRequestSchema,
@@ -36,7 +35,6 @@ import {
   type ResourceTemplate,
   type GetPromptRequest,
   type ListPromptsRequest,
-  type InitializeRequest,
   type CompleteRequest,
   type SetLevelRequest,
   type PingRequest,
@@ -58,7 +56,6 @@ import {
   type ListResourcesResult,
   type GetPromptResult,
   type ListPromptsResult,
-  type InitializeResult,
   type CompleteResult,
   type EmptyResult,
   type Tool,
@@ -89,6 +86,20 @@ import { ProxyContext } from '../../types/mcp.types.js';
 import { createLogger } from '../../logger/index.js';
 import { policyEngine } from '../services/PolicyEngine.js';
 import { approvalService, ApprovalRateLimitError } from '../services/ApprovalService.js';
+import {
+  RESERVED_CATALOG_TOOLS,
+  CATALOG_TOOL_NAMES,
+  DiscoveryMode,
+  DiscoveryProfileConfig,
+  evaluateExposureRules,
+  inferDiscoveryRiskLevel,
+} from '../../types/discovery.types.js';
+import {
+  handleCatalogSearch,
+  handleCatalogDescribe,
+  handleCatalogExecute,
+} from '../services/DiscoveryNativeToolHandlers.js';
+import { discoveryConfigService } from '../services/DiscoveryConfigService.js';
 import { ResultCacheService } from './cache/ResultCacheService.js';
 import type { CacheScopeContext, ResolvedCachePolicy } from './cache/types.js';
 
@@ -138,6 +149,7 @@ export class ProxySession {
     private sessionLogger: SessionLogger,
     eventStore: PersistentEventStore,
     private onclose: (sessionId: string) => Promise<void>,
+    instructions?: string,
   ) {
     // Initialize logger (needed in constructor because sessionId is required)
     this.logger = createLogger('ProxySession', { sessionId: this.sessionId });
@@ -158,6 +170,7 @@ export class ProxySession {
           completions: {},
           logging: {},
         },
+        ...(instructions ? { instructions } : {}),
       },
     );
     // Set up request handlers
@@ -366,6 +379,63 @@ export class ProxySession {
     const startTime = Date.now();
     const allTools = this.clientSession.listTools();
 
+    const profile = await discoveryConfigService.getActiveProfile();
+    if (profile && profile.enabled && profile.mode !== 'FLAT') {
+      const mode = profile.mode as DiscoveryMode;
+      if (mode === DiscoveryMode.HYBRID || mode === DiscoveryMode.STRICT) {
+        const { getCatalogToolDefinitions } =
+          await import('../services/DiscoveryNativeToolHandlers.js');
+        const catalogToolDefs = getCatalogToolDefinitions();
+        const temporaryServerIds = new Set(
+          ServerManager.instance
+            .getAvailableServersFromTemporaryServers()
+            .map((context) => context.serverID),
+        );
+
+        const temporaryTools: Tool[] = [];
+        const catalogScopedTools: Tool[] = [];
+        for (const tool of allTools.tools) {
+          const parsed = this.clientSession.parseName(tool.name);
+          if (parsed && temporaryServerIds.has(parsed.serverID)) {
+            temporaryTools.push(tool);
+          } else {
+            catalogScopedTools.push(tool);
+          }
+        }
+
+        if (mode === DiscoveryMode.STRICT) {
+          allTools.tools = [...temporaryTools, ...catalogToolDefs];
+        } else {
+          const config = profile.config as DiscoveryProfileConfig | null;
+          const rules = config?.directExposureRules;
+
+          // Always filter in HYBRID mode — tools are only exposed directly when a rule
+          // explicitly marks them as directCallable. With no rules the default is false,
+          // so all tools are hidden and only the catalog meta-tools remain accessible.
+          const filteredCatalogTools = catalogScopedTools.filter((tool: Tool) => {
+            const parsed = this.clientSession.parseName(tool.name);
+            if (!parsed) return false;
+            return evaluateExposureRules(
+              rules,
+              {
+                serverId: parsed.serverID,
+                riskLevel: inferDiscoveryRiskLevel(
+                  (tool.annotations ?? null) as Record<string, unknown> | null,
+                ),
+              },
+              false,
+            );
+          });
+
+          allTools.tools = [...filteredCatalogTools, ...temporaryTools, ...catalogToolDefs];
+        }
+
+        if (allTools._meta) {
+          allTools._meta.totalCount = allTools.tools.length;
+        }
+      }
+    }
+
     await this.sessionLogger.logClientRequest({
       action: MCPEventLogType.ResponseToolList,
       upstreamRequestId: String(extra.requestId),
@@ -390,10 +460,59 @@ export class ProxySession {
     const startTime = Date.now();
     const toolName = request.params.name;
     this.logger.debug({ toolName }, 'Handling tool call');
-
-    // Generate uniformRequestId for correlation
     const uniformRequestId = LogService.getInstance().generateUniformRequestId(this.sessionId);
     const originalRequestId = extra.requestId;
+
+    // Progressive Disclosure: only intercept catalog tools when PPD is active (non-FLAT)
+    const ppdProfile = await discoveryConfigService.getActiveProfile();
+    const ppdActive = ppdProfile && ppdProfile.enabled && ppdProfile.mode !== 'FLAT';
+
+    if (ppdActive && RESERVED_CATALOG_TOOLS.has(toolName)) {
+      const startTimeCatalog = Date.now();
+      let catalogResult: CallToolResult;
+
+      switch (toolName) {
+        case CATALOG_TOOL_NAMES.SEARCH:
+          catalogResult = await handleCatalogSearch(
+            request.params.arguments,
+            this.clientSession.userId,
+            this.clientSession,
+          );
+          break;
+        case CATALOG_TOOL_NAMES.DESCRIBE:
+          catalogResult = await handleCatalogDescribe(
+            request.params.arguments,
+            this.clientSession.userId,
+            this.clientSession,
+          );
+          break;
+        case CATALOG_TOOL_NAMES.EXECUTE:
+          catalogResult = await handleCatalogExecute(
+            request.params.arguments,
+            this.clientSession.userId,
+            this,
+            this.clientSession,
+          );
+          break;
+        default:
+          throw new McpError(ErrorCode.MethodNotFound, `Unknown catalog tool: ${toolName}`);
+      }
+
+      await this.sessionLogger.logClientRequest({
+        action: MCPEventLogType.RequestTool,
+        upstreamRequestId: String(originalRequestId),
+        uniformRequestId,
+        requestParams: JSON.stringify({ name: toolName, arguments: request.params.arguments }),
+        responseResult: JSON.stringify(catalogResult),
+        serverId: 'gateway',
+        duration: Date.now() - startTimeCatalog,
+        statusCode: catalogResult.isError ? 500 : 200,
+      });
+
+      return catalogResult;
+    }
+
+    // Generate uniformRequestId for correlation
     let approvalRequestId: string | null = null;
     let approvalHeartbeatTimer: NodeJS.Timeout | null = null;
 
@@ -878,6 +997,16 @@ export class ProxySession {
         );
       }
 
+      const forwardToolCall = async (): Promise<CallToolResult> => {
+        // Forward request to downstream server, passing signal and proxyRequestId
+        const rawResult = (await client.callTool(copyParams, CallToolResultSchema, {
+          signal: extra.signal,
+          relatedRequestId: proxyRequestId,
+        })) as CallToolResult;
+        targetServerContext.clearTimeout();
+        return rawResult;
+      };
+
       // Use executeWithCache with singleflight for deduplication
       const serverResult = storeCachePolicy
         ? (
@@ -888,21 +1017,10 @@ export class ProxySession {
               storeScopeCtx,
               storeCachePolicy,
               request.params.arguments,
-              async () => {
-                // Forward request to downstream server, passing signal and proxyRequestId
-                const rawResult = (await client.callTool(copyParams, CallToolResultSchema, {
-                  signal: extra.signal,
-                  relatedRequestId: proxyRequestId,
-                })) as CallToolResult;
-                targetServerContext.clearTimeout();
-                return rawResult;
-              },
+              forwardToolCall,
             )
           ).result
-        : ((await client.callTool(copyParams, CallToolResultSchema, {
-            signal: extra.signal,
-            relatedRequestId: proxyRequestId,
-          })) as CallToolResult);
+        : await forwardToolCall();
 
       // Log response to client
       await this.sessionLogger.logClientRequest({
@@ -1008,6 +1126,33 @@ export class ProxySession {
       // Clean up request mapping
       this.requestIdMapper.removeMapping(proxyRequestId);
     }
+  }
+
+  public async executeToolCallInternal(
+    aliasedToolName: string,
+    toolArgs: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const request: CallToolRequest = {
+      method: 'tools/call',
+      params: {
+        name: aliasedToolName,
+        arguments: toolArgs,
+      },
+    };
+
+    const extra = {
+      requestId: `catalog-exec-${Date.now()}`,
+      signal: undefined,
+      sendNotification: async () => undefined,
+      sendRequest: async () => {
+        throw new McpError(
+          ErrorCode.InternalError,
+          'Catalog-executed tools cannot initiate reverse requests (e.g., sampling). Execute this tool directly instead.',
+        );
+      },
+    } as unknown as RequestHandlerExtra<any, any>;
+
+    return await this.handleToolCall(request, extra);
   }
 
   /**
@@ -1663,6 +1808,16 @@ export class ProxySession {
         tenantId: this.tenantId,
       };
 
+      const forwardResourceRead = async () => {
+        // Forward request, passing signal and proxyRequestId
+        const rawResult = await client.readResource(requestCopy.params, {
+          signal: extra.signal,
+          relatedRequestId: proxyRequestId,
+        });
+        targetServer.clearTimeout();
+        return rawResult;
+      };
+
       // Use executeWithCache with singleflight for deduplication
       const serverResult = storeResCachePolicy
         ? (
@@ -1673,21 +1828,10 @@ export class ProxySession {
               storeResScopeCtx,
               storeResCachePolicy,
               request.params,
-              async () => {
-                // Forward request, passing signal and proxyRequestId
-                const rawResult = await client.readResource(requestCopy.params, {
-                  signal: extra.signal,
-                  relatedRequestId: proxyRequestId,
-                });
-                targetServer.clearTimeout();
-                return rawResult;
-              },
+              forwardResourceRead,
             )
           ).result
-        : await client.readResource(requestCopy.params, {
-            signal: extra.signal,
-            relatedRequestId: proxyRequestId,
-          });
+        : await forwardResourceRead();
       const rewrittenResult = this.rewriteAppResourceResult(serverResult, result.serverID);
 
       try {
@@ -2123,6 +2267,16 @@ export class ProxySession {
         tenantId: this.tenantId,
       };
 
+      const forwardPromptGet = async () => {
+        // Forward request, passing signal and proxyRequestId
+        const rawResult = await client.getPrompt(requestCopy.params, {
+          signal: extra.signal,
+          relatedRequestId: proxyRequestId,
+        });
+        targetServerContext.clearTimeout();
+        return rawResult;
+      };
+
       // Use executeWithCache with singleflight for deduplication
       const result = storePromptCachePolicy
         ? (
@@ -2133,21 +2287,10 @@ export class ProxySession {
               storePromptScopeCtx,
               storePromptCachePolicy,
               request.params.arguments,
-              async () => {
-                // Forward request, passing signal and proxyRequestId
-                const rawResult = await client.getPrompt(requestCopy.params, {
-                  signal: extra.signal,
-                  relatedRequestId: proxyRequestId,
-                });
-                targetServerContext.clearTimeout();
-                return rawResult;
-              },
+              forwardPromptGet,
             )
           ).result
-        : await client.getPrompt(requestCopy.params, {
-            signal: extra.signal,
-            relatedRequestId: proxyRequestId,
-          });
+        : await forwardPromptGet();
 
       try {
         // Log response

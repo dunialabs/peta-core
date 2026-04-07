@@ -11,6 +11,7 @@ import { MCPEventLogType } from '../../types/enums.js';
 import { UserRepository } from '../../repositories/UserRepository.js';
 import { McpServerCapabilities } from '../types/mcp.js';
 import { CapabilitiesService } from '../services/CapabilitiesService.js';
+import { discoveryConfigService } from '../services/DiscoveryConfigService.js';
 import { createLogger } from '../../logger/index.js';
 
 /**
@@ -75,6 +76,12 @@ export class SessionStore {
       action: MCPEventLogType.SessionInit,
     });
 
+    const profile = await discoveryConfigService.getActiveProfile();
+    const instructions =
+      profile && profile.enabled && profile.mode !== 'FLAT' && profile.instructionText
+        ? profile.instructionText
+        : undefined;
+
     // 6. Create corresponding ProxySession, pass SessionLogger
     const proxySession = new ProxySession(
       sessionId,
@@ -83,6 +90,7 @@ export class SessionStore {
       sessionLogger,
       eventStore,
       (sessionId: string) => this.removeSingleSession(sessionId),
+      instructions,
     );
 
     // 7. Associate ProxySession with ClientSession

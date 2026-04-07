@@ -65,6 +65,31 @@ export enum AdminActionType {
   RESTART_CLOUDFLARED = 8004, // Restart cloudflared
   STOP_CLOUDFLARED = 8005, // Stop cloudflared
 
+  // Policy operations (9100-9199)
+  CREATE_POLICY_SET = 9101, // Create a new tool policy set
+  GET_POLICY_SETS = 9102, // List tool policy sets
+  UPDATE_POLICY_SET = 9103, // Update a tool policy set
+  DELETE_POLICY_SET = 9104, // Delete a tool policy set
+  GET_EFFECTIVE_POLICY = 9105, // Get the effective (merged) policy for evaluation
+
+  // Approval operations (9200-9299)
+  LIST_APPROVAL_REQUESTS = 9201, // List approval requests (with filters)
+  GET_APPROVAL_REQUEST = 9202, // Get a single approval request by ID
+  DECIDE_APPROVAL_REQUEST = 9203, // Approve or reject an approval request
+  GET_PENDING_APPROVALS_COUNT = 9204, // Get count of pending approval requests
+
+  // Progressive Disclosure operations (9300-9399)
+  GET_DISCOVERY_CONFIG = 9301,
+  SET_DISCOVERY_CONFIG = 9302,
+  CREATE_DISCOVERY_PROFILE = 9310,
+  GET_DISCOVERY_PROFILES = 9311,
+  GET_DISCOVERY_PROFILE = 9312,
+  UPDATE_DISCOVERY_PROFILE = 9313,
+  DELETE_DISCOVERY_PROFILE = 9314,
+  PREVIEW_DISCOVERY = 9320,
+  REINDEX_CATALOG = 9330,
+  GET_CATALOG_STATS = 9331,
+
   // Skills operations (10040-10043)
   LIST_SKILLS = 10040, // List all skills
   UPLOAD_SKILL = 10041, // Upload skill (ZIP file)
@@ -80,19 +105,6 @@ export enum AdminActionType {
   CACHE_PURGE_PROMPT = 11013,
   CACHE_PURGE_RESOURCE = 11014,
   CACHE_PURGE_EXACT = 11015,
-
-  // Policy operations (9100-9199)
-  CREATE_POLICY_SET = 9101, // Create a new tool policy set
-  GET_POLICY_SETS = 9102, // List tool policy sets
-  UPDATE_POLICY_SET = 9103, // Update a tool policy set
-  DELETE_POLICY_SET = 9104, // Delete a tool policy set
-  GET_EFFECTIVE_POLICY = 9105, // Get the effective (merged) policy for evaluation
-
-  // Approval operations (9200-9299)
-  LIST_APPROVAL_REQUESTS = 9201, // List approval requests (with filters)
-  GET_APPROVAL_REQUEST = 9202, // Get a single approval request by ID
-  DECIDE_APPROVAL_REQUEST = 9203, // Approve or reject an approval request
-  GET_PENDING_APPROVALS_COUNT = 9204, // Get count of pending approval requests
 }
 
 /**

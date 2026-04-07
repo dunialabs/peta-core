@@ -2,7 +2,7 @@ import { ServerContext } from './ServerContext.js';
 import { ServerRepository } from '../../repositories/ServerRepository.js';
 import { UserRepository } from '../../repositories/UserRepository.js';
 import { DownstreamTransportFactory } from './DownstreamTransportFactory.js';
-import { Client, ClientOptions } from "@modelcontextprotocol/sdk/client/index.js";
+import { Client, ClientOptions } from '@modelcontextprotocol/sdk/client/index.js';
 import { ServerAuthType, ServerCategory, ServerStatus } from '../../types/enums.js';
 import { Permissions, ServerConfigCapabilities } from '../types/mcp.js';
 import { CryptoService } from '../../security/CryptoService.js';
@@ -32,7 +32,7 @@ import {
   ResourceUpdatedNotificationSchema,
   ResourceUpdatedNotification,
   McpError,
-  ErrorCode
+  ErrorCode,
 } from '@modelcontextprotocol/sdk/types.js';
 import { APP_INFO } from '../../config/config.js';
 import { Server, User } from '@prisma/client';
@@ -46,15 +46,15 @@ import { customStdioRunnerService } from './CustomStdioRunnerService.js';
 import {
   createConnectionStartupDiagnostics,
   formatConnectionDiagnosticError,
-  type ConnectionStartupDiagnostics
+  type ConnectionStartupDiagnostics,
 } from './ConnectionStartupDiagnostics.js';
 
 /**
  * Subscription state structure
  */
 interface SubscriptionState {
-  subscribedSessions: Set<string>;  // Session IDs subscribed to this resource
-  downstreamSubscribed: boolean;     // Whether already subscribed to downstream
+  subscribedSessions: Set<string>; // Session IDs subscribed to this resource
+  downstreamSubscribed: boolean; // Whether already subscribed to downstream
 }
 
 function createErrorWithCause(message: string, cause: unknown): Error {
@@ -81,7 +81,7 @@ export class ServerManager {
       // sampling: {},
       // roots: { listChanged: true },
       // elicitation: {}
-    }
+    },
   };
 
   // Resource subscription state management key: `${serverId}::${resourceUri}`
@@ -95,8 +95,8 @@ export class ServerManager {
 
   // Idle check timer
   private idleCheckTimer?: NodeJS.Timeout;
-  private readonly IDLE_CHECK_INTERVAL = 5 * 60 * 1000;  // Check every 5 minutes
-  private readonly IDLE_TIMEOUT = 5 * 60 * 1000;  // 5 minute idle timeout
+  private readonly IDLE_CHECK_INTERVAL = 5 * 60 * 1000; // Check every 5 minutes
+  private readonly IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minute idle timeout
 
   // Logger for ServerManager
   private logger = createLogger('ServerManager');
@@ -104,25 +104,29 @@ export class ServerManager {
   static readonly instance: ServerManager = new ServerManager();
 
   private constructor() {
+    this.getAllEnabledServers()
+      .then((servers) => {
+        for (const server of servers) {
+          if (server.allowUserInput) {
+            continue;
+          }
 
-    this.getAllEnabledServers().then((servers) => {
-      for (const server of servers) {
-        if (server.allowUserInput) {
-          continue;
+          if (!this.isLazyStartApplicable(server)) {
+            continue;
+          }
+
+          this.initializeManagedServerContext(server, ServerStatus.Sleeping);
         }
+        this.logger.info(
+          { count: servers.length },
+          'All enabled servers initialized in sleeping state (lazy start enabled)',
+        );
 
-        if (!this.isLazyStartApplicable(server)) {
-          continue;
-        }
-
-        this.initializeManagedServerContext(server, ServerStatus.Sleeping);
-      }
-      this.logger.info({ count: servers.length }, 'All enabled servers initialized in sleeping state (lazy start enabled)');
-
-      this.startIdleCheck();
-    }).catch((error) => {
-      this.logger.error({ error }, 'Failed to initialize enabled servers in sleeping state');
-    });
+        this.startIdleCheck();
+      })
+      .catch((error) => {
+        this.logger.error({ error }, 'Failed to initialize enabled servers in sleeping state');
+      });
   }
 
   /**
@@ -137,7 +141,10 @@ export class ServerManager {
    */
   getOwnerToken(): string {
     if (!this.ownerToken) {
-      throw new McpError(ErrorCode.InvalidParams, 'Owner token not available. Please ensure Owner has accessed the API at least once.');
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'Owner token not available. Please ensure Owner has accessed the API at least once.',
+      );
     }
     return this.ownerToken;
   }
@@ -258,7 +265,7 @@ export class ServerManager {
 
     const temporaryServerEntity = {
       ...server,
-      launchConfig: JSON.stringify(encryptedLaunchConfig)
+      launchConfig: JSON.stringify(encryptedLaunchConfig),
     };
     const initialStatus = this.isLazyStartApplicable(server)
       ? ServerStatus.Sleeping
@@ -292,15 +299,16 @@ export class ServerManager {
    * @param userId User ID (for temporary servers)
    * @returns ServerContext
    */
-  async ensureServerAvailable(
-    serverId: string,
-    userId?: string
-  ): Promise<ServerContext> {
-    let context = this.getServerContext(serverId, userId)
-      ?? await this.restoreServerContext(serverId, userId);
+  async ensureServerAvailable(serverId: string, userId?: string): Promise<ServerContext> {
+    let context =
+      this.getServerContext(serverId, userId) ??
+      (await this.restoreServerContext(serverId, userId));
 
     if (!context) {
-      throw new McpError(ErrorCode.InvalidParams, `Server ${serverId} not found in server contexts`);
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Server ${serverId} not found in server contexts`,
+      );
     }
 
     // Case 1: Server is online, update last activity time
@@ -315,7 +323,6 @@ export class ServerManager {
     } else {
       key = serverId;
     }
-
 
     // Case 2: Server is starting (another request triggered start), wait for completion
     if (this.serverWaitQueues.has(key)) {
@@ -351,22 +358,28 @@ export class ServerManager {
     }
 
     // Case 5: Server is in error state
-    throw new  McpError(ErrorCode.InvalidParams, `Server ${serverId} is in error state: ${context?.lastError || 'Unknown error'}`);
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Server ${serverId} is in error state: ${context?.lastError || 'Unknown error'}`,
+    );
   }
 
   /**
    * Wake up sleeping server
    */
-  private async wakeupServer(
-    context: ServerContext,
-    userId?: string
-  ): Promise<ServerContext> {
+  private async wakeupServer(context: ServerContext, userId?: string): Promise<ServerContext> {
     const serverId = context.serverEntity.serverId;
-    this.logger.info({ serverName: context.serverEntity.serverName, serverId, userId }, 'Waking up server from sleep');
+    this.logger.info(
+      { serverName: context.serverEntity.serverName, serverId, userId },
+      'Waking up server from sleep',
+    );
 
     // Check if lazy start is applicable
     if (!this.isLazyStartApplicable(context.serverEntity)) {
-      throw new McpError(ErrorCode.InvalidParams, `Server ${context.serverEntity.serverName} does not support lazy start`);
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Server ${context.serverEntity.serverName} does not support lazy start`,
+      );
     }
 
     // Get token
@@ -388,12 +401,15 @@ export class ServerManager {
     try {
       await this.createServerConnection(context, token);
 
-      this.logger.info({
-        serverId,
-        userId,
-        from: 'Sleeping',
-        to: 'Online'
-      }, 'Server woken up successfully');
+      this.logger.info(
+        {
+          serverId,
+          userId,
+          from: 'Sleeping',
+          to: 'Online',
+        },
+        'Server woken up successfully',
+      );
       return context;
     } catch (error) {
       this.logger.error({ error, serverId, userId }, 'Failed to wake up server');
@@ -405,7 +421,7 @@ export class ServerManager {
       // Throw error to let caller handle
       throw new McpError(
         ErrorCode.InternalError,
-        error instanceof Error ? error.message : String(error)
+        error instanceof Error ? error.message : String(error),
       );
     }
   }
@@ -416,10 +432,10 @@ export class ServerManager {
   private async waitForServerReady(
     serverId: string,
     userId?: string,
-    timeoutMs: number = 50000  // 50 second timeout
+    timeoutMs: number = 50000, // 50 second timeout
   ): Promise<ServerContext> {
     const startTime = Date.now();
-    const checkInterval = 100;  // Check every 100ms
+    const checkInterval = 100; // Check every 100ms
 
     while (Date.now() - startTime < timeoutMs) {
       const context = this.getServerContext(serverId, userId);
@@ -432,16 +448,12 @@ export class ServerManager {
         throw new Error(`Server ${serverId} failed to start: ${context.lastError}`);
       }
 
-      if (
-        context &&
-        context.status !== ServerStatus.Connecting &&
-        context.lastError
-      ) {
+      if (context && context.status !== ServerStatus.Connecting && context.lastError) {
         throw new Error(`Server ${serverId} failed to start: ${context.lastError}`);
       }
 
       // Wait before checking again
-      await new Promise(resolve => setTimeout(resolve, checkInterval));
+      await new Promise((resolve) => setTimeout(resolve, checkInterval));
     }
 
     throw new Error(`Server ${serverId} startup timeout after ${timeoutMs}ms`);
@@ -452,7 +464,7 @@ export class ServerManager {
    */
   private isLazyStartApplicable(server: Server): boolean {
     // Global switch check
-    const globalEnabled = process.env.LAZY_START_ENABLED !== 'false';  // Default enabled
+    const globalEnabled = process.env.LAZY_START_ENABLED !== 'false'; // Default enabled
     if (!globalEnabled) {
       return false;
     }
@@ -470,7 +482,7 @@ export class ServerManager {
   private injectOAuthTokenEnv(
     authType: ServerAuthType,
     launchConfig: Record<string, any>,
-    accessToken: string
+    accessToken: string,
   ): void {
     switch (authType) {
       case ServerAuthType.GoogleAuth:
@@ -488,19 +500,22 @@ export class ServerManager {
         };
         break;
 
-      case ServerAuthType.ZendeskAuth:
+      case ServerAuthType.ZendeskAuth: {
         let zendeskSubdomain = launchConfig.env?.zendeskSubdomain;
         if (!zendeskSubdomain) {
-          throw new Error('[ServerManager] Missing zendeskSubdomain for server auth type ZendeskAuth');
+          throw new Error(
+            '[ServerManager] Missing zendeskSubdomain for server auth type ZendeskAuth',
+          );
         }
 
         zendeskSubdomain = zendeskSubdomain.replace('https://', '').replace('.zendesk.com', '');
         launchConfig.env = {
           ...launchConfig.env,
-          "zendeskSubdomain": zendeskSubdomain,
+          zendeskSubdomain: zendeskSubdomain,
           accessToken: accessToken,
         };
         break;
+      }
 
       case ServerAuthType.NotionAuth:
         launchConfig.env = {
@@ -598,26 +613,35 @@ export class ServerManager {
    */
   private async sleepServer(context: ServerContext): Promise<void> {
     try {
-      this.logger.info({
-        serverName: context.serverEntity.serverName,
-        userId: context.userId,
-        idleTime: (Date.now() - context.lastActive) / 1000 + ' seconds',
-        from: 'Online',
-        to: 'Sleeping'
-      }, 'Putting server to sleep');
+      this.logger.info(
+        {
+          serverName: context.serverEntity.serverName,
+          userId: context.userId,
+          idleTime: (Date.now() - context.lastActive) / 1000 + ' seconds',
+          from: 'Online',
+          to: 'Sleeping',
+        },
+        'Putting server to sleep',
+      );
 
       await this.disconnectServerContext(context, ServerStatus.Sleeping, {
         serverId: context.serverEntity.serverId,
         userId: context.userId,
       });
 
-      this.logger.info({
-        serverName: context.serverEntity.serverName,
-        userId: context.userId,
-        status: 'Sleeping'
-      }, 'Server transitioned to sleeping state');
+      this.logger.info(
+        {
+          serverName: context.serverEntity.serverName,
+          userId: context.userId,
+          status: 'Sleeping',
+        },
+        'Server transitioned to sleeping state',
+      );
     } catch (error) {
-      this.logger.error({ error, serverName: context.serverEntity.serverName }, 'Failed to put server to sleep');
+      this.logger.error(
+        { error, serverName: context.serverEntity.serverName },
+        'Failed to put server to sleep',
+      );
     }
   }
 
@@ -649,7 +673,7 @@ export class ServerManager {
   getServerContextByID(id: string): ServerContext | undefined {
     return Array.from(this.serverContexts.values()).find((context) => context.id === id);
   }
-  
+
   /**
    * Get all servers
    */
@@ -661,14 +685,29 @@ export class ServerManager {
     return await ServerRepository.findEnabled();
   }
 
-
   /**
    * Get all available server IDs
    */
   getAvailableServers(): ServerContext[] {
-    const availableServers = Array.from(this.serverContexts.values()).filter((context) => context.status === ServerStatus.Online || context.status === ServerStatus.Sleeping);
-    const temporaryServers = Array.from(this.temporaryServers.values()).filter((context) => context.status === ServerStatus.Online || context.status === ServerStatus.Sleeping);
+    const availableServers = this.getAvailableServersFromServerContexts();
+    const temporaryServers = this.getAvailableServersFromTemporaryServers();
     return [...availableServers, ...temporaryServers];
+  }
+
+  // get all available servers from serverContexts
+  getAvailableServersFromServerContexts(): ServerContext[] {
+    return Array.from(this.serverContexts.values()).filter(
+      (context) =>
+        context.status === ServerStatus.Online || context.status === ServerStatus.Sleeping,
+    );
+  }
+
+  // get all available servers from temporaryServers
+  getAvailableServersFromTemporaryServers(): ServerContext[] {
+    return Array.from(this.temporaryServers.values()).filter(
+      (context) =>
+        context.status === ServerStatus.Online || context.status === ServerStatus.Sleeping,
+    );
   }
 
   getUserAvailableServers(user: User): ServerContext[] {
@@ -676,7 +715,8 @@ export class ServerManager {
     const availableServers = this.getAvailableServers();
     const result: ServerContext[] = [];
     for (const server of availableServers) {
-      const enabled = permissions[server.serverEntity.serverId]?.enabled ?? server.serverEntity.publicAccess;
+      const enabled =
+        permissions[server.serverEntity.serverId]?.enabled ?? server.serverEntity.publicAccess;
       if (!enabled) {
         continue;
       }
@@ -702,7 +742,7 @@ export class ServerManager {
     }
     return capabilities;
   }
-  
+
   /**
    * Add new server connection
    */
@@ -745,7 +785,7 @@ export class ServerManager {
 
     return this.initializeManagedServerContext(server, ServerStatus.Sleeping);
   }
-  
+
   /**
    * Remove server connection
    */
@@ -770,7 +810,7 @@ export class ServerManager {
       return undefined;
     }
   }
-  
+
   /**
    * Disconnect and reconnect server (for API key change)
    */
@@ -789,11 +829,18 @@ export class ServerManager {
 
     await this.createServerConnection(serverContext, token);
 
-    this.logger.info({ serverName: serverEntity.serverName }, 'Server reconnected with new API key');
+    this.logger.info(
+      { serverName: serverEntity.serverName },
+      'Server reconnected with new API key',
+    );
     return serverContext;
   }
 
-  async reconnectTemporaryServer(serverEntity: Server, userId: string, token: string): Promise<ServerContext> {
+  async reconnectTemporaryServer(
+    serverEntity: Server,
+    userId: string,
+    token: string,
+  ): Promise<ServerContext> {
     const serverId = serverEntity.serverId;
     let serverContext = this.getTemporaryServer(serverId, userId);
     if (serverContext) {
@@ -811,13 +858,16 @@ export class ServerManager {
     await this.createServerConnection(serverContext, token);
     return serverContext;
   }
-  
+
   /**
    * Update server configuration
    */
-  async updateServerCapabilitiesConfig(serverId: string, capabilities: string): Promise<{ toolsChanged: boolean, resourcesChanged: boolean, promptsChanged: boolean }> {
+  async updateServerCapabilitiesConfig(
+    serverId: string,
+    capabilities: string,
+  ): Promise<{ toolsChanged: boolean; resourcesChanged: boolean; promptsChanged: boolean }> {
     const currentContext = this.serverContexts.get(serverId);
-    
+
     if (!currentContext) {
       return { toolsChanged: false, resourcesChanged: false, promptsChanged: false };
     }
@@ -850,7 +900,8 @@ export class ServerManager {
         oldCapabilitiesConfig.prompts = {};
       }
 
-      const { toolsChanged, resourcesChanged, promptsChanged } = currentContext.isCapabilityChanged(newCapabilitiesConfig);
+      const { toolsChanged, resourcesChanged, promptsChanged } =
+        currentContext.isCapabilityChanged(newCapabilitiesConfig);
       currentContext.lastSync = new Date();
       currentContext.updateCapabilitiesConfig(capabilities);
       return { toolsChanged, resourcesChanged, promptsChanged };
@@ -859,15 +910,11 @@ export class ServerManager {
       return { toolsChanged: true, resourcesChanged: true, promptsChanged: true };
     }
   }
-  
+
   /**
    * Create server connection
    */
-  private async createServerConnection(
-    serverContext: ServerContext, 
-    token: string
-  ): Promise<void> {
-    
+  private async createServerConnection(serverContext: ServerContext, token: string): Promise<void> {
     if (serverContext.status === ServerStatus.Online) {
       return;
     } else if (serverContext.status === ServerStatus.Connecting) {
@@ -882,7 +929,7 @@ export class ServerManager {
     try {
       serverContext.status = ServerStatus.Connecting;
       serverContext.userToken = token;
-      
+
       // 1. Parse launch_config
       const baseLaunchConfig = await this.decryptLaunchConfig(token, serverEntity);
 
@@ -893,18 +940,25 @@ export class ServerManager {
 
       const category = serverContext.serverEntity.category;
       switch (category) {
-        case ServerCategory.RestApi:
-          if (!serverEntity.configTemplate || serverEntity.configTemplate.trim() === '' || serverEntity.configTemplate.trim() === '{}') {
-            throw new Error(`[ServerManager] Missing configTemplate for server ${serverEntity.serverId}`);
+        case ServerCategory.RestApi: {
+          if (
+            !serverEntity.configTemplate ||
+            serverEntity.configTemplate.trim() === '' ||
+            serverEntity.configTemplate.trim() === '{}'
+          ) {
+            throw new Error(
+              `[ServerManager] Missing configTemplate for server ${serverEntity.serverId}`,
+            );
           }
           const config = JSON.parse(serverEntity.configTemplate);
           config.apis[0].auth = launchConfig.auth;
           delete launchConfig.auth;
           launchConfig.env ??= {
-            type: 'none'
+            type: 'none',
           };
           launchConfig.env.GATEWAY_CONFIG = JSON.stringify(config);
           break;
+        }
         case ServerCategory.Skills:
           // Rewrite ./skills/<serverId> volume paths to host-absolute paths when running inside Docker
           await this.resolveSkillsVolumeMounts(launchConfig);
@@ -920,34 +974,37 @@ export class ServerManager {
           {
             serverId: serverEntity.serverId,
             originalCommand: runnerMetadata.originalCommand,
-            runnerImage: runnerMetadata.runnerImage
+            runnerImage: runnerMetadata.runnerImage,
           },
-          'CustomStdio command wrapped to runner container'
+          'CustomStdio command wrapped to runner container',
         );
       }
 
       // 4. Create transport using dynamic transport factory
-      const { transport, transportType } = await DownstreamTransportFactory.create(resolvedLaunchConfig);
+      const { transport, transportType } =
+        await DownstreamTransportFactory.create(resolvedLaunchConfig);
       const runnerExecutionTrace = runnerMetadata
         ? customStdioRunnerService.attachExecutionTrace(transport)
         : undefined;
 
       // 1.5 Detect and cache transport type if not already set
       if (!serverEntity.transportType || serverEntity.transportType !== transportType) {
-
         await ServerRepository.update(serverEntity.serverId, { transportType });
         serverEntity.transportType = transportType;
 
-        this.logger.info({ serverId: serverEntity.serverId, transportType }, 'Transport type detected and cached');
+        this.logger.info(
+          { serverId: serverEntity.serverId, transportType },
+          'Transport type detected and cached',
+        );
       }
 
       // 5. Create MCP client
       const client = new Client(
         {
           name: APP_INFO.name,
-          version: APP_INFO.version
+          version: APP_INFO.version,
         },
-        this.clientOptions
+        this.clientOptions,
       );
       startupDiagnostics = createConnectionStartupDiagnostics(transport, client);
 
@@ -956,37 +1013,47 @@ export class ServerManager {
 
         if (this.plannedTransportCloses.has(transport as object)) {
           this.plannedTransportCloses.delete(transport as object);
-          this.logger.debug({ serverId: serverEntity.serverId }, 'Ignoring planned transport close');
+          this.logger.debug(
+            { serverId: serverEntity.serverId },
+            'Ignoring planned transport close',
+          );
           return;
         }
 
         if (serverContext.transport && serverContext.transport !== transport) {
-          this.logger.debug({ serverId: serverEntity.serverId }, 'Ignoring stale transport close event');
+          this.logger.debug(
+            { serverId: serverEntity.serverId },
+            'Ignoring stale transport close event',
+          );
           return;
         }
 
-        const affectedSessions = SessionStore.instance?.getSessionsUsingServer(serverEntity.serverId) ?? [];
+        const affectedSessions =
+          SessionStore.instance?.getSessionsUsingServer(serverEntity.serverId) ?? [];
         let closeErrorMessage = 'Transport closed by server';
         let preferredCloseMessage: string | undefined;
         if (runnerMetadata && runnerExecutionTrace) {
           const runnerFailure = customStdioRunnerService.buildFailureDetails(
             serverEntity.serverId,
             runnerMetadata,
-            runnerExecutionTrace
+            runnerExecutionTrace,
           );
           if (runnerFailure) {
             closeErrorMessage = runnerFailure.message;
             preferredCloseMessage = runnerFailure.message;
-            this.logger.error({
-              serverId: serverEntity.serverId,
-              originalCommand: runnerMetadata.originalCommand,
-              runnerImage: runnerMetadata.runnerImage,
-              category: runnerFailure.category,
-              reason: runnerFailure.reason,
-              exitCode: runnerExecutionTrace.exitCode,
-              signal: runnerExecutionTrace.signal,
-              stderrTail: runnerFailure.stderrSummary
-            }, 'CustomStdio runner process exited');
+            this.logger.error(
+              {
+                serverId: serverEntity.serverId,
+                originalCommand: runnerMetadata.originalCommand,
+                runnerImage: runnerMetadata.runnerImage,
+                category: runnerFailure.category,
+                reason: runnerFailure.reason,
+                exitCode: runnerExecutionTrace.exitCode,
+                signal: runnerExecutionTrace.signal,
+                stderrTail: runnerFailure.stderrSummary,
+              },
+              'CustomStdio runner process exited',
+            );
           }
         }
 
@@ -997,21 +1064,24 @@ export class ServerManager {
           serverContext,
           closeErrorMessage,
           preferredCloseMessage ??
-            (startupPhaseActive ? startupDiagnostics?.getPreferredMessage() : undefined)
+            (startupPhaseActive ? startupDiagnostics?.getPreferredMessage() : undefined),
         );
 
-        const shouldPreserveContext = this.isLazyStartApplicable(serverEntity) && serverEntity.enabled;
+        const shouldPreserveContext =
+          this.isLazyStartApplicable(serverEntity) && serverEntity.enabled;
         const nextStatus = shouldPreserveContext ? ServerStatus.Sleeping : ServerStatus.Error;
         serverContext.stopTokenRefresh();
         serverContext.clearConnectionState(nextStatus);
 
         this.notifyUsersOfServerChange(serverEntity.serverId, affectedSessions, 'server_error', {
           toolsChanged: !shouldPreserveContext && (serverContext.tools?.tools?.length ?? 0) > 0,
-          resourcesChanged: !shouldPreserveContext && (serverContext.resources?.resources?.length ?? 0) > 0,
-          promptsChanged: !shouldPreserveContext && (serverContext.prompts?.prompts?.length ?? 0) > 0
+          resourcesChanged:
+            !shouldPreserveContext && (serverContext.resources?.resources?.length ?? 0) > 0,
+          promptsChanged:
+            !shouldPreserveContext && (serverContext.prompts?.prompts?.length ?? 0) > 0,
         });
       };
-      
+
       // 6. Establish connection
       try {
         await client.connect(transport);
@@ -1021,19 +1091,22 @@ export class ServerManager {
             serverEntity.serverId,
             runnerMetadata,
             runnerExecutionTrace,
-            error
+            error,
           );
           if (runnerFailure) {
-            this.logger.error({
-              serverId: serverEntity.serverId,
-              originalCommand: runnerMetadata.originalCommand,
-              runnerImage: runnerMetadata.runnerImage,
-              category: runnerFailure.category,
-              reason: runnerFailure.reason,
-              exitCode: runnerExecutionTrace.exitCode,
-              signal: runnerExecutionTrace.signal,
-              stderrTail: runnerFailure.stderrSummary
-            }, 'CustomStdio runner failed during startup');
+            this.logger.error(
+              {
+                serverId: serverEntity.serverId,
+                originalCommand: runnerMetadata.originalCommand,
+                runnerImage: runnerMetadata.runnerImage,
+                category: runnerFailure.category,
+                reason: runnerFailure.reason,
+                exitCode: runnerExecutionTrace.exitCode,
+                signal: runnerExecutionTrace.signal,
+                stderrTail: runnerFailure.stderrSummary,
+              },
+              'CustomStdio runner failed during startup',
+            );
             runnerStartupFailureMessage = runnerFailure.message;
             throw createErrorWithCause(runnerFailure.message, error);
           }
@@ -1041,7 +1114,10 @@ export class ServerManager {
         throw error;
       }
       this.logger.info({ serverName: serverEntity.serverName }, 'Connection established');
-      if (serverEntity.category === ServerCategory.CustomRemote || serverEntity.category === ServerCategory.CustomStdio) {
+      if (
+        serverEntity.category === ServerCategory.CustomRemote ||
+        serverEntity.category === ServerCategory.CustomStdio
+      ) {
         const serverInfo = client.getServerVersion();
         if (serverInfo?.name && serverInfo.name !== serverEntity.serverName) {
           let name = serverInfo.name.trim();
@@ -1050,7 +1126,7 @@ export class ServerManager {
           }
 
           await ServerRepository.update(serverEntity.serverId, {
-            serverName: name
+            serverName: name,
           });
           serverEntity.serverName = name;
         }
@@ -1062,7 +1138,7 @@ export class ServerManager {
       await client.ping({ timeout: 5000 });
 
       serverContext.status = ServerStatus.Online;
-      
+
       // 7. Save connection to context
       serverContext.connection = client;
       serverContext.transport = transport;
@@ -1093,14 +1169,17 @@ export class ServerManager {
           ? error
           : createErrorWithCause(preferredErrorMessage, error);
 
-      this.logger.warn({
-        error: errorToThrow,
-        serverName: serverEntity.serverName,
-        diagnostics: startupDiagnostics?.getSnapshot(error)
-      }, 'Server startup failed');
+      this.logger.warn(
+        {
+          error: errorToThrow,
+          serverName: serverEntity.serverName,
+          diagnostics: startupDiagnostics?.getSnapshot(error),
+        },
+        'Server startup failed',
+      );
       serverContext.stopTokenRefresh();
       serverContext.clearConnectionState(
-        this.isLazyStartApplicable(serverEntity) ? ServerStatus.Sleeping : ServerStatus.Error
+        this.isLazyStartApplicable(serverEntity) ? ServerStatus.Sleeping : ServerStatus.Error,
       );
       this.recordServerStartupError(serverContext, preferredErrorMessage);
       startupPhaseActive = false;
@@ -1113,7 +1192,7 @@ export class ServerManager {
   private recordServerStartupError(
     serverContext: ServerContext,
     primaryMessage?: string,
-    preferredMessage?: string
+    preferredMessage?: string,
   ): void {
     const nextMessage = preferredMessage ?? primaryMessage;
     if (!nextMessage || nextMessage.trim() === '') {
@@ -1128,7 +1207,6 @@ export class ServerManager {
   }
 
   async updateServerCapabilities(serverContext: ServerContext): Promise<void> {
-    
     if (!serverContext.connection) {
       return;
     }
@@ -1136,7 +1214,6 @@ export class ServerManager {
     const client = serverContext.connection;
 
     try {
-
       const capabilities = client.getServerCapabilities();
 
       if (capabilities) {
@@ -1155,19 +1232,36 @@ export class ServerManager {
                 const tools = await client.listTools();
                 await serverContext.updateTools(tools);
                 this.globalRouter?.handleToolsListChanged(serverContext.serverEntity.serverId);
-  
+
+                try {
+                  const { discoveryIndexBuilder } =
+                    await import('../services/DiscoveryIndexBuilder.js');
+                  await discoveryIndexBuilder.invalidateServer(serverContext.serverEntity.serverId);
+                } catch (err) {
+                  this.logger.warn(
+                    { error: err, serverId: serverContext.serverEntity.serverId },
+                    'Failed to invalidate discovery catalog',
+                  );
+                }
+
                 // Log ServerCapabilityUpdate (1313)
                 const serverLogger = this.serverLoggers.get(serverContext.serverEntity.serverId);
                 if (serverLogger) {
                   await serverLogger.logServerCapabilityUpdate({
-                    requestParams: { type: 'tools/listChanged', toolsCount: tools.tools?.length || 0 }
+                    requestParams: {
+                      type: 'tools/listChanged',
+                      toolsCount: tools.tools?.length || 0,
+                    },
                   });
                 }
               } catch (error) {
                 serverContext.recordTimeout(error);
-                this.logger.warn({ error, serverName: serverContext.serverEntity.serverName }, 'Failed to get tools');
+                this.logger.warn(
+                  { error, serverName: serverContext.serverEntity.serverName },
+                  'Failed to get tools',
+                );
               }
-            }
+            },
           );
         }
 
@@ -1181,19 +1275,25 @@ export class ServerManager {
                 const resourceTemplates = await client.listResourceTemplates();
                 await serverContext.updateResourceTemplates(resourceTemplates);
                 this.globalRouter?.handleResourcesListChanged(serverContext.serverEntity.serverId);
-  
+
                 // Log ServerCapabilityUpdate (1313)
                 const serverLogger = this.serverLoggers.get(serverContext.serverEntity.serverId);
                 if (serverLogger) {
                   await serverLogger.logServerCapabilityUpdate({
-                    requestParams: { type: 'resources/listChanged', resourcesCount: resources.resources?.length || 0 }
+                    requestParams: {
+                      type: 'resources/listChanged',
+                      resourcesCount: resources.resources?.length || 0,
+                    },
                   });
                 }
               } catch (error) {
                 serverContext.recordTimeout(error);
-                this.logger.warn({ error, serverName: serverContext.serverEntity.serverName }, 'Failed to get resources');
+                this.logger.warn(
+                  { error, serverName: serverContext.serverEntity.serverName },
+                  'Failed to get resources',
+                );
               }
-            }
+            },
           );
         }
 
@@ -1201,8 +1301,11 @@ export class ServerManager {
           client.setNotificationHandler(
             ResourceUpdatedNotificationSchema,
             async (notification: ResourceUpdatedNotification) => {
-              this.globalRouter?.handleResourceUpdated(serverContext.serverEntity.serverId, notification);
-            }
+              this.globalRouter?.handleResourceUpdated(
+                serverContext.serverEntity.serverId,
+                notification,
+              );
+            },
           );
         }
 
@@ -1210,24 +1313,29 @@ export class ServerManager {
           client.setNotificationHandler(
             PromptListChangedNotificationSchema,
             async (notification: PromptListChangedNotification) => {
-
               try {
                 const prompts = await client.listPrompts();
                 await serverContext.updatePrompts(prompts);
                 this.globalRouter?.handlePromptsListChanged(serverContext.serverEntity.serverId);
-  
+
                 // Log ServerCapabilityUpdate (1313)
                 const serverLogger = this.serverLoggers.get(serverContext.serverEntity.serverId);
                 if (serverLogger) {
                   await serverLogger.logServerCapabilityUpdate({
-                    requestParams: { type: 'prompts/listChanged', promptsCount: prompts.prompts?.length || 0 }
+                    requestParams: {
+                      type: 'prompts/listChanged',
+                      promptsCount: prompts.prompts?.length || 0,
+                    },
                   });
                 }
               } catch (error) {
                 serverContext.recordTimeout(error);
-                this.logger.warn({ error, serverName: serverContext.serverEntity.serverName }, 'Failed to get prompts');
+                this.logger.warn(
+                  { error, serverName: serverContext.serverEntity.serverName },
+                  'Failed to get prompts',
+                );
               }
-            }
+            },
           );
         }
 
@@ -1235,9 +1343,24 @@ export class ServerManager {
           const tools = await client.listTools();
           if (tools) {
             await serverContext.updateTools(tools);
+
+            if (serverContext.userId == null) {
+              try {
+                const { discoveryIndexBuilder } = await import('../services/DiscoveryIndexBuilder.js');
+                await discoveryIndexBuilder.invalidateServer(serverContext.serverEntity.serverId);
+              } catch (err) {
+                this.logger.warn(
+                  { error: err, serverId: serverContext.serverEntity.serverId },
+                  'Failed to rebuild discovery catalog after initial tools load',
+                );
+              }
+            }
           }
         } catch (error) {
-          this.logger.warn({ error, serverName: serverContext.serverEntity.serverName }, 'Failed to get tools');
+          this.logger.warn(
+            { error, serverName: serverContext.serverEntity.serverName },
+            'Failed to get tools',
+          );
         }
 
         try {
@@ -1249,7 +1372,10 @@ export class ServerManager {
             await serverContext.updateResourceTemplates(resourceTemplates);
           }
         } catch (error) {
-          this.logger.warn({ error, serverName: serverContext.serverEntity.serverName }, 'Failed to get resources');
+          this.logger.warn(
+            { error, serverName: serverContext.serverEntity.serverName },
+            'Failed to get resources',
+          );
         }
 
         try {
@@ -1260,7 +1386,10 @@ export class ServerManager {
             }
           }
         } catch (error) {
-          this.logger.warn({ error, serverName: serverContext.serverEntity.serverName }, 'Failed to get prompts');
+          this.logger.warn(
+            { error, serverName: serverContext.serverEntity.serverName },
+            'Failed to get prompts',
+          );
         }
 
         if (toolsEmpty && resourcesEmpty && promptsEmpty) {
@@ -1270,7 +1399,9 @@ export class ServerManager {
             const config = template?.toolDefaultConfig;
             if (config !== undefined) {
               const defaultConfig = typeof config === 'string' ? JSON.parse(config) : config;
-              serverContext.updateCapabilitiesConfig(JSON.stringify({tools: defaultConfig, resources: {}, prompts: {}}));
+              serverContext.updateCapabilitiesConfig(
+                JSON.stringify({ tools: defaultConfig, resources: {}, prompts: {} }),
+              );
             }
           } catch (error) {
             this.logger.error({ error }, 'Invalid configTemplate JSON');
@@ -1288,12 +1419,22 @@ export class ServerManager {
               }
             }
           }
-          
-          await ServerRepository.updateCapabilities(serverContext.serverID, JSON.stringify({tools: newCapabilities.tools, resources: newCapabilities.resources, prompts: newCapabilities.prompts}));
+
+          await ServerRepository.updateCapabilities(
+            serverContext.serverID,
+            JSON.stringify({
+              tools: newCapabilities.tools,
+              resources: newCapabilities.resources,
+              prompts: newCapabilities.prompts,
+            }),
+          );
         }
       }
     } catch (error) {
-      this.logger.warn({ error, serverName: serverContext.serverEntity.serverName }, 'Failed to get capabilities');
+      this.logger.warn(
+        { error, serverName: serverContext.serverEntity.serverName },
+        'Failed to get capabilities',
+      );
     }
   }
 
@@ -1303,7 +1444,7 @@ export class ServerManager {
   private async initializeAuthentication(
     serverContext: ServerContext,
     launchConfig: Record<string, any>,
-    token: string
+    token: string,
   ): Promise<void> {
     const category = serverContext.serverEntity.category;
     if (category !== ServerCategory.Template) {
@@ -1319,10 +1460,13 @@ export class ServerManager {
       this.injectOAuthTokenEnv(authType, launchConfig, initialToken);
       delete launchConfig.oauth;
 
-      this.logger.info({
-        serverName: serverContext.serverEntity.serverName,
-        usePetaOauthConfig
-      }, 'OAuth initialized with Peta config');
+      this.logger.info(
+        {
+          serverName: serverContext.serverEntity.serverName,
+          usePetaOauthConfig,
+        },
+        'OAuth initialized with Peta config',
+      );
       return;
     }
 
@@ -1349,8 +1493,11 @@ export class ServerManager {
 
       default:
         this.logger.warn(
-          { authType: serverContext.serverEntity.authType, serverName: serverContext.serverEntity.serverName },
-          'Unknown auth type'
+          {
+            authType: serverContext.serverEntity.authType,
+            serverName: serverContext.serverEntity.serverName,
+          },
+          'Unknown auth type',
         );
     }
   }
@@ -1360,7 +1507,7 @@ export class ServerManager {
    */
   private async initializeOAuthWithRefresh(
     serverContext: ServerContext,
-    launchConfig: Record<string, any>
+    launchConfig: Record<string, any>,
   ): Promise<void> {
     const authType = serverContext.serverEntity.authType;
 
@@ -1371,7 +1518,7 @@ export class ServerManager {
       !launchConfig.oauth?.refreshToken
     ) {
       throw new Error(
-        `[ServerManager] Missing OAuth configuration for server ${serverContext.serverID}. Required: clientId, clientSecret, refreshToken`
+        `[ServerManager] Missing OAuth configuration for server ${serverContext.serverID}. Required: clientId, clientSecret, refreshToken`,
       );
     }
 
@@ -1380,7 +1527,7 @@ export class ServerManager {
       (!launchConfig.oauth.tokenUrl || typeof launchConfig.oauth.tokenUrl !== 'string')
     ) {
       throw new Error(
-        `[ServerManager] Missing OAuth tokenUrl for server ${serverContext.serverID} (ZendeskAuth)`
+        `[ServerManager] Missing OAuth tokenUrl for server ${serverContext.serverID} (ZendeskAuth)`,
       );
     }
 
@@ -1396,12 +1543,12 @@ export class ServerManager {
     // 2. Create authentication strategy
     const authStrategy = AuthStrategyFactory.create(
       serverContext.serverEntity.authType,
-      launchConfig.oauth
+      launchConfig.oauth,
     );
 
     if (!authStrategy) {
       throw new Error(
-        `[ServerManager] Failed to create auth strategy for server ${serverContext.serverID}`
+        `[ServerManager] Failed to create auth strategy for server ${serverContext.serverID}`,
       );
     }
 
@@ -1414,20 +1561,23 @@ export class ServerManager {
     // 5. Remove oauth config (don't pass to downstream server)
     delete launchConfig.oauth;
 
-    this.logger.info({
-      serverName: serverContext.serverEntity.serverName,
-      authType: serverContext.serverEntity.authType
-    }, 'OAuth initialized');
+    this.logger.info(
+      {
+        serverName: serverContext.serverEntity.serverName,
+        authType: serverContext.serverEntity.authType,
+      },
+      'OAuth initialized',
+    );
   }
 
   private async initializePetaAuth(
     serverContext: ServerContext,
     launchConfig: Record<string, any>,
-    token: string
+    token: string,
   ): Promise<string> {
     if (!launchConfig.oauth?.clientId) {
       throw new Error(
-        `[ServerManager] Missing OAuth configuration for server ${serverContext.serverID}. Required: clientId`
+        `[ServerManager] Missing OAuth configuration for server ${serverContext.serverID}. Required: clientId`,
       );
     }
 
@@ -1437,7 +1587,7 @@ export class ServerManager {
       clientId: launchConfig.oauth.clientId,
       key: launchConfig.oauth.key,
       accessToken: launchConfig.oauth.accessToken,
-      expiresAt: launchConfig.oauth.expiresAt
+      expiresAt: launchConfig.oauth.expiresAt,
     });
 
     return await serverContext.startTokenRefresh(authStrategy);
@@ -1453,10 +1603,7 @@ export class ServerManager {
    * @param serverContext Regular server context (must have userToken)
    * @param oauthConfig OAuth configuration object (can include accessToken, refreshToken, expiresAt, etc.)
    */
-  async updateServerLaunchConfig(
-    serverContext: ServerContext,
-    oauthConfig: any
-  ): Promise<void> {
+  async updateServerLaunchConfig(serverContext: ServerContext, oauthConfig: any): Promise<void> {
     try {
       const serverId = serverContext.serverID;
       const serverEntity = serverContext.serverEntity;
@@ -1466,7 +1613,7 @@ export class ServerManager {
       if (!userToken) {
         this.logger.warn(
           { serverId, serverName: serverEntity.serverName },
-          'No userToken available for OAuth config update'
+          'No userToken available for OAuth config update',
         );
         return;
       }
@@ -1474,7 +1621,7 @@ export class ServerManager {
       // 2. Decrypt launchConfig
       const decryptedLaunchConfig = await CryptoService.decryptDataFromString(
         serverEntity.launchConfig,
-        userToken
+        userToken,
       );
       const launchConfig = JSON.parse(decryptedLaunchConfig);
 
@@ -1490,22 +1637,23 @@ export class ServerManager {
         ...oauthConfig,
       };
 
-      this.logger.debug({
-        serverId,
-        serverName: serverEntity.serverName,
-        hasAccessToken: !!oauthConfig.accessToken,
-        hasRefreshToken: !!oauthConfig.refreshToken,
-        hasExpiresAt: !!oauthConfig.expiresAt,
-        expiresAt: oauthConfig.expiresAt
-          ? new Date(oauthConfig.expiresAt).toISOString()
-          : 'N/A'
-      }, 'Updating OAuth config in server launchConfig');
+      this.logger.debug(
+        {
+          serverId,
+          serverName: serverEntity.serverName,
+          hasAccessToken: !!oauthConfig.accessToken,
+          hasRefreshToken: !!oauthConfig.refreshToken,
+          hasExpiresAt: !!oauthConfig.expiresAt,
+          expiresAt: oauthConfig.expiresAt ? new Date(oauthConfig.expiresAt).toISOString() : 'N/A',
+        },
+        'Updating OAuth config in server launchConfig',
+      );
 
       // 5. Re-encrypt launchConfig
       const updatedLaunchConfigStr = JSON.stringify(launchConfig);
       const encryptedLaunchConfigData = await CryptoService.encryptData(
         updatedLaunchConfigStr,
-        userToken
+        userToken,
       );
 
       // 6. Serialize encrypted data to string
@@ -1514,21 +1662,24 @@ export class ServerManager {
       // 7. Save to database
       const updatedServer = await ServerRepository.updateLaunchConfig(
         serverId,
-        encryptedLaunchConfig
+        encryptedLaunchConfig,
       );
 
       // 8. Update serverEntity in memory
       serverContext.serverEntity = updatedServer;
 
-      this.logger.info({
-        serverId,
-        serverName: serverEntity.serverName,
-        updatedFields: Object.keys(oauthConfig).join(', ')
-      }, 'Server OAuth config updated successfully');
+      this.logger.info(
+        {
+          serverId,
+          serverName: serverEntity.serverName,
+          updatedFields: Object.keys(oauthConfig).join(', '),
+        },
+        'Server OAuth config updated successfully',
+      );
     } catch (error) {
       this.logger.error(
         { error, serverId: serverContext.serverID },
-        'Failed to update server OAuth config'
+        'Failed to update server OAuth config',
       );
       // Don't throw error to avoid interrupting token refresh flow
     }
@@ -1543,10 +1694,7 @@ export class ServerManager {
    * @param serverContext Temporary Server context (must have userId and userToken)
    * @param oauthConfig New OAuth configuration (includes accessToken, refreshToken, expiresAt)
    */
-  async updateUserLaunchConfig(
-    serverContext: ServerContext,
-    oauthConfig: any
-  ): Promise<void> {
+  async updateUserLaunchConfig(serverContext: ServerContext, oauthConfig: any): Promise<void> {
     try {
       const userId = serverContext.userId;
       const serverId = serverContext.serverID;
@@ -1556,7 +1704,7 @@ export class ServerManager {
       if (!userId || !userToken) {
         this.logger.warn(
           { serverId, userId },
-          'Missing userId or userToken for user launch config update'
+          'Missing userId or userToken for user launch config update',
         );
         return;
       }
@@ -1574,16 +1722,13 @@ export class ServerManager {
       // 4. Decrypt this server's launchConfig
       const encryptedConfig = launchConfigs[serverId];
       if (!encryptedConfig) {
-        this.logger.warn(
-          { serverId, userId },
-          'Server config not found in user launchConfigs'
-        );
+        this.logger.warn({ serverId, userId }, 'Server config not found in user launchConfigs');
         return;
       }
 
       const decryptedStr = await CryptoService.decryptDataFromString(
         JSON.stringify(encryptedConfig),
-        userToken
+        userToken,
       );
       const launchConfig = JSON.parse(decryptedStr);
 
@@ -1602,17 +1747,15 @@ export class ServerManager {
           serverId,
           userId,
           hasAccessToken: !!oauthConfig.accessToken,
-          expiresAt: oauthConfig.expiresAt
-            ? new Date(oauthConfig.expiresAt).toISOString()
-            : 'N/A',
+          expiresAt: oauthConfig.expiresAt ? new Date(oauthConfig.expiresAt).toISOString() : 'N/A',
         },
-        'Updating OAuth config in launchConfig'
+        'Updating OAuth config in launchConfig',
       );
 
       // 6. Re-encrypt
       const encryptedData = await CryptoService.encryptData(
         JSON.stringify(launchConfig),
-        userToken
+        userToken,
       );
 
       // 7. Update launchConfigs
@@ -1631,14 +1774,11 @@ export class ServerManager {
 
         this.logger.debug(
           { serverId, userId, sessionCount: userSessions.length },
-          'Synced launchConfigs to user sessions'
+          'Synced launchConfigs to user sessions',
         );
       }
 
-      this.logger.info(
-        { serverId, userId },
-        'User launch config updated with new OAuth tokens'
-      );
+      this.logger.info({ serverId, userId }, 'User launch config updated with new OAuth tokens');
     } catch (error) {
       this.logger.error(
         {
@@ -1646,19 +1786,19 @@ export class ServerManager {
           serverId: serverContext.serverID,
           userId: serverContext.userId,
         },
-        'Failed to update user launch config'
+        'Failed to update user launch config',
       );
       // Don't throw error to avoid interrupting token refresh flow
     }
   }
 
-  async decryptLaunchConfig(token: string, serverEntity: Server) : Promise<string> {
+  async decryptLaunchConfig(token: string, serverEntity: Server): Promise<string> {
     const serverName = serverEntity.serverName;
     try {
       // Decrypt launch config
       const launchConfig = await CryptoService.decryptDataFromString(
         serverEntity.launchConfig, // encrypted launch config
-        token // rawBase64 key
+        token, // rawBase64 key
       );
 
       return launchConfig;
@@ -1667,13 +1807,15 @@ export class ServerManager {
         AuthErrorType.INVALID_TOKEN,
         `Failed to decrypt launch config for server ${serverName}`,
         'owner',
-        error
+        error,
       );
     }
   }
 
-  async connectAllServers(token: string) : Promise<{ successServers: { serverId: string; serverName: string; proxyId: number }[]; failedServers: { serverId: string; serverName: string; proxyId: number }[] }> {
-
+  async connectAllServers(token: string): Promise<{
+    successServers: { serverId: string; serverName: string; proxyId: number }[];
+    failedServers: { serverId: string; serverName: string; proxyId: number }[];
+  }> {
     // Create connections for all serverContexts concurrently
     const connectPromises: Promise<Server>[] = [];
 
@@ -1685,7 +1827,10 @@ export class ServerManager {
       }
       try {
         const context = this.serverContexts.get(server.serverId);
-        if (context?.status === ServerStatus.Online || context?.status === ServerStatus.Connecting) {
+        if (
+          context?.status === ServerStatus.Online ||
+          context?.status === ServerStatus.Connecting
+        ) {
           continue;
         }
         const serverContext = this.initializeManagedServerContext(server);
@@ -1696,7 +1841,10 @@ export class ServerManager {
         if (this.isLazyStartApplicable(server)) {
           // Initialize in Sleeping state, don't start
           serverContext.status = ServerStatus.Sleeping;
-          this.logger.info({ serverId: server.serverId, serverName: server.serverName }, 'Server initialized in sleeping state (lazy start enabled)');
+          this.logger.info(
+            { serverId: server.serverId, serverName: server.serverName },
+            'Server initialized in sleeping state (lazy start enabled)',
+          );
           continue;
         }
 
@@ -1709,33 +1857,43 @@ export class ServerManager {
     }
 
     for (const serverContext of contexts) {
-      connectPromises.push(this.createServerConnection(serverContext, token).then(() => serverContext.serverEntity).catch((error) => serverContext.serverEntity));
+      connectPromises.push(
+        this.createServerConnection(serverContext, token)
+          .then(() => serverContext.serverEntity)
+          .catch((error) => serverContext.serverEntity),
+      );
     }
     const results = await Promise.allSettled(connectPromises);
     // Return list of successful and failed servers
-    const successServers = results.filter((result) => result.status === 'fulfilled').map((result) => result.value);
-    const failedServers = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
+    const successServers = results
+      .filter((result) => result.status === 'fulfilled')
+      .map((result) => result.value);
+    const failedServers = results
+      .filter((result) => result.status === 'rejected')
+      .map((result) => result.reason);
     return {
       successServers: successServers.map((server) => ({
         serverId: server.serverId,
         serverName: server.serverName,
-        proxyId: server.proxyId
+        proxyId: server.proxyId,
       })),
       failedServers: failedServers.map((server) => ({
         serverId: server.serverId,
         serverName: server.serverName,
-        proxyId: server.proxyId
-      }))
+        proxyId: server.proxyId,
+      })),
     };
   }
-  
+
   /**
    * Register reverse request handlers
    * Handle requests initiated by Server (Sampling, Roots, Elicitation)
    */
   private registerReverseRequestHandlers(client: Client, serverId: string): void {
     if (!this.globalRouter) {
-      this.logger.warn('GlobalRequestRouter not initialized, skipping reverse request handler registration');
+      this.logger.warn(
+        'GlobalRequestRouter not initialized, skipping reverse request handler registration',
+      );
       return;
     }
 
@@ -1743,111 +1901,123 @@ export class ServerManager {
 
     if (this.clientOptions.capabilities?.sampling) {
       // Register Sampling request handler
-      client.setRequestHandler(
-        CreateMessageRequestSchema,
-        async (request, extra) => {
-          this.logger.debug({
+      client.setRequestHandler(CreateMessageRequestSchema, async (request, extra) => {
+        this.logger.debug(
+          {
             serverId,
             requestId: extra?.requestId,
             sessionId: extra?.sessionId,
             requestInfo: extra?.requestInfo,
             hasAuthInfo: !!extra?.authInfo,
             hasSendRequest: typeof extra?.sendRequest === 'function',
-            hasSendNotification: typeof extra?.sendNotification === 'function'
-          }, 'Server requested sampling');
+            hasSendNotification: typeof extra?.sendNotification === 'function',
+          },
+          'Server requested sampling',
+        );
 
-          // Extract proxyContext from _meta
-          const proxyContext = request.params._meta?.proxyContext as ProxyContext | undefined;
+        // Extract proxyContext from _meta
+        const proxyContext = request.params._meta?.proxyContext as ProxyContext | undefined;
 
-          if (!proxyContext || !proxyContext.proxyRequestId) {
-            this.logger.error({
+        if (!proxyContext || !proxyContext.proxyRequestId) {
+          this.logger.error(
+            {
               serverId,
               requestId: extra?.requestId,
-              params: request.params
-            }, '[CRITICAL] No proxyContext in sampling request');
-            throw new McpError(
-              ErrorCode.InvalidRequest,
-              'Missing proxyContext for sampling request routing'
-            );
-          }
-
-          return router.handleSamplingRequest(serverId, request, proxyContext);
+              params: request.params,
+            },
+            '[CRITICAL] No proxyContext in sampling request',
+          );
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            'Missing proxyContext for sampling request routing',
+          );
         }
-      );
+
+        return router.handleSamplingRequest(serverId, request, proxyContext);
+      });
     }
 
     if (this.clientOptions.capabilities?.roots) {
       // Register Roots list request handler
-      client.setRequestHandler(
-        ListRootsRequestSchema,
-        async (request, extra) => {
-          this.logger.debug({
-            serverId,
-            requestId: extra?.requestId,
-            sessionId: extra?.sessionId,
-            requestInfo: extra?.requestInfo
-          }, 'Server requested roots list');
-
-          // Extract proxyContext from _meta
-          const proxyContext = request.params?._meta?.proxyContext as ProxyContext | undefined;
-
-          if (!proxyContext || !proxyContext.proxyRequestId) {
-            this.logger.error({
-              serverId,
-              requestId: extra?.requestId,
-              params: request.params
-            }, '[CRITICAL] No proxyContext in roots list request');
-            throw new McpError(
-              ErrorCode.InvalidRequest,
-              'Missing proxyContext for roots list request routing'
-            );
-          }
-
-          return router.handleRootsListRequest(serverId, request, proxyContext);
-        }
-      );
-    }
-
-    if (this.clientOptions.capabilities?.elicitation) {
-      // Register Elicitation request handler
-      client.setRequestHandler(
-        ElicitRequestSchema,
-        async (request, extra) => {
-          this.logger.debug({
+      client.setRequestHandler(ListRootsRequestSchema, async (request, extra) => {
+        this.logger.debug(
+          {
             serverId,
             requestId: extra?.requestId,
             sessionId: extra?.sessionId,
             requestInfo: extra?.requestInfo,
-            params: request.params
-          }, 'Server requested user input');
-  
-          // Extract proxyContext from _meta
-          const proxyContext = request.params._meta?.proxyContext as ProxyContext | undefined;
-  
-          if (!proxyContext || !proxyContext.proxyRequestId) {
-            this.logger.error({
+          },
+          'Server requested roots list',
+        );
+
+        // Extract proxyContext from _meta
+        const proxyContext = request.params?._meta?.proxyContext as ProxyContext | undefined;
+
+        if (!proxyContext || !proxyContext.proxyRequestId) {
+          this.logger.error(
+            {
               serverId,
               requestId: extra?.requestId,
-              params: request.params
-            }, '[CRITICAL] No proxyContext in elicitation request');
-            throw new McpError(
-              ErrorCode.InvalidRequest,
-              'Missing proxyContext for elicitation request routing'
-            );
-          }
-  
-          return router.handleElicitationRequest(serverId, request, proxyContext);
+              params: request.params,
+            },
+            '[CRITICAL] No proxyContext in roots list request',
+          );
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            'Missing proxyContext for roots list request routing',
+          );
         }
-      );
+
+        return router.handleRootsListRequest(serverId, request, proxyContext);
+      });
+    }
+
+    if (this.clientOptions.capabilities?.elicitation) {
+      // Register Elicitation request handler
+      client.setRequestHandler(ElicitRequestSchema, async (request, extra) => {
+        this.logger.debug(
+          {
+            serverId,
+            requestId: extra?.requestId,
+            sessionId: extra?.sessionId,
+            requestInfo: extra?.requestInfo,
+            params: request.params,
+          },
+          'Server requested user input',
+        );
+
+        // Extract proxyContext from _meta
+        const proxyContext = request.params._meta?.proxyContext as ProxyContext | undefined;
+
+        if (!proxyContext || !proxyContext.proxyRequestId) {
+          this.logger.error(
+            {
+              serverId,
+              requestId: extra?.requestId,
+              params: request.params,
+            },
+            '[CRITICAL] No proxyContext in elicitation request',
+          );
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            'Missing proxyContext for elicitation request routing',
+          );
+        }
+
+        return router.handleElicitationRequest(serverId, request, proxyContext);
+      });
     }
 
     this.logger.info({ serverId }, 'Reverse request handlers registered');
-    
+
     // Register cancellation notification handler from server
     client.setNotificationHandler(
       CancelledNotificationSchema,
       async (notification: CancelledNotification) => {
-        this.logger.debug({ serverId, requestId: notification.params.requestId }, 'Server sent cancellation');
+        this.logger.debug(
+          { serverId, requestId: notification.params.requestId },
+          'Server sent cancellation',
+        );
 
         // Extract sessionId from proxyRequestId (format: "sessionId:originalId:timestamp")
         const proxyRequestId = String(notification.params.requestId);
@@ -1865,14 +2035,17 @@ export class ServerManager {
             // Forward cancellation notification to client
             await proxySession.forwardCancellationToClient(notification);
           } catch (error) {
-            this.logger.error({ error, serverId, sessionId }, 'Failed to forward cancellation from server');
+            this.logger.error(
+              { error, serverId, sessionId },
+              'Failed to forward cancellation from server',
+            );
           }
         } else {
           this.logger.warn({ sessionId }, 'No ProxySession found for sessionId');
         }
-      }
+      },
     );
-    
+
     // Register progress notification handler from server
     client.setNotificationHandler(
       ProgressNotificationSchema,
@@ -1895,12 +2068,15 @@ export class ServerManager {
             // Forward progress notification to client
             await proxySession.forwardProgressToClient(notification);
           } catch (error) {
-            this.logger.error({ error, serverId, sessionId }, 'Failed to forward progress from server');
+            this.logger.error(
+              { error, serverId, sessionId },
+              'Failed to forward progress from server',
+            );
           }
         } else {
           this.logger.warn({ sessionId }, 'No ProxySession found for sessionId');
         }
-      }
+      },
     );
 
     client.setNotificationHandler(
@@ -1909,16 +2085,21 @@ export class ServerManager {
         this.logger.debug({ serverId }, 'Server sent resource updated notification');
 
         router.handleResourceUpdated(serverId, notification);
-      }
+      },
     );
   }
 
-  async notifyUsersOfServerChange(serverId: string, affectedSessions: ClientSession[], changeType: string, changed: { toolsChanged: boolean, resourcesChanged: boolean, promptsChanged: boolean }): Promise<void> {
+  async notifyUsersOfServerChange(
+    serverId: string,
+    affectedSessions: ClientSession[],
+    changeType: string,
+    changed: { toolsChanged: boolean; resourcesChanged: boolean; promptsChanged: boolean },
+  ): Promise<void> {
     try {
       this.logger.info({ serverId, changeType, changed }, 'Notifying users of server change');
-      
+
       socketNotifier.notifyUserPermissionChangedByServer(serverId);
-      
+
       if (affectedSessions.length === 0) {
         this.logger.debug({ serverId }, 'No affected sessions for server');
         return;
@@ -1939,15 +2120,20 @@ export class ServerManager {
           if (changed.promptsChanged) {
             session.sendPromptListChanged();
           }
-        }
-        catch (error) {
+        } catch (error) {
           this.logger.error({ error, sessionId: session.sessionId }, 'Failed to notify session');
         }
       }
 
-      this.logger.info({ serverId, changeType, sessionCount: affectedSessions.length }, 'Notified sessions about server change');
+      this.logger.info(
+        { serverId, changeType, sessionCount: affectedSessions.length },
+        'Notified sessions about server change',
+      );
     } catch (error) {
-      this.logger.error({ error, serverId, changeType, changed }, 'Failed to notify users of server change');
+      this.logger.error(
+        { error, serverId, changeType, changed },
+        'Failed to notify users of server change',
+      );
     }
   }
 
@@ -1966,7 +2152,7 @@ export class ServerManager {
         results[server.serverId] = ServerStatus.Offline;
       }
     }
-    
+
     return results;
   }
 
@@ -1975,14 +2161,19 @@ export class ServerManager {
     const servers = await this.getAllServers();
     for (const server of servers) {
       if (server.allowUserInput) {
-        const contexts = Array.from(this.temporaryServers.values()).filter((context) => context.serverEntity.serverId === server.serverId);
+        const contexts = Array.from(this.temporaryServers.values()).filter(
+          (context) => context.serverEntity.serverId === server.serverId,
+        );
         if (contexts.length > 0) {
           const statusCount: { [key: string]: number } = {};
           for (const context of contexts) {
-            statusCount[context.status.toString()] = (statusCount[context.status.toString()] || 0) + 1;
+            statusCount[context.status.toString()] =
+              (statusCount[context.status.toString()] || 0) + 1;
           }
-          results[server.serverName] = Object.entries(statusCount).map(([status, count]) => `${ServerStatus[Number.parseInt(status)]}(${count})`).join(", ");
-        } else {  
+          results[server.serverName] = Object.entries(statusCount)
+            .map(([status, count]) => `${ServerStatus[Number.parseInt(status)]}(${count})`)
+            .join(', ');
+        } else {
           results[server.serverName] = ServerStatus[ServerStatus.Offline];
         }
       } else {
@@ -1995,10 +2186,10 @@ export class ServerManager {
         }
       }
     }
-    
+
     return results;
   }
-  
+
   /**
    * Aggregate resource subscription (reference counting)
    *
@@ -2006,7 +2197,12 @@ export class ServerManager {
    * @param resourceUri Original resource URI (without prefix)
    * @param sessionId Session ID
    */
-  async subscribeResource(serverId: string, resourceUri: string, sessionId: string, userId: string): Promise<void> {
+  async subscribeResource(
+    serverId: string,
+    resourceUri: string,
+    sessionId: string,
+    userId: string,
+  ): Promise<void> {
     const subscriptionKey = `${serverId}::${resourceUri}`;
     this.logger.debug({ subscriptionKey, sessionId }, 'Subscribe request');
 
@@ -2021,7 +2217,7 @@ export class ServerManager {
     if (!state) {
       state = {
         subscribedSessions: new Set(),
-        downstreamSubscribed: false
+        downstreamSubscribed: false,
       };
       this.resourceSubscriptions.set(subscriptionKey, state);
     }
@@ -2043,11 +2239,9 @@ export class ServerManager {
 
       try {
         // Send subscription request to downstream
-        await serverContext.connection.subscribeResource(
-          {
-            uri: resourceUri
-          }
-        );
+        await serverContext.connection.subscribeResource({
+          uri: resourceUri,
+        });
 
         state.downstreamSubscribed = true;
         this.logger.info({ subscriptionKey }, 'Subscribed to downstream resource');
@@ -2061,7 +2255,10 @@ export class ServerManager {
       }
     }
 
-    this.logger.info({ subscriptionKey, subscriberCount: state.subscribedSessions.size }, 'Subscription successful');
+    this.logger.info(
+      { subscriptionKey, subscriberCount: state.subscribedSessions.size },
+      'Subscription successful',
+    );
   }
 
   /**
@@ -2071,7 +2268,12 @@ export class ServerManager {
    * @param resourceUri Original resource URI (without prefix)
    * @param sessionId Session ID
    */
-  async unsubscribeResource(serverId: string, resourceUri: string, sessionId: string, userId: string): Promise<void> {
+  async unsubscribeResource(
+    serverId: string,
+    resourceUri: string,
+    sessionId: string,
+    userId: string,
+  ): Promise<void> {
     const subscriptionKey = `${serverId}::${resourceUri}`;
     this.logger.debug({ subscriptionKey, sessionId }, 'Unsubscribe request');
 
@@ -2090,15 +2292,16 @@ export class ServerManager {
       if (serverContext && serverContext.connection) {
         try {
           // Send unsubscription request to downstream
-          await serverContext.connection.unsubscribeResource(
-            {
-              uri: resourceUri
-            }
-          );
+          await serverContext.connection.unsubscribeResource({
+            uri: resourceUri,
+          });
 
           this.logger.info({ subscriptionKey }, 'Unsubscribed from downstream resource');
         } catch (error) {
-          this.logger.error({ error, subscriptionKey }, 'Failed to unsubscribe from downstream resource');
+          this.logger.error(
+            { error, subscriptionKey },
+            'Failed to unsubscribe from downstream resource',
+          );
         }
       }
 
@@ -2106,7 +2309,10 @@ export class ServerManager {
       this.resourceSubscriptions.delete(subscriptionKey);
     }
 
-    this.logger.info({ subscriptionKey, remainingSubscribers: state.subscribedSessions.size }, 'Unsubscription successful');
+    this.logger.info(
+      { subscriptionKey, remainingSubscribers: state.subscribedSessions.size },
+      'Unsubscription successful',
+    );
   }
 
   /**
@@ -2135,13 +2341,16 @@ export class ServerManager {
         // Parse subscriptionKey
         const [serverId, resourceUri] = subscriptionKey.split('::', 2);
         unsubscribePromises.push(
-          this.unsubscribeResource(serverId, resourceUri, sessionId, userId)
+          this.unsubscribeResource(serverId, resourceUri, sessionId, userId),
         );
       }
     }
 
     await Promise.all(unsubscribePromises);
-    this.logger.info({ sessionId, subscriptionCount: unsubscribePromises.length }, 'Cleaned up subscriptions for session');
+    this.logger.info(
+      { sessionId, subscriptionCount: unsubscribePromises.length },
+      'Cleaned up subscriptions for session',
+    );
   }
 
   /**
@@ -2157,12 +2366,14 @@ export class ServerManager {
       });
     });
 
-    const closeTemporaryPromises = Array.from(this.temporaryServers.values()).map(async (context) => {
-      await this.disconnectServerContext(context, ServerStatus.Offline, {
-        serverName: context.serverEntity.serverName,
-        userId: context.userId,
-      });
-    });
+    const closeTemporaryPromises = Array.from(this.temporaryServers.values()).map(
+      async (context) => {
+        await this.disconnectServerContext(context, ServerStatus.Offline, {
+          serverName: context.serverEntity.serverName,
+          userId: context.userId,
+        });
+      },
+    );
 
     await Promise.all([...closePromises, ...closeTemporaryPromises]);
     this.serverContexts.clear();
@@ -2211,7 +2422,7 @@ export class ServerManager {
       // Establish connection
       await this.createServerConnection(serverContext, token);
     }
-    
+
     this.logger.info({ internalKey, status: serverContext.status }, 'Temporary server created');
     return serverContext;
   }
@@ -2233,7 +2444,9 @@ export class ServerManager {
    * @returns ServerContext[]
    */
   getTemporaryServers(serverId: string): ServerContext[] {
-    return Array.from(this.temporaryServers.values()).filter((context) => context.serverEntity.serverId === serverId);
+    return Array.from(this.temporaryServers.values()).filter(
+      (context) => context.serverEntity.serverId === serverId,
+    );
   }
 
   /**
@@ -2243,7 +2456,9 @@ export class ServerManager {
    * @returns ServerContext or undefined
    */
   getTemporaryServerContextByID(id: string, userId: string): ServerContext | undefined {
-    return Array.from(this.temporaryServers.values()).find((context) => context.id === id && context.userId === userId);
+    return Array.from(this.temporaryServers.values()).find(
+      (context) => context.id === id && context.userId === userId,
+    );
   }
 
   /**
@@ -2320,7 +2535,7 @@ export class ServerManager {
           this.temporaryServers.delete(key);
           this.temporaryServerLoggers.delete(key);
         }
-      })
+      }),
     );
 
     this.logger.info({ userId }, 'All temporary servers closed for user');
@@ -2357,7 +2572,7 @@ export class ServerManager {
           this.temporaryServers.delete(key);
           this.temporaryServerLoggers.delete(key);
         }
-      })
+      }),
     );
 
     this.logger.info({ serverId }, 'All temporary servers closed for template');
@@ -2406,12 +2621,16 @@ export class ServerManager {
     }
 
     this.logger.debug(
-      { containerMount: CORE_CONTAINER_SKILLS_MOUNT, childMount: CHILD_CONTAINER_SKILLS_MOUNT, hostSkillsDir },
-      'Rewriting skills volume mount paths to host-absolute paths'
+      {
+        containerMount: CORE_CONTAINER_SKILLS_MOUNT,
+        childMount: CHILD_CONTAINER_SKILLS_MOUNT,
+        hostSkillsDir,
+      },
+      'Rewriting skills volume mount paths to host-absolute paths',
     );
 
     launchConfig.args = (launchConfig.args as string[]).map((arg) =>
-      this.rewriteSkillsVolumeArg(arg, CHILD_CONTAINER_SKILLS_MOUNT, hostSkillsDir)
+      this.rewriteSkillsVolumeArg(arg, CHILD_CONTAINER_SKILLS_MOUNT, hostSkillsDir),
     );
   }
 
@@ -2425,7 +2644,7 @@ export class ServerManager {
   private rewriteSkillsVolumeArg(
     arg: string,
     childContainerSkillsDir: string,
-    hostSkillsDir: string
+    hostSkillsDir: string,
   ): string {
     // Volume specs always contain at least one colon
     if (!arg.includes(':')) {

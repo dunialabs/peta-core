@@ -20,6 +20,7 @@ import { CloudflaredHandler } from './handlers/CloudflaredHandler.js';
 import { SkillsHandler } from './handlers/SkillsHandler.js';
 import { PolicyHandler } from './handlers/PolicyHandler.js';
 import { ApprovalHandler } from './handlers/ApprovalHandler.js';
+import { DiscoveryHandler } from './handlers/DiscoveryHandler.js';
 import { CacheHandler } from './handlers/CacheHandler.js';
 import { UserRole } from '../types/enums.js';
 import { createLogger } from '../logger/index.js';
@@ -42,6 +43,7 @@ export class ConfigController {
   private skillsHandler: SkillsHandler;
   private policyHandler: PolicyHandler;
   private approvalHandler: ApprovalHandler;
+  private discoveryHandler: DiscoveryHandler;
   private cacheHandler: CacheHandler;
 
   // Logger for ConfigController
@@ -60,6 +62,7 @@ export class ConfigController {
     this.skillsHandler = new SkillsHandler();
     this.policyHandler = new PolicyHandler();
     this.approvalHandler = new ApprovalHandler();
+    this.discoveryHandler = new DiscoveryHandler();
     this.cacheHandler = new CacheHandler();
   }
 
@@ -387,39 +390,6 @@ export class ConfigController {
           break;
         case AdminActionType.CACHE_PURGE_EXACT:
           result = await this.cacheHandler.handlePurgeExact(adminRequest);
-          
-        // ==================== Policy Operations (9100-9199) ====================
-        case AdminActionType.CREATE_POLICY_SET:
-          result = await this.policyHandler.handleCreatePolicySet(adminRequest);
-          break;
-        case AdminActionType.GET_POLICY_SETS:
-          result = await this.policyHandler.handleGetPolicySets(adminRequest);
-          break;
-        case AdminActionType.UPDATE_POLICY_SET:
-          result = await this.policyHandler.handleUpdatePolicySet(adminRequest);
-          break;
-        case AdminActionType.DELETE_POLICY_SET:
-          result = await this.policyHandler.handleDeletePolicySet(adminRequest);
-          break;
-        case AdminActionType.GET_EFFECTIVE_POLICY:
-          result = await this.policyHandler.handleGetEffectivePolicy(adminRequest);
-          break;
-
-        // ==================== Approval Operations (9200-9299) ====================
-        case AdminActionType.LIST_APPROVAL_REQUESTS:
-          result = await this.approvalHandler.handleListApprovalRequests(adminRequest);
-          break;
-        case AdminActionType.GET_APPROVAL_REQUEST:
-          result = await this.approvalHandler.handleGetApprovalRequest(adminRequest);
-          break;
-        case AdminActionType.DECIDE_APPROVAL_REQUEST:
-          result = await this.approvalHandler.handleDecideApprovalRequest(
-            adminRequest,
-            req.authContext,
-          );
-          break;
-        case AdminActionType.GET_PENDING_APPROVALS_COUNT:
-          result = await this.approvalHandler.handleGetPendingApprovalsCount(adminRequest);
           break;
 
         // ==================== Policy Operations (9100-9199) ====================
@@ -454,6 +424,38 @@ export class ConfigController {
           break;
         case AdminActionType.GET_PENDING_APPROVALS_COUNT:
           result = await this.approvalHandler.handleGetPendingApprovalsCount(adminRequest);
+          break;
+
+        // ==================== Progressive Disclosure Operations (9300-9399) ====================
+        case AdminActionType.GET_DISCOVERY_CONFIG:
+          result = await this.discoveryHandler.handleGetConfig();
+          break;
+        case AdminActionType.SET_DISCOVERY_CONFIG:
+          result = await this.discoveryHandler.handleSetConfig(adminRequest);
+          break;
+        case AdminActionType.CREATE_DISCOVERY_PROFILE:
+          result = await this.discoveryHandler.handleCreateProfile(adminRequest);
+          break;
+        case AdminActionType.GET_DISCOVERY_PROFILES:
+          result = await this.discoveryHandler.handleGetProfiles();
+          break;
+        case AdminActionType.GET_DISCOVERY_PROFILE:
+          result = await this.discoveryHandler.handleGetProfile(adminRequest);
+          break;
+        case AdminActionType.UPDATE_DISCOVERY_PROFILE:
+          result = await this.discoveryHandler.handleUpdateProfile(adminRequest);
+          break;
+        case AdminActionType.DELETE_DISCOVERY_PROFILE:
+          result = await this.discoveryHandler.handleDeleteProfile(adminRequest);
+          break;
+        case AdminActionType.PREVIEW_DISCOVERY:
+          result = await this.discoveryHandler.handlePreviewDiscovery(adminRequest);
+          break;
+        case AdminActionType.REINDEX_CATALOG:
+          result = await this.discoveryHandler.handleReindexCatalog();
+          break;
+        case AdminActionType.GET_CATALOG_STATS:
+          result = await this.discoveryHandler.handleGetCatalogStats();
           break;
 
         default: {
