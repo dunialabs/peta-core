@@ -14,11 +14,14 @@ export const RESERVED_CATALOG_TOOLS: ReadonlySet<string> = new Set(
   Object.values(CATALOG_TOOL_NAMES),
 );
 
+export type CatalogRiskLevel = 'low' | 'medium' | 'high' | 'critical';
+export type DirectExposureRiskLevel = 'low' | 'high';
+
 export interface CatalogSearchInput {
   query: string;
   profileId?: string;
   serverIds?: string[];
-  riskMax?: 'low' | 'medium' | 'high' | 'critical';
+  riskMax?: CatalogRiskLevel;
   directCallableOnly?: boolean;
   detail?: 'summary';
   limit?: number;
@@ -75,17 +78,85 @@ export interface CatalogExecuteInput {
   expectedSchemaHash?: string | null;
 }
 
+export interface DiscoveryExposureRuleMatch {
+  serverIds?: string[];
+  riskLevels?: DirectExposureRiskLevel[];
+}
+
+export interface DiscoveryExposureRule {
+  match: DiscoveryExposureRuleMatch;
+  directCallable: boolean;
+}
+
 export interface DiscoveryProfileConfig {
-  directExposureRules?: Array<{
-    match: {
-      serverIds?: string[];
-      riskLevels?: string[];
-    };
-    directCallable: boolean;
-  }>;
+  directExposureRules?: DiscoveryExposureRule[];
 }
 
 export type ExposureRule = NonNullable<DiscoveryProfileConfig['directExposureRules']>[number];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isNonEmptyStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string' && item.length > 0);
+}
+
+function isDirectExposureRiskLevel(value: unknown): value is DirectExposureRiskLevel {
+  return value === 'low' || value === 'high';
+}
+
+function isDirectExposureRiskLevelArray(value: unknown): value is DirectExposureRiskLevel[] {
+  return Array.isArray(value) && value.every(isDirectExposureRiskLevel);
+}
+
+export function validateDiscoveryProfileConfig(config: unknown): string | null {
+  if (!isRecord(config)) {
+    return 'config must be a JSON object';
+  }
+
+  const { directExposureRules } = config;
+  if (directExposureRules === undefined) {
+    return null;
+  }
+
+  if (!Array.isArray(directExposureRules)) {
+    return 'config.directExposureRules must be an array';
+  }
+
+  for (let index = 0; index < directExposureRules.length; index += 1) {
+    const rawRule = directExposureRules[index];
+    const path = `config.directExposureRules[${index}]`;
+    if (!isRecord(rawRule)) {
+      return `${path} must be an object`;
+    }
+
+    if (!isRecord(rawRule.match)) {
+      return `${path}.match must be an object`;
+    }
+
+    if (typeof rawRule.directCallable !== 'boolean') {
+      return `${path}.directCallable must be a boolean`;
+    }
+
+    const { serverIds, riskLevels } = rawRule.match;
+    if (serverIds !== undefined && !isNonEmptyStringArray(serverIds)) {
+      return `${path}.match.serverIds must be a non-empty array of strings`;
+    }
+
+    if (riskLevels !== undefined && !isDirectExposureRiskLevelArray(riskLevels)) {
+      return `${path}.match.riskLevels must contain only "low" or "high"`;
+    }
+
+    const hasServerIds = Array.isArray(serverIds) && serverIds.length > 0;
+    const hasRiskLevels = Array.isArray(riskLevels) && riskLevels.length > 0;
+    if (!hasServerIds && !hasRiskLevels) {
+      return `${path}.match must include a non-empty serverIds or riskLevels array`;
+    }
+  }
+
+  return null;
+}
 
 /**
  * Evaluate exposure rules to determine if an action is directly callable.
@@ -105,19 +176,26 @@ export function evaluateExposureRules(
   for (const rule of rules) {
     const m = rule.match;
     if (!m || typeof m !== 'object') continue;
+
+    const serverIds = isNonEmptyStringArray(m.serverIds) ? m.serverIds : undefined;
+    const riskLevels = isDirectExposureRiskLevelArray(m.riskLevels) ? m.riskLevels : undefined;
+
     let hasCondition = false;
     let matched = true;
 
-    if (m.serverIds?.length) {
+    if (serverIds?.length) {
       hasCondition = true;
-      matched = matched && m.serverIds.includes(action.serverId);
+      matched = matched && serverIds.includes(action.serverId);
     }
-    if (m.riskLevels?.length) {
+    if (riskLevels?.length) {
       hasCondition = true;
-      matched = matched && !!action.riskLevel && m.riskLevels.includes(action.riskLevel);
+      matched =
+        matched &&
+        isDirectExposureRiskLevel(action.riskLevel) &&
+        riskLevels.includes(action.riskLevel);
     }
 
-    if (hasCondition && matched) return rule.directCallable;
+    if (hasCondition && matched && typeof rule.directCallable === 'boolean') return rule.directCallable;
   }
 
   return defaultValue;
@@ -125,7 +203,7 @@ export function evaluateExposureRules(
 
 export function inferDiscoveryRiskLevel(
   annotations: Record<string, unknown> | null | undefined,
-): string | null {
+): DirectExposureRiskLevel | null {
   if (annotations?.destructiveHint === true) {
     return 'high';
   }

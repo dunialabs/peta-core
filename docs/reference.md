@@ -179,7 +179,7 @@ When you need the exact executable surface for a user, trust the live session/ru
 Discovery profiles are named configurations that control tool visibility:
 
 - **Profile fields**: `name`, `description`, `mode`, `enabled`, `isDefault`, `config`, `instructionText`
-- **directExposureRules** (in `config`): Ordered rules evaluated against each tool's `serverId` and `riskLevel`. First match wins. Unmatched tools default to catalog-only.
+- **directExposureRules** (in `config`): Ordered rules evaluated against each tool's `serverId` and `riskLevel`. First match wins. Unmatched tools default to catalog-only. `riskLevels` currently supports `low` and `high`.
 - **instructionText**: Optional text injected into the AI client's context to explain the catalog workflow.
 
 Profiles are managed through the Admin API (9310-9314) and the Console UI (Progressive Disclosure page).

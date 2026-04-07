@@ -269,7 +269,7 @@ type DiscoveryProfileConfig = {
   directExposureRules?: Array<{
     match: {
       serverIds?: string[];
-      riskLevels?: string[];  // 'low' | 'medium' | 'high' | 'critical'
+      riskLevels?: Array<'low' | 'high'>;
     };
     directCallable: boolean;
   }>;
@@ -283,7 +283,7 @@ type DiscoveryProfileConfig = {
 - Rules with an empty or missing `match` object are skipped (they do not act as catch-all)
 - If no rule matches, the action defaults to catalog-only (not directly callable)
 - Only used in `HYBRID` mode; `FLAT` exposes everything, `STRICT` hides everything
-- **Risk level inference**: Currently only `low` (from `readOnlyHint`) and `high` (from `destructiveHint`) are auto-inferred from MCP annotations. `medium` and `critical` rules will not match unless a custom source populates them.
+- **Risk level inference**: `riskLevels` currently supports only `low` (from `readOnlyHint`) and `high` (from `destructiveHint`).
 
 **DangerLevel**
 

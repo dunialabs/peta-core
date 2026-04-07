@@ -8,6 +8,7 @@ import {
   DiscoveryProfileCreateInput,
   DiscoveryProfileUpdateInput,
   evaluateExposureRules,
+  validateDiscoveryProfileConfig,
 } from '../../types/discovery.types.js';
 import { createLogger } from '../../logger/index.js';
 import { DiscoveryProfileRepository } from '../../repositories/DiscoveryProfileRepository.js';
@@ -55,6 +56,13 @@ export class DiscoveryHandler {
     }
     if (!isDiscoveryMode(data.mode)) {
       throw new AdminError('Invalid field: mode', AdminErrorCode.INVALID_REQUEST);
+    }
+
+    if (data.config !== undefined) {
+      const configError = validateDiscoveryProfileConfig(data.config);
+      if (configError) {
+        throw new AdminError(`Invalid field: ${configError}`, AdminErrorCode.INVALID_REQUEST);
+      }
     }
 
     const created = await DiscoveryProfileRepository.create({
@@ -117,6 +125,13 @@ export class DiscoveryHandler {
 
     if (data.name !== undefined && typeof data.name === 'string' && data.name.trim() === '') {
       throw new AdminError('Profile name cannot be blank', AdminErrorCode.INVALID_REQUEST);
+    }
+
+    if (data.config !== undefined) {
+      const configError = validateDiscoveryProfileConfig(data.config);
+      if (configError) {
+        throw new AdminError(`Invalid field: ${configError}`, AdminErrorCode.INVALID_REQUEST);
+      }
     }
 
     const updated = await DiscoveryProfileRepository.update(data.id, {
