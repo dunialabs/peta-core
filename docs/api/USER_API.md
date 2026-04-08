@@ -463,7 +463,7 @@ _Example 4: CustomStdio Server (category=5) — user provides env overrides_
   - **How to decide input vs OAuth**:
     - `server.authType === 1 (ApiKey)` → user should input values for credentials (standard Template flow).
     - `server.authType > 1` → OAuth flow (see below). In practice, OAuth templates will include `template.oAuthConfig.deskClientId`.
-    - `ServerAuthType` reference: `1=ApiKey`, `2=GoogleAuth`, `3=NotionAuth`, `4=FigmaAuth`, `5=GoogleCalendarAuth`, `6=GithubAuth`, `7=ZendeskAuth`, `8=CanvasAuth`, `9=CanvaAuth`, `10=GmailAuth`, `11=GoogleDocsAuth`, `12=GoogleSheetsAuth`, `13=GoogleFormsAuth`, `14=PipedriveAuth`.
+    - `ServerAuthType` reference: `1=ApiKey`, `2=GoogleAuth`, `3=NotionAuth`, `4=FigmaAuth`, `5=GoogleCalendarAuth`, `6=GithubAuth`, `7=ZendeskAuth`, `8=CanvasAuth`, `9=CanvaAuth`, `10=GmailAuth`, `11=GoogleDocsAuth`, `12=GoogleSheetsAuth`, `13=GoogleFormsAuth`, `14=PipedriveAuth`, `15=HubSpotAuth`.
     - Google-family OAuth types (`GoogleAuth`, `GoogleCalendarAuth`, `GmailAuth`, `GoogleDocsAuth`, `GoogleSheetsAuth`, `GoogleFormsAuth`) all use the same Google OAuth flow.
 
   - **OAuth Template servers**:

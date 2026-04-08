@@ -16,6 +16,7 @@ import { zendeskAdapter } from './zendesk.js';
 import { canvasAdapter } from './canvas.js';
 import { canvaAdapter } from './canva.js';
 import { pipedriveAdapter } from './pipedrive.js';
+import { hubspotAdapter } from './hubspot.js';
 
 /**
  * Map of provider names to their adapters
@@ -30,6 +31,7 @@ const providers: Map<string, ProviderAdapter> = new Map([
   ['canvas', canvasAdapter],
   ['canva', canvaAdapter],
   ['pipedrive', pipedriveAdapter],
+  ['hubspot', hubspotAdapter],
 ]);
 
 /**

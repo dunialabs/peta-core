@@ -245,6 +245,8 @@ export class AuthUtils {
         return 'zendesk';
       case ServerAuthType.PipedriveAuth:
         return 'pipedrive';
+      case ServerAuthType.HubSpotAuth:
+        return 'hubspot';
       case ServerAuthType.ApiKey:
         return undefined;
       default:

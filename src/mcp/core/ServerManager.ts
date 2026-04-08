@@ -494,6 +494,7 @@ export class ServerManager {
       case ServerAuthType.FigmaAuth:
       case ServerAuthType.GithubAuth:
       case ServerAuthType.CanvaAuth:
+      case ServerAuthType.HubSpotAuth:
         launchConfig.env = {
           ...launchConfig.env,
           accessToken: accessToken,
@@ -1483,6 +1484,7 @@ export class ServerManager {
       case ServerAuthType.CanvaAuth:
       case ServerAuthType.ZendeskAuth:
       case ServerAuthType.PipedriveAuth:
+      case ServerAuthType.HubSpotAuth:
         serverContext.userToken = token;
         await this.initializeOAuthWithRefresh(serverContext, launchConfig);
         break;

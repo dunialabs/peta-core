@@ -36,6 +36,8 @@ Typical responsibilities inside the gateway include:
 - Streaming responses back to clients via MCP and/or Socket.IO.
 - Emitting structured logs and audit records for each operation.
 
+For downstream OAuth-backed Template servers, the gateway also acts as a token broker: it exchanges authorization codes, stores the full OAuth state encrypted at rest, refreshes access tokens server-side, removes `launchConfig.oauth` before process launch, and injects only the runtime access token into the downstream MCP server environment.
+
 ---
 
 ## Project Structure

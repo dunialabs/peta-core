@@ -239,6 +239,7 @@ interface AdminResponse<T = any> {
 - `12` GoogleSheetsAuth
 - `13` GoogleFormsAuth
 - `14` PipedriveAuth
+- `15` HubSpotAuth
 
 
 **ServerStatus**
