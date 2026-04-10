@@ -463,7 +463,7 @@ _Example 4: CustomStdio Server (category=5) — user provides env overrides_
   - **How to decide input vs OAuth**:
     - `server.authType === 1 (ApiKey)` → user should input values for credentials (standard Template flow).
     - `server.authType > 1` → OAuth flow (see below). In practice, OAuth templates will include `template.oAuthConfig.deskClientId`.
-    - `ServerAuthType` reference: `1=ApiKey`, `2=GoogleAuth`, `3=NotionAuth`, `4=FigmaAuth`, `5=GoogleCalendarAuth`, `6=GithubAuth`, `7=ZendeskAuth`, `8=CanvasAuth`, `9=CanvaAuth`, `10=GmailAuth`, `11=GoogleDocsAuth`, `12=GoogleSheetsAuth`, `13=GoogleFormsAuth`, `14=PipedriveAuth`, `15=HubSpotAuth`.
+    - `ServerAuthType` reference: `1=ApiKey`, `2=GoogleAuth`, `3=NotionAuth`, `4=FigmaAuth`, `5=GoogleCalendarAuth`, `6=GithubAuth`, `7=ZendeskAuth`, `8=CanvasAuth`, `9=CanvaAuth`, `10=GmailAuth`, `11=GoogleDocsAuth`, `12=GoogleSheetsAuth`, `13=GoogleFormsAuth`, `14=PipedriveAuth`, `15=HubSpotAuth`, `16=IntercomAuth`.
     - Google-family OAuth types (`GoogleAuth`, `GoogleCalendarAuth`, `GmailAuth`, `GoogleDocsAuth`, `GoogleSheetsAuth`, `GoogleFormsAuth`) all use the same Google OAuth flow.
 
   - **OAuth Template servers**:
@@ -536,6 +536,7 @@ _Example 4: CustomStdio Server (category=5) — user provides env overrides_
    - If `template.oAuthConfig.deskClientId` exists, skip placeholder replacement and:
      - Read `YOUR_OAUTH_CODE` and `YOUR_OAUTH_REDIRECT_URL` from `authConf`
      - Exchange authorization code for tokens
+     - Intercom templates also call `/me` with the new access token and persist `oauth.intercomRegion`
    - Handle OAuth expiration dates dynamically (Notion: 30 days, Figma: 90 days)
 
    **For CustomRemote Servers (category=2)**:

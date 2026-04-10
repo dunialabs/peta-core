@@ -247,6 +247,8 @@ export class AuthUtils {
         return 'pipedrive';
       case ServerAuthType.HubSpotAuth:
         return 'hubspot';
+      case ServerAuthType.IntercomAuth:
+        return 'intercom';
       case ServerAuthType.ApiKey:
         return undefined;
       default:

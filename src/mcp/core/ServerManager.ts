@@ -43,6 +43,7 @@ import { createLogger } from '../../logger/index.js';
 import * as path from 'path';
 import { resolveHostPath } from '../../utils/DockerHostPathResolver.js';
 import { customStdioRunnerService } from './CustomStdioRunnerService.js';
+import { IntercomInvalidTokenError } from '../auth/IntercomTokenHelper.js';
 import {
   createConnectionStartupDiagnostics,
   formatConnectionDiagnosticError,
@@ -230,6 +231,54 @@ export class ServerManager {
     } catch (error) {
       this.logger.error({ error, ...logContext }, 'Error closing server connection');
     }
+  }
+
+  private async clearIntercomOAuthState(serverContext: ServerContext): Promise<void> {
+    const clearedOAuthConfig = {
+      accessToken: undefined,
+      refreshToken: undefined,
+      expiresAt: undefined,
+      intercomRegion: undefined,
+    };
+
+    if (serverContext.userId) {
+      await this.updateUserLaunchConfig(serverContext, clearedOAuthConfig);
+      return;
+    }
+
+    await this.updateServerLaunchConfig(serverContext, clearedOAuthConfig);
+  }
+
+  async handleInvalidIntercomToken(
+    serverContext: ServerContext,
+    reason?: string,
+  ): Promise<void> {
+    this.logger.warn(
+      {
+        serverId: serverContext.serverID,
+        serverName: serverContext.serverEntity.serverName,
+        userId: serverContext.userId,
+        allowUserInput: serverContext.serverEntity.allowUserInput,
+        reason,
+      },
+      'Intercom token invalid, clearing persisted OAuth state',
+    );
+
+    await this.clearIntercomOAuthState(serverContext);
+
+    if (serverContext.serverEntity.allowUserInput) {
+      if (serverContext.userId) {
+        await this.closeTemporaryServer(serverContext.serverID, serverContext.userId);
+      } else {
+        await this.disconnectServerContext(serverContext, ServerStatus.Offline, {
+          serverId: serverContext.serverID,
+        });
+      }
+      return;
+    }
+
+    await ServerRepository.disable(serverContext.serverID);
+    await this.removeServer(serverContext.serverID);
   }
 
   private async restoreManagedServerContext(serverId: string): Promise<ServerContext | undefined> {
@@ -495,10 +544,21 @@ export class ServerManager {
       case ServerAuthType.GithubAuth:
       case ServerAuthType.CanvaAuth:
       case ServerAuthType.HubSpotAuth:
+      case ServerAuthType.IntercomAuth:
         launchConfig.env = {
           ...launchConfig.env,
           accessToken: accessToken,
         };
+        if (authType === ServerAuthType.IntercomAuth) {
+          const intercomRegion = launchConfig.oauth?.intercomRegion;
+          if (!intercomRegion || typeof intercomRegion !== 'string') {
+            throw new Error(
+              '[ServerManager] Missing intercomRegion for server auth type IntercomAuth',
+            );
+          }
+
+          launchConfig.env.intercomRegion = intercomRegion;
+        }
         break;
 
       case ServerAuthType.ZendeskAuth: {
@@ -1456,7 +1516,11 @@ export class ServerManager {
     const usePetaOauthConfig = serverContext.serverEntity.usePetaOauthConfig;
 
     // For testing the temporary block
-    if (usePetaOauthConfig && serverContext.serverEntity.authType !== ServerAuthType.ApiKey) {
+    if (
+      usePetaOauthConfig &&
+      serverContext.serverEntity.authType !== ServerAuthType.ApiKey &&
+      serverContext.serverEntity.authType !== ServerAuthType.IntercomAuth
+    ) {
       const initialToken = await this.initializePetaAuth(serverContext, launchConfig, token);
       this.injectOAuthTokenEnv(authType, launchConfig, initialToken);
       delete launchConfig.oauth;
@@ -1485,6 +1549,7 @@ export class ServerManager {
       case ServerAuthType.ZendeskAuth:
       case ServerAuthType.PipedriveAuth:
       case ServerAuthType.HubSpotAuth:
+      case ServerAuthType.IntercomAuth:
         serverContext.userToken = token;
         await this.initializeOAuthWithRefresh(serverContext, launchConfig);
         break;
@@ -1542,6 +1607,24 @@ export class ServerManager {
       );
     }
 
+    if (
+      authType === ServerAuthType.IntercomAuth &&
+      (!launchConfig.oauth.accessToken || typeof launchConfig.oauth.accessToken !== 'string')
+    ) {
+      throw new Error(
+        `[ServerManager] Missing OAuth accessToken for server ${serverContext.serverID} (IntercomAuth)`,
+      );
+    }
+
+    if (
+      authType === ServerAuthType.IntercomAuth &&
+      (!launchConfig.oauth.intercomRegion || typeof launchConfig.oauth.intercomRegion !== 'string')
+    ) {
+      throw new Error(
+        `[ServerManager] Missing OAuth intercomRegion for server ${serverContext.serverID} (IntercomAuth)`,
+      );
+    }
+
     // 2. Create authentication strategy
     const authStrategy = AuthStrategyFactory.create(
       serverContext.serverEntity.authType,
@@ -1555,7 +1638,15 @@ export class ServerManager {
     }
 
     // 3. Start token refresh and get initial token
-    const initialToken = await serverContext.startTokenRefresh(authStrategy);
+    let initialToken: string;
+    try {
+      initialToken = await serverContext.startTokenRefresh(authStrategy);
+    } catch (error) {
+      if (error instanceof IntercomInvalidTokenError) {
+        await this.handleInvalidIntercomToken(serverContext, error.message);
+      }
+      throw error;
+    }
 
     // 4. Inject access token into environment variables (don't pass OAuth config)
     this.injectOAuthTokenEnv(serverContext.serverEntity.authType, launchConfig, initialToken);

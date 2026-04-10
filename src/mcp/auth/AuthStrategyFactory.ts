@@ -8,6 +8,7 @@ import { CanvaAuthStrategy } from './CanvaAuthStrategy.js';
 import { ZendeskAuthStrategy } from './ZendeskAuthStrategy.js';
 import { PipedriveAuthStrategy } from './PipedriveAuthStrategy.js';
 import { HubSpotAuthStrategy } from './HubSpotAuthStrategy.js';
+import { IntercomAuthStrategy } from './IntercomAuthStrategy.js';
 import { createLogger } from '../../logger/index.js';
 
 // Logger for AuthStrategyFactory
@@ -108,6 +109,16 @@ export class AuthStrategyFactory {
           refreshToken: config.refreshToken,
           accessToken: config.accessToken,
           expiresAt: config.expiresAt,
+        });
+
+      case ServerAuthType.IntercomAuth:
+        return new IntercomAuthStrategy({
+          clientId: config.clientId,
+          clientSecret: config.clientSecret,
+          refreshToken: config.refreshToken,
+          accessToken: config.accessToken,
+          expiresAt: config.expiresAt,
+          intercomRegion: config.intercomRegion,
         });
 
       case ServerAuthType.ApiKey:

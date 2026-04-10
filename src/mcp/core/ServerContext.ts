@@ -9,6 +9,7 @@ import { IAuthStrategy, TokenInfo } from '../auth/IAuthStrategy.js';
 import { createLogger } from '../../logger/index.js';
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ServerManager } from "./ServerManager.js";
+import { IntercomInvalidTokenError } from '../auth/IntercomTokenHelper.js';
 
 /**
  * Downstream Server context object
@@ -396,6 +397,18 @@ export class ServerContext {
       this.scheduleNextRefresh();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+
+      if (error instanceof IntercomInvalidTokenError) {
+        this.logger.fatal({
+          error,
+          serverName: this.serverEntity.serverName,
+          errorMessage,
+        }, 'Intercom token invalid - clearing OAuth configuration and disconnecting server');
+
+        this.lastError = errorMessage;
+        await ServerManager.instance.handleInvalidIntercomToken(this, errorMessage);
+        return;
+      }
 
       // Check if it's an OAuth authentication error (401/400)
       // These errors usually mean refresh token has expired, been revoked, or configuration is wrong

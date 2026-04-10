@@ -36,6 +36,7 @@ Peta Core handles two distinct OAuth-related concerns:
 
 - **Gateway OAuth 2.0 access tokens (JWT).** Used by MCP clients to authenticate to the `/mcp` gateway. These are issued by Peta Core and can be revoked server-side.
 - **Downstream connector OAuth credentials (third-party providers).** Used by downstream MCP servers to call external APIs. Peta Core stores the full OAuth configuration encrypted at rest (including refresh tokens where applicable), refreshes access tokens server-side, and injects only access tokens into the downstream runtime.
+- Some providers do not issue refresh tokens. Intercom is handled as a long-lived access token plus provider metadata (`intercomRegion`), with runtime validity checks against Intercom's `/me` endpoint instead of refresh-token rotation.
 
 The Admin API (`/admin`) and Socket.IO (`/socket.io`) currently authenticate using Peta access tokens (opaque bearer tokens) validated against the user database.
 

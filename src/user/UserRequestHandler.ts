@@ -29,6 +29,10 @@ import {
 import { AuthUtils } from '../utils/AuthUtils.js';
 import { exchangeAuthorizationCode } from '../mcp/oauth/exchange.js';
 import { PETA_AUTH_CONFIG } from '../config/petaAuthConfig.js';
+import {
+  fetchIntercomTokenMetadata,
+  INTERCOM_FAKE_REFRESH_TOKEN,
+} from '../mcp/auth/IntercomTokenHelper.js';
 
 export class UserRequestHandler {
   private logger = createLogger('UserRequestHandler');
@@ -301,7 +305,10 @@ export class UserRequestHandler {
             throw new UserError('Invalid OAuth provider', UserErrorCode.SERVER_CONFIG_INVALID);
           }
 
-          if (oauth.clientId === oauthConfig.userClientId) {
+          if (
+            server.authType !== ServerAuthType.IntercomAuth &&
+            oauth.clientId === oauthConfig.userClientId
+          ) {
             // user peta client id
             const keyLength = Math.ceil(userToken.length * 0.5);
             const key = userToken.substring(keyLength) + serverId + true.toString();
@@ -403,8 +410,19 @@ export class UserRequestHandler {
                   : undefined,
               });
 
+              if (
+                server.authType === ServerAuthType.IntercomAuth &&
+                !exchangeResult.refreshToken
+              ) {
+                exchangeResult.refreshToken = INTERCOM_FAKE_REFRESH_TOKEN;
+              }
+
               if (exchangeResult.accessToken && exchangeResult.refreshToken) {
                 const expiresAt = exchangeResult.expiresAt ?? Date.now() + 30 * 24 * 60 * 60 * 1000;
+                const intercomMetadata =
+                  server.authType === ServerAuthType.IntercomAuth
+                    ? await fetchIntercomTokenMetadata(exchangeResult.accessToken)
+                    : undefined;
                 decryptedLaunchConfigValue.oauth = {
                   clientId: oauth.clientId,
                   clientSecret: oauth.clientSecret,
@@ -412,6 +430,10 @@ export class UserRequestHandler {
                   refreshToken: exchangeResult.refreshToken,
                   expiresAt: expiresAt,
                 };
+                if (server.authType === ServerAuthType.IntercomAuth) {
+                  decryptedLaunchConfigValue.oauth.intercomRegion =
+                    intercomMetadata!.intercomRegion;
+                }
                 if (server.authType === ServerAuthType.PipedriveAuth) {
                   if (!exchangeResult.apiDomain) {
                     throw new UserError(

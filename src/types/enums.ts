@@ -41,6 +41,7 @@ export enum ServerAuthType {
   GoogleFormsAuth = 13, // Google Forms OAuth authentication
   PipedriveAuth = 14, // Pipedrive OAuth authentication
   HubSpotAuth = 15, // HubSpot OAuth authentication
+  IntercomAuth = 16, // Intercom OAuth authentication
 }
 
 export enum MCPEventLogType {

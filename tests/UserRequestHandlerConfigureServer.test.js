@@ -12,6 +12,7 @@ const getUserSessions = jest.fn().mockReturnValue([]);
 const updateSessionUserPreferences = jest.fn();
 const notifyPermissionChangedByUser = jest.fn().mockResolvedValue(true);
 const fetchMock = jest.fn();
+const exchangeAuthorizationCode = jest.fn();
 
 jest.unstable_mockModule('../dist/repositories/ServerRepository.js', () => ({
   ServerRepository: {
@@ -33,6 +34,10 @@ jest.unstable_mockModule('../dist/security/CryptoService.js', () => ({
     hash,
     encryptData,
   },
+}));
+
+jest.unstable_mockModule('../dist/mcp/oauth/exchange.js', () => ({
+  exchangeAuthorizationCode,
 }));
 
 jest.unstable_mockModule('../dist/mcp/core/ServerManager.js', () => ({
@@ -136,6 +141,7 @@ describe('UserRequestHandler.handleConfigureServer', () => {
     getUserSessions.mockReturnValue([]);
     updateSessionUserPreferences.mockResolvedValue(undefined);
     notifyPermissionChangedByUser.mockResolvedValue(true);
+    exchangeAuthorizationCode.mockReset();
     fetchMock.mockResolvedValue({
       ok: true,
       status: 200,
@@ -270,5 +276,86 @@ describe('UserRequestHandler.handleConfigureServer', () => {
     expect(requestBody).not.toHaveProperty('tokenUrl');
     expect(requestBody).not.toHaveProperty('scope');
     expect(requestBody).not.toHaveProperty('codeVerifier');
+  });
+
+  test('configures Intercom OAuth templates through direct exchange and persists region metadata', async () => {
+    findByServerId.mockResolvedValue(
+      makeServer({
+        serverId: 'intercom-oauth',
+        serverName: 'Intercom OAuth',
+        authType: ServerAuthType.IntercomAuth,
+        configTemplate: JSON.stringify({
+          oAuthConfig: {
+            deskClientId: 'owner-client-id',
+            userClientId: 'user-client-id',
+          },
+        }),
+      }),
+    );
+    decryptDataFromString.mockResolvedValue(
+      JSON.stringify({
+        oauth: {
+          clientId: 'user-client-id',
+          clientSecret: 'owner-client-secret',
+        },
+      }),
+    );
+    exchangeAuthorizationCode.mockResolvedValue({
+      accessToken: 'intercom-access-token',
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          app: {
+            region: 'US',
+          },
+        }),
+      headers: new Headers({
+        'content-type': 'application/json',
+      }),
+    });
+
+    const result = await UserRequestHandler.instance.handleConfigureServer('user-1', 'user-token', {
+      serverId: 'intercom-oauth',
+      authConf: [
+        {
+          key: 'YOUR_OAUTH_CODE',
+          value: 'intercom-code',
+          dataType: 1,
+        },
+        {
+          key: 'YOUR_OAUTH_REDIRECT_URL',
+          value: 'https://example.com/intercom/callback',
+          dataType: 1,
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      serverId: 'intercom-oauth',
+      message: 'Server configured and started successfully',
+    });
+    expect(exchangeAuthorizationCode).toHaveBeenCalledWith({
+      provider: 'intercom',
+      tokenUrl: undefined,
+      clientId: 'user-client-id',
+      clientSecret: 'owner-client-secret',
+      code: 'intercom-code',
+      redirectUri: 'https://example.com/intercom/callback',
+      codeVerifier: undefined,
+      scope: undefined,
+    });
+
+    const persistedLaunchConfig = JSON.parse(encryptData.mock.calls[0][0]);
+    expect(persistedLaunchConfig.oauth).toMatchObject({
+      clientId: 'user-client-id',
+      clientSecret: 'owner-client-secret',
+      accessToken: 'intercom-access-token',
+      refreshToken: '__INTERCOM_NO_REFRESH_TOKEN__',
+      intercomRegion: 'US',
+    });
+    expect(typeof persistedLaunchConfig.oauth.expiresAt).toBe('number');
   });
 });

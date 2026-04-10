@@ -240,6 +240,7 @@ interface AdminResponse<T = any> {
 - `13` GoogleFormsAuth
 - `14` PipedriveAuth
 - `15` HubSpotAuth
+- `16` IntercomAuth
 
 
 **ServerStatus**
@@ -868,7 +869,8 @@ null
 
 **OAuth Template note**:
 
-- If `configTemplate.oAuthConfig.clientId` exists, the decrypted `launchConfig` must include `oauth` fields (`clientId`, `clientSecret`, `code`, `redirectUri`, etc.); system exchanges and persists tokens
+- If `configTemplate.oAuthConfig.clientId` exists, the decrypted `launchConfig` must include `oauth` fields (`clientId`, `clientSecret`, `code`, `redirectUri`, etc.); system exchanges and persists tokens.
+- Intercom OAuth templates (`authType=16`) additionally persist `oauth.intercomRegion` after exchanging the authorization code. Intercom does not return refresh tokens, so Core stores a compatibility placeholder value internally and validates the access token through Intercom's `/me` endpoint at runtime.
 
 **Input examples (by category)**:
 

@@ -20,6 +20,10 @@ import { createLogger } from '../../logger/index.js';
 import { CryptoService } from '../../security/CryptoService.js';
 import { exchangeAuthorizationCode } from '../../mcp/oauth/exchange.js';
 import { PETA_AUTH_CONFIG } from '../../config/petaAuthConfig.js';
+import {
+  fetchIntercomTokenMetadata,
+  INTERCOM_FAKE_REFRESH_TOKEN,
+} from '../../mcp/auth/IntercomTokenHelper.js';
 
 /**
  * Server operation handler (2000-2999)
@@ -306,7 +310,10 @@ export class ServerHandler {
         // owner authentication flow
         if (allowUserInputValue === false) {
           if (oauth && oauth.code) {
-            if (oauth.clientId === oauthConfig.clientId) {
+            if (
+              authType !== ServerAuthType.IntercomAuth &&
+              oauth.clientId === oauthConfig.clientId
+            ) {
               usePetaOauthConfigValue = true;
               // user peta client id
               const keyLength = Math.ceil(token.length * 0.5);
@@ -422,9 +429,20 @@ export class ServerHandler {
                     : undefined,
                 });
 
+                if (
+                  authType === ServerAuthType.IntercomAuth &&
+                  !exchangeResult.refreshToken
+                ) {
+                  exchangeResult.refreshToken = INTERCOM_FAKE_REFRESH_TOKEN;
+                }
+
                 if (exchangeResult.accessToken && exchangeResult.refreshToken) {
                   const expiresAt =
                     exchangeResult.expiresAt ?? Date.now() + 30 * 24 * 60 * 60 * 1000;
+                  const intercomMetadata =
+                    authType === ServerAuthType.IntercomAuth
+                      ? await fetchIntercomTokenMetadata(exchangeResult.accessToken)
+                      : undefined;
                   decryptedLaunchConfigValue.oauth = {
                     clientId: clientId,
                     clientSecret: clientSecret,
@@ -432,6 +450,10 @@ export class ServerHandler {
                     refreshToken: exchangeResult.refreshToken,
                     expiresAt: expiresAt,
                   };
+                  if (authType === ServerAuthType.IntercomAuth) {
+                    decryptedLaunchConfigValue.oauth.intercomRegion =
+                      intercomMetadata!.intercomRegion;
+                  }
                   if (authType === ServerAuthType.PipedriveAuth) {
                     if (!exchangeResult.apiDomain) {
                       throw new AdminError('Pipedrive OAuth response missing api_domain', AdminErrorCode.INVALID_REQUEST);
@@ -474,7 +496,10 @@ export class ServerHandler {
             throw new AdminError('Invalid OAuth code', AdminErrorCode.INVALID_REQUEST);
           }
         } else {
-          if (oauth.clientId !== oauthConfig.userClientId) {
+          if (
+            authType === ServerAuthType.IntercomAuth ||
+            oauth.clientId !== oauthConfig.userClientId
+          ) {
             usePetaOauthConfigValue = false;
             // Use the client ID provided by the owner
             if (!oauth.clientSecret || oauth.clientSecret.trim() === '') {

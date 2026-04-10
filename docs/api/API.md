@@ -138,9 +138,11 @@ Peta Core exposes an OAuth 2.0 authorization server for obtaining access tokens 
 
 These endpoints are separate from downstream connector OAuth tokens used by downstream MCP servers to access third-party APIs. Those credentials are brokered internally by Peta Core and are not exposed here.
 
-For Template servers that use downstream third-party OAuth, Peta Core supports provider-specific authorization-code exchange and refresh-token renewal on the server side. The encrypted `launchConfig.oauth` state may include `clientId`, `clientSecret`, `refreshToken`, cached `accessToken`, and `expiresAt`; when the downstream runtime is launched, Peta Core strips that OAuth object and injects only the short-lived access token the runtime needs.
+For Template servers that use downstream third-party OAuth, Peta Core supports provider-specific authorization-code exchange and runtime token management on the server side. The encrypted `launchConfig.oauth` state may include `clientId`, `clientSecret`, `refreshToken`, cached `accessToken`, `expiresAt`, and provider metadata such as Intercom `intercomRegion`; when the downstream runtime is launched, Peta Core strips that OAuth object and injects only the runtime values the downstream server needs.
 
 Refresh-token-based downstream providers currently include the Google family, Notion, Figma, GitHub, Canva, Zendesk, Pipedrive, and HubSpot.
+
+Intercom is handled differently: OAuth code exchange returns a long-lived access token without a refresh token, so Peta Core validates that token against Intercom's `/me` endpoint on startup and on a synthetic recheck schedule, and persists the returned `app.region` value for downstream env injection.
 
 #### Endpoint List
 
