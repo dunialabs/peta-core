@@ -439,10 +439,7 @@ export class ServerHandler {
                 if (exchangeResult.accessToken && exchangeResult.refreshToken) {
                   const expiresAt =
                     exchangeResult.expiresAt ?? Date.now() + 30 * 24 * 60 * 60 * 1000;
-                  const intercomMetadata =
-                    authType === ServerAuthType.IntercomAuth
-                      ? await fetchIntercomTokenMetadata(exchangeResult.accessToken)
-                      : undefined;
+
                   decryptedLaunchConfigValue.oauth = {
                     clientId: clientId,
                     clientSecret: clientSecret,
@@ -451,8 +448,8 @@ export class ServerHandler {
                     expiresAt: expiresAt,
                   };
                   if (authType === ServerAuthType.IntercomAuth) {
-                    decryptedLaunchConfigValue.oauth.intercomRegion =
-                      intercomMetadata!.intercomRegion;
+                    const intercomMetadata = await fetchIntercomTokenMetadata(exchangeResult.accessToken);
+                    decryptedLaunchConfigValue.oauth.intercomRegion = intercomMetadata.intercomRegion;
                   }
                   if (authType === ServerAuthType.PipedriveAuth) {
                     if (!exchangeResult.apiDomain) {

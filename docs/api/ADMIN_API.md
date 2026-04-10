@@ -871,6 +871,7 @@ null
 
 - If `configTemplate.oAuthConfig.clientId` exists, the decrypted `launchConfig` must include `oauth` fields (`clientId`, `clientSecret`, `code`, `redirectUri`, etc.); system exchanges and persists tokens.
 - Intercom OAuth templates (`authType=16`) additionally persist `oauth.intercomRegion` after exchanging the authorization code. Intercom does not return refresh tokens, so Core stores a compatibility placeholder value internally and validates the access token through Intercom's `/me` endpoint at runtime.
+- If Intercom later reports that a stored token is invalid, owner-managed servers are disabled after Core clears the dynamic OAuth state. For `allowUserInput=true` servers, Core unconfigures the affected user's saved server configuration instead of keeping a stale temporary OAuth payload around.
 
 **Input examples (by category)**:
 
