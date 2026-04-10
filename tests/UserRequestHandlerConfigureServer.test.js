@@ -217,4 +217,58 @@ describe('UserRequestHandler.handleConfigureServer', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(updateLaunchConfigs).not.toHaveBeenCalled();
   });
+
+  test('uses the hubspot provider for Peta-managed HubSpot OAuth without dynamic-provider fields', async () => {
+    findByServerId.mockResolvedValue(
+      makeServer({
+        serverId: 'hubspot-oauth',
+        serverName: 'HubSpot OAuth',
+        authType: ServerAuthType.HubSpotAuth,
+      }),
+    );
+    decryptDataFromString.mockResolvedValue(
+      JSON.stringify({
+        oauth: {
+          clientId: 'user-client-id',
+        },
+      }),
+    );
+
+    const result = await UserRequestHandler.instance.handleConfigureServer('user-1', 'user-token', {
+      serverId: 'hubspot-oauth',
+      authConf: [
+        {
+          key: 'YOUR_OAUTH_CODE',
+          value: 'hubspot-code',
+          dataType: 1,
+        },
+        {
+          key: 'YOUR_OAUTH_REDIRECT_URL',
+          value: 'https://example.com/hubspot/callback',
+          dataType: 1,
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      serverId: 'hubspot-oauth',
+      message: 'Server configured and started successfully',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const [url, requestInit] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/v1\/oauth\/exchange$/);
+
+    const requestBody = JSON.parse(requestInit.body);
+    expect(requestBody).toMatchObject({
+      clientId: 'user-client-id',
+      provider: 'hubspot',
+      key: 'hashed-key',
+      code: 'hubspot-code',
+      redirectUri: 'https://example.com/hubspot/callback',
+    });
+    expect(requestBody).not.toHaveProperty('tokenUrl');
+    expect(requestBody).not.toHaveProperty('scope');
+    expect(requestBody).not.toHaveProperty('codeVerifier');
+  });
 });
