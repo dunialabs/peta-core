@@ -249,6 +249,8 @@ export class AuthUtils {
         return 'hubspot';
       case ServerAuthType.IntercomAuth:
         return 'intercom';
+      case ServerAuthType.SlackAuth:
+        return 'slack';
       case ServerAuthType.ApiKey:
         return undefined;
       default:

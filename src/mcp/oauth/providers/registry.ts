@@ -18,6 +18,7 @@ import { canvaAdapter } from './canva.js';
 import { pipedriveAdapter } from './pipedrive.js';
 import { hubspotAdapter } from './hubspot.js';
 import { intercomAdapter } from './intercom.js';
+import { slackAdapter } from './slack.js';
 
 /**
  * Map of provider names to their adapters
@@ -34,6 +35,7 @@ const providers: Map<string, ProviderAdapter> = new Map([
   ['pipedrive', pipedriveAdapter],
   ['hubspot', hubspotAdapter],
   ['intercom', intercomAdapter],
+  ['slack', slackAdapter],
 ]);
 
 /**

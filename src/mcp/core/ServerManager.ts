@@ -545,6 +545,7 @@ export class ServerManager {
       case ServerAuthType.CanvaAuth:
       case ServerAuthType.HubSpotAuth:
       case ServerAuthType.IntercomAuth:
+      case ServerAuthType.SlackAuth:
         launchConfig.env = {
           ...launchConfig.env,
           accessToken: accessToken,
@@ -1550,6 +1551,7 @@ export class ServerManager {
       case ServerAuthType.PipedriveAuth:
       case ServerAuthType.HubSpotAuth:
       case ServerAuthType.IntercomAuth:
+      case ServerAuthType.SlackAuth:
         serverContext.userToken = token;
         await this.initializeOAuthWithRefresh(serverContext, launchConfig);
         break;

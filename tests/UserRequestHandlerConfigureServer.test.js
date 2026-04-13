@@ -358,4 +358,126 @@ describe('UserRequestHandler.handleConfigureServer', () => {
     });
     expect(typeof persistedLaunchConfig.oauth.expiresAt).toBe('number');
   });
+
+  test('configures Slack OAuth templates through direct exchange and persists user token mode', async () => {
+    findByServerId.mockResolvedValue(
+      makeServer({
+        serverId: 'slack-oauth',
+        serverName: 'Slack OAuth',
+        authType: ServerAuthType.SlackAuth,
+        configTemplate: JSON.stringify({
+          oAuthConfig: {
+            deskClientId: 'owner-client-id',
+            userClientId: 'user-client-id',
+          },
+        }),
+      }),
+    );
+    decryptDataFromString.mockResolvedValue(
+      JSON.stringify({
+        oauth: {
+          clientId: 'user-client-id',
+          clientSecret: 'owner-client-secret',
+        },
+      }),
+    );
+    exchangeAuthorizationCode.mockResolvedValue({
+      accessToken: 'slack-access-token',
+      refreshToken: 'slack-refresh-token',
+      expiresAt: Date.now() + 3600_000,
+    });
+
+    const result = await UserRequestHandler.instance.handleConfigureServer('user-1', 'user-token', {
+      serverId: 'slack-oauth',
+      authConf: [
+        {
+          key: 'YOUR_OAUTH_CODE',
+          value: 'slack-code',
+          dataType: 1,
+        },
+        {
+          key: 'YOUR_OAUTH_REDIRECT_URL',
+          value: 'https://example.com/slack/callback',
+          dataType: 1,
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      serverId: 'slack-oauth',
+      message: 'Server configured and started successfully',
+    });
+    expect(exchangeAuthorizationCode).toHaveBeenCalledWith({
+      provider: 'slack',
+      tokenUrl: undefined,
+      clientId: 'user-client-id',
+      clientSecret: 'owner-client-secret',
+      code: 'slack-code',
+      redirectUri: 'https://example.com/slack/callback',
+      codeVerifier: undefined,
+      scope: undefined,
+      tokenMode: 'user',
+    });
+
+    const persistedLaunchConfig = JSON.parse(encryptData.mock.calls[0][0]);
+    expect(persistedLaunchConfig.oauth).toMatchObject({
+      clientId: 'user-client-id',
+      clientSecret: 'owner-client-secret',
+      accessToken: 'slack-access-token',
+      refreshToken: 'slack-refresh-token',
+      tokenMode: 'user',
+    });
+    expect(typeof persistedLaunchConfig.oauth.expiresAt).toBe('number');
+  });
+
+  test('rejects Slack OAuth configuration when token rotation is not enabled', async () => {
+    findByServerId.mockResolvedValue(
+      makeServer({
+        serverId: 'slack-oauth',
+        serverName: 'Slack OAuth',
+        authType: ServerAuthType.SlackAuth,
+        configTemplate: JSON.stringify({
+          oAuthConfig: {
+            deskClientId: 'owner-client-id',
+            userClientId: 'user-client-id',
+          },
+        }),
+      }),
+    );
+    decryptDataFromString.mockResolvedValue(
+      JSON.stringify({
+        oauth: {
+          clientId: 'user-client-id',
+          clientSecret: 'owner-client-secret',
+        },
+      }),
+    );
+    exchangeAuthorizationCode.mockResolvedValue({
+      accessToken: 'slack-access-token',
+      expiresAt: Date.now() + 3600_000,
+    });
+
+    await expect(
+      UserRequestHandler.instance.handleConfigureServer('user-1', 'user-token', {
+        serverId: 'slack-oauth',
+        authConf: [
+          {
+            key: 'YOUR_OAUTH_CODE',
+            value: 'slack-code',
+            dataType: 1,
+          },
+          {
+            key: 'YOUR_OAUTH_REDIRECT_URL',
+            value: 'https://example.com/slack/callback',
+            dataType: 1,
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      name: 'UserError',
+      code: UserErrorCode.SERVER_CONFIG_INVALID,
+      message:
+        'Slack OAuth requires Token Rotation. Enable Token Rotation in Slack OAuth settings.',
+    });
+  });
 });

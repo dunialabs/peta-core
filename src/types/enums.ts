@@ -42,6 +42,7 @@ export enum ServerAuthType {
   PipedriveAuth = 14, // Pipedrive OAuth authentication
   HubSpotAuth = 15, // HubSpot OAuth authentication
   IntercomAuth = 16, // Intercom OAuth authentication
+  SlackAuth = 17, // Slack OAuth authentication
 }
 
 export enum MCPEventLogType {

@@ -30,6 +30,8 @@ export interface ExchangeContext {
   codeVerifier?: string;
   /** Optional scope for the OAuth request */
   scope?: string;
+  /** Token selection mode for providers that can return multiple token shapes */
+  tokenMode?: 'user' | 'bot' | 'auto';
 }
 
 /**
@@ -74,6 +76,13 @@ export interface HttpResponse {
   headers: Headers;
 }
 
+export interface NormalizedTokenResponse {
+  accessToken: string;
+  refreshToken?: string;
+  apiDomain?: string;
+  expiresIn?: number;
+}
+
 /**
  * Provider adapter interface
  *
@@ -104,6 +113,12 @@ export interface ProviderAdapter {
    * Build the HTTP request for token exchange
    */
   buildRequest(ctx: ExchangeContext): ProviderRequest;
+
+  /**
+   * Normalize provider-specific token response fields into the standard shape.
+   * If omitted, the default top-level OAuth field mapping is used.
+   */
+  parseResponse?(data: Record<string, unknown>, ctx: ExchangeContext): NormalizedTokenResponse;
 
   /**
    * Optional default expiration in seconds

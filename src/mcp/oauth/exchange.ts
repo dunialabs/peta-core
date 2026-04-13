@@ -5,7 +5,12 @@
  * across different OAuth providers.
  */
 
-import type { ExchangeContext, ExchangeResult, ProviderAdapter } from './types.js';
+import type {
+  ExchangeContext,
+  ExchangeResult,
+  NormalizedTokenResponse,
+  ProviderAdapter,
+} from './types.js';
 import { getProviderAdapter } from './providers/registry.js';
 import { oauthHttpPost } from './http.js';
 import { resolveExpires } from './utils.js';
@@ -44,6 +49,36 @@ function resolveTokenUrl(ctx: ExchangeContext, adapter: ProviderAdapter): string
       provider: ctx.provider,
     }
   );
+}
+
+function normalizeTokenResponse(
+  data: Record<string, unknown>,
+  ctx: ExchangeContext,
+  adapter: ProviderAdapter
+): NormalizedTokenResponse {
+  if (adapter.parseResponse) {
+    return adapter.parseResponse(data, ctx);
+  }
+
+  const accessToken = data.access_token;
+  if (typeof accessToken !== 'string' || accessToken.trim() === '') {
+    throw new OAuthExchangeError('No access token found in response', {
+      type: 'parse',
+      provider: ctx.provider,
+      responseBody: JSON.stringify(data),
+    });
+  }
+
+  return {
+    accessToken,
+    refreshToken:
+      typeof data.refresh_token === 'string' ? data.refresh_token : undefined,
+    apiDomain:
+      typeof data.api_domain === 'string' && data.api_domain.trim() !== ''
+        ? data.api_domain
+        : undefined,
+    expiresIn: typeof data.expires_in === 'number' ? data.expires_in : undefined,
+  };
 }
 
 /**
@@ -85,34 +120,18 @@ export async function exchangeAuthorizationCode(
   const request = adapter.buildRequest(ctx);
   const response = await oauthHttpPost(tokenUrl, request, ctx.provider);
   const { data } = response;
-
-  if (typeof data.access_token !== 'string' || data.access_token.trim() === '') {
-    throw new OAuthExchangeError('No access token found in response', {
-      type: 'parse',
-      provider: ctx.provider,
-      responseBody: JSON.stringify(data),
-    });
-  }
-  // Extract tokens from response
-  const accessToken = data.access_token as string;
-  const refreshToken = data.refresh_token as string | undefined;
-  const apiDomain =
-    typeof data.api_domain === 'string' && data.api_domain.trim() !== ''
-      ? data.api_domain
-      : undefined;
+  const normalized = normalizeTokenResponse(data, ctx, adapter);
 
   // Resolve expiration
-  const responseExpiresIn =
-    typeof data.expires_in === 'number' ? data.expires_in : undefined;
   const { expiresIn, expiresAt } = resolveExpires(
-    responseExpiresIn,
+    normalized.expiresIn,
     adapter.defaultExpiresIn
   );
 
   return {
-    accessToken,
-    refreshToken,
-    apiDomain,
+    accessToken: normalized.accessToken,
+    refreshToken: normalized.refreshToken,
+    apiDomain: normalized.apiDomain,
     expiresIn,
     expiresAt,
     raw: data,

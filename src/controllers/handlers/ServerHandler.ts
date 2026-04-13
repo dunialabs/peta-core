@@ -25,6 +25,9 @@ import {
   INTERCOM_FAKE_REFRESH_TOKEN,
 } from '../../mcp/auth/IntercomTokenHelper.js';
 
+const SLACK_TOKEN_ROTATION_REQUIRED_MESSAGE =
+  'Slack OAuth requires Token Rotation. Enable Token Rotation in Slack OAuth settings.';
+
 /**
  * Server operation handler (2000-2999)
  */
@@ -312,6 +315,7 @@ export class ServerHandler {
           if (oauth && oauth.code) {
             if (
               authType !== ServerAuthType.IntercomAuth &&
+              authType !== ServerAuthType.SlackAuth &&
               oauth.clientId === oauthConfig.clientId
             ) {
               usePetaOauthConfigValue = true;
@@ -400,6 +404,9 @@ export class ServerHandler {
                 );
               } catch (error) {
                 this.logger.error({ err: error }, 'Error exchanging authorization code');
+                if (error instanceof AdminError) {
+                  throw error;
+                }
                 throw new AdminError(
                   'Failed to exchange OAuth code',
                   AdminErrorCode.INVALID_REQUEST,
@@ -427,6 +434,8 @@ export class ServerHandler {
                   scope: [ServerAuthType.ZendeskAuth].includes(authType)
                     ? oauthConfig.scope
                     : undefined,
+                  tokenMode:
+                    authType === ServerAuthType.SlackAuth ? 'user' : undefined,
                 });
 
                 if (
@@ -434,6 +443,16 @@ export class ServerHandler {
                   !exchangeResult.refreshToken
                 ) {
                   exchangeResult.refreshToken = INTERCOM_FAKE_REFRESH_TOKEN;
+                }
+
+                if (
+                  authType === ServerAuthType.SlackAuth &&
+                  !exchangeResult.refreshToken
+                ) {
+                  throw new AdminError(
+                    SLACK_TOKEN_ROTATION_REQUIRED_MESSAGE,
+                    AdminErrorCode.INVALID_REQUEST,
+                  );
                 }
 
                 if (exchangeResult.accessToken && exchangeResult.refreshToken) {
@@ -450,6 +469,9 @@ export class ServerHandler {
                     refreshToken: exchangeResult.refreshToken,
                     expiresAt: expiresAt,
                   };
+                  if (authType === ServerAuthType.SlackAuth) {
+                    decryptedLaunchConfigValue.oauth.tokenMode = 'user';
+                  }
                   if (authType === ServerAuthType.IntercomAuth) {
                     decryptedLaunchConfigValue.oauth.intercomRegion =
                       intercomMetadata!.intercomRegion;
@@ -486,6 +508,9 @@ export class ServerHandler {
                 }
               } catch (error) {
                 this.logger.error({ err: error }, 'Error exchanging authorization code');
+                if (error instanceof AdminError) {
+                  throw error;
+                }
                 throw new AdminError(
                   'Failed to exchange OAuth code',
                   AdminErrorCode.INVALID_REQUEST,
@@ -498,6 +523,7 @@ export class ServerHandler {
         } else {
           if (
             authType === ServerAuthType.IntercomAuth ||
+            authType === ServerAuthType.SlackAuth ||
             oauth.clientId !== oauthConfig.userClientId
           ) {
             usePetaOauthConfigValue = false;
