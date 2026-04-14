@@ -438,10 +438,7 @@ export class UserRequestHandler {
 
               if (exchangeResult.accessToken && exchangeResult.refreshToken) {
                 const expiresAt = exchangeResult.expiresAt ?? Date.now() + 30 * 24 * 60 * 60 * 1000;
-                const intercomMetadata =
-                  server.authType === ServerAuthType.IntercomAuth
-                    ? await fetchIntercomTokenMetadata(exchangeResult.accessToken)
-                    : undefined;
+
                 decryptedLaunchConfigValue.oauth = {
                   clientId: oauth.clientId,
                   clientSecret: oauth.clientSecret,
@@ -453,6 +450,7 @@ export class UserRequestHandler {
                   decryptedLaunchConfigValue.oauth.tokenMode = 'user';
                 }
                 if (server.authType === ServerAuthType.IntercomAuth) {
+                  const intercomMetadata = await fetchIntercomTokenMetadata(exchangeResult.accessToken);
                   decryptedLaunchConfigValue.oauth.intercomRegion =
                     intercomMetadata!.intercomRegion;
                 }

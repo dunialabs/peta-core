@@ -36,9 +36,9 @@ Typical responsibilities inside the gateway include:
 - Streaming responses back to clients via MCP and/or Socket.IO.
 - Emitting structured logs and audit records for each operation.
 
-For downstream OAuth-backed Template servers, the gateway also acts as a token broker: it exchanges authorization codes, stores the full OAuth state encrypted at rest, refreshes or validates access tokens server-side, removes `launchConfig.oauth` before process launch, and injects only the runtime values the downstream MCP server environment needs.
+For downstream OAuth-backed Template servers, the gateway also acts as a token broker: it exchanges authorization codes, stores the full OAuth state encrypted at rest, refreshes or validates access tokens server-side, removes `launchConfig.oauth` before process launch, and injects only the runtime values the downstream MCP server environment needs. For owner-managed servers, dynamic OAuth fields are persisted back through the same server-context token that successfully decrypted the stored `launchConfig`, with the cached owner token used only as a lazy-start fallback when no context token is available.
 
-Intercom is a provider-specific exception to the refresh-token model. Core stores the Intercom access token plus the `app.region` value discovered from Intercom's `/me` endpoint, injects `accessToken` and `intercomRegion` into the downstream runtime, and re-validates the token on startup and on a synthetic recheck schedule. If Intercom reports that the token has been revoked, blocked, expired, or is otherwise invalid, Core clears the persisted dynamic OAuth state, closes the affected server context, and disables owner-managed servers.
+Intercom is a provider-specific exception to the refresh-token model. Core stores the Intercom access token plus the `app.region` value discovered from Intercom's `/me` endpoint, injects `accessToken` and `intercomRegion` into the downstream runtime, and re-validates the token on startup and on a synthetic recheck schedule. If Intercom reports that the token has been revoked, blocked, expired, or is otherwise invalid, Core unconfigures user-managed temporary servers so the stale OAuth payload is removed from the user's saved launch config, and it clears the persisted dynamic OAuth state, closes the server context, and disables owner-managed servers.
 
 ---
 

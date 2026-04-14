@@ -49,6 +49,7 @@ import {
   formatConnectionDiagnosticError,
   type ConnectionStartupDiagnostics,
 } from './ConnectionStartupDiagnostics.js';
+import { UserRequestHandler } from '../../user/UserRequestHandler.js';
 
 /**
  * Subscription state structure
@@ -264,19 +265,32 @@ export class ServerManager {
       'Intercom token invalid, clearing persisted OAuth state',
     );
 
-    await this.clearIntercomOAuthState(serverContext);
-
     if (serverContext.serverEntity.allowUserInput) {
       if (serverContext.userId) {
-        await this.closeTemporaryServer(serverContext.serverID, serverContext.userId);
-      } else {
-        await this.disconnectServerContext(serverContext, ServerStatus.Offline, {
-          serverId: serverContext.serverID,
-        });
+        try {
+          await UserRequestHandler.instance.handleUnconfigureServer(serverContext.userId, {
+            serverId: serverContext.serverID,
+          });
+        } catch (error) {
+          this.logger.error(
+            {
+              error,
+              serverId: serverContext.serverID,
+              userId: serverContext.userId,
+            },
+            'Failed to unconfigure user server after Intercom token invalid',
+          );
+          await this.clearIntercomOAuthState(serverContext);
+          await this.disconnectServerContext(serverContext, ServerStatus.Offline, {
+            serverId: serverContext.serverID,
+            userId: serverContext.userId,
+          });
+        }
       }
       return;
     }
 
+    await this.clearIntercomOAuthState(serverContext);
     await ServerRepository.disable(serverContext.serverID);
     await this.removeServer(serverContext.serverID);
   }
@@ -550,16 +564,6 @@ export class ServerManager {
           ...launchConfig.env,
           accessToken: accessToken,
         };
-        if (authType === ServerAuthType.IntercomAuth) {
-          const intercomRegion = launchConfig.oauth?.intercomRegion;
-          if (!intercomRegion || typeof intercomRegion !== 'string') {
-            throw new Error(
-              '[ServerManager] Missing intercomRegion for server auth type IntercomAuth',
-            );
-          }
-
-          launchConfig.env.intercomRegion = intercomRegion;
-        }
         break;
 
       case ServerAuthType.ZendeskAuth: {
@@ -596,6 +600,20 @@ export class ServerManager {
           ...launchConfig.env,
           apiDomain: apiDomain,
           accessToken: accessToken,
+        };
+        break;
+      }
+
+      case ServerAuthType.IntercomAuth: {
+        let intercomRegion: string = launchConfig.oauth?.intercomRegion;
+        if (!intercomRegion || typeof intercomRegion !== 'string' || !["US", "EU", "AU"].includes(intercomRegion)) {
+          intercomRegion = "US";
+        }
+
+        launchConfig.env = {
+          ...launchConfig.env,
+          accessToken: accessToken,
+          intercomRegion: intercomRegion,
         };
         break;
       }
@@ -1702,7 +1720,7 @@ export class ServerManager {
     try {
       const serverId = serverContext.serverID;
       const serverEntity = serverContext.serverEntity;
-      const userToken = serverContext.userToken;
+      const userToken = serverContext.userToken ?? this.ownerToken;
 
       // 1. Check if userToken exists
       if (!userToken) {
