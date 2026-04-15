@@ -43,6 +43,7 @@ export enum ServerAuthType {
   HubSpotAuth = 15, // HubSpot OAuth authentication
   IntercomAuth = 16, // Intercom OAuth authentication
   SlackAuth = 17, // Slack OAuth authentication
+  TeamsAuth = 18, // Microsoft Teams OAuth authentication
 }
 
 export enum MCPEventLogType {

@@ -140,7 +140,9 @@ These endpoints are separate from downstream connector OAuth tokens used by down
 
 For Template servers that use downstream third-party OAuth, Peta Core supports provider-specific authorization-code exchange and runtime token management on the server side. The encrypted `launchConfig.oauth` state may include `clientId`, `clientSecret`, `refreshToken`, cached `accessToken`, `expiresAt`, and provider metadata such as Intercom `intercomRegion`; when the downstream runtime is launched, Peta Core strips that OAuth object and injects only the runtime values the downstream server needs. For owner-managed servers, later OAuth-state persistence reuses the active server-context token that decrypted the stored launch config, with the cached owner token used only as a fallback when a live context token is unavailable.
 
-Refresh-token-based downstream providers currently include the Google family, Notion, Figma, GitHub, Canva, Zendesk, Pipedrive, and HubSpot.
+Refresh-token-based downstream providers currently include the Google family, Notion, Figma, GitHub, Canva, Zendesk, Pipedrive, HubSpot, and Teams.
+
+Teams uses the Microsoft Entra authorization-code flow with PKCE for the initial code exchange, then follows the standard refresh-token runtime model inside Peta Core. Teams is treated as a direct/custom-app downstream OAuth provider, so Core does not route Teams exchanges or refreshes through the Peta-managed OAuth broker.
 
 Intercom is handled differently: OAuth code exchange returns a long-lived access token without a refresh token, so Peta Core validates that token against Intercom's `/me` endpoint on startup and on a synthetic recheck schedule, and persists the returned `app.region` value for downstream env injection. If Intercom later reports that the token is invalid, owner-managed servers are disabled after their dynamic OAuth state is cleared, while user-managed temporary servers are unconfigured for that user so the stale Intercom payload is removed from saved user launch configs.
 

@@ -316,6 +316,7 @@ export class ServerHandler {
             if (
               authType !== ServerAuthType.IntercomAuth &&
               authType !== ServerAuthType.SlackAuth &&
+              authType !== ServerAuthType.TeamsAuth &&
               oauth.clientId === oauthConfig.clientId
             ) {
               usePetaOauthConfigValue = true;
@@ -521,6 +522,7 @@ export class ServerHandler {
           if (
             authType === ServerAuthType.IntercomAuth ||
             authType === ServerAuthType.SlackAuth ||
+            authType === ServerAuthType.TeamsAuth ||
             oauth.clientId !== oauthConfig.userClientId
           ) {
             usePetaOauthConfigValue = false;

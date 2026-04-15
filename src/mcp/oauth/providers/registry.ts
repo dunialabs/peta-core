@@ -19,6 +19,7 @@ import { pipedriveAdapter } from './pipedrive.js';
 import { hubspotAdapter } from './hubspot.js';
 import { intercomAdapter } from './intercom.js';
 import { slackAdapter } from './slack.js';
+import { teamsAdapter } from './teams.js';
 
 /**
  * Map of provider names to their adapters
@@ -36,6 +37,7 @@ const providers: Map<string, ProviderAdapter> = new Map([
   ['hubspot', hubspotAdapter],
   ['intercom', intercomAdapter],
   ['slack', slackAdapter],
+  ['teams', teamsAdapter],
 ]);
 
 /**

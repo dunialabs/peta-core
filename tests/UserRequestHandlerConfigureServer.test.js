@@ -359,6 +359,87 @@ describe('UserRequestHandler.handleConfigureServer', () => {
     expect(typeof persistedLaunchConfig.oauth.expiresAt).toBe('number');
   });
 
+  test('configures Teams OAuth templates through direct exchange and passes PKCE verifier', async () => {
+    findByServerId.mockResolvedValue(
+      makeServer({
+        serverId: 'teams-oauth',
+        serverName: 'Teams OAuth',
+        authType: ServerAuthType.TeamsAuth,
+        configTemplate: JSON.stringify({
+          oAuthConfig: {
+            deskClientId: 'owner-client-id',
+            userClientId: 'user-client-id',
+            pkce: {
+              required: true,
+              method: 'S256',
+            },
+          },
+        }),
+      }),
+    );
+    decryptDataFromString.mockResolvedValue(
+      JSON.stringify({
+        oauth: {
+          clientId: 'user-client-id',
+          clientSecret: 'owner-client-secret',
+        },
+      }),
+    );
+    exchangeAuthorizationCode.mockResolvedValue({
+      accessToken: 'teams-access-token',
+      refreshToken: 'teams-refresh-token',
+      expiresAt: Date.now() + 3600_000,
+    });
+
+    const result = await UserRequestHandler.instance.handleConfigureServer('user-1', 'user-token', {
+      serverId: 'teams-oauth',
+      authConf: [
+        {
+          key: 'YOUR_OAUTH_CODE',
+          value: 'teams-code',
+          dataType: 1,
+        },
+        {
+          key: 'YOUR_OAUTH_REDIRECT_URL',
+          value: 'https://example.com/teams/callback',
+          dataType: 1,
+        },
+        {
+          key: 'YOUR_OAUTH_PKCE_VERIFIER',
+          value: 'pkce-verifier',
+          dataType: 1,
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      serverId: 'teams-oauth',
+      message: 'Server configured and started successfully',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(exchangeAuthorizationCode).toHaveBeenCalledWith({
+      provider: 'teams',
+      tokenUrl: undefined,
+      clientId: 'user-client-id',
+      clientSecret: 'owner-client-secret',
+      code: 'teams-code',
+      redirectUri: 'https://example.com/teams/callback',
+      codeVerifier: 'pkce-verifier',
+      scope: undefined,
+      tokenMode: undefined,
+    });
+
+    const persistedLaunchConfig = JSON.parse(encryptData.mock.calls[0][0]);
+    expect(persistedLaunchConfig.oauth).toMatchObject({
+      clientId: 'user-client-id',
+      clientSecret: 'owner-client-secret',
+      accessToken: 'teams-access-token',
+      refreshToken: 'teams-refresh-token',
+    });
+    expect(persistedLaunchConfig.oauth).not.toHaveProperty('codeVerifier');
+    expect(typeof persistedLaunchConfig.oauth.expiresAt).toBe('number');
+  });
+
   test('configures Slack OAuth templates through direct exchange and persists user token mode', async () => {
     findByServerId.mockResolvedValue(
       makeServer({

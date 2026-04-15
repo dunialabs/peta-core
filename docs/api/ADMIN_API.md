@@ -241,6 +241,8 @@ interface AdminResponse<T = any> {
 - `14` PipedriveAuth
 - `15` HubSpotAuth
 - `16` IntercomAuth
+- `17` SlackAuth
+- `18` TeamsAuth
 
 
 **ServerStatus**
@@ -869,9 +871,10 @@ null
 
 **OAuth Template note**:
 
-- If `configTemplate.oAuthConfig.clientId` exists, the decrypted `launchConfig` must include `oauth` fields (`clientId`, `clientSecret`, `code`, `redirectUri`, etc.); system exchanges and persists tokens.
+- If `configTemplate.oAuthConfig.clientId` exists, the decrypted `launchConfig` must include `oauth` fields (`clientId`, `clientSecret`, `code`, `redirectUri`, etc.); PKCE providers also include `codeVerifier`. Core exchanges the code and persists runtime OAuth state.
 - Intercom OAuth templates (`authType=16`) additionally persist `oauth.intercomRegion` after exchanging the authorization code. Intercom does not return refresh tokens, so Core stores a compatibility placeholder value internally and validates the access token through Intercom's `/me` endpoint at runtime.
 - If Intercom later reports that a stored token is invalid, owner-managed servers are disabled after Core clears the dynamic OAuth state. For `allowUserInput=true` servers, Core unconfigures the affected user's saved server configuration instead of keeping a stale temporary OAuth payload around.
+- Teams OAuth templates (`authType=18`) use direct Microsoft token exchange with PKCE and do not use Peta-managed OAuth broker exchange/refresh endpoints.
 
 **Input examples (by category)**:
 

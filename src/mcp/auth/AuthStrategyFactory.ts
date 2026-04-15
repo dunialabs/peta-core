@@ -10,6 +10,7 @@ import { PipedriveAuthStrategy } from './PipedriveAuthStrategy.js';
 import { HubSpotAuthStrategy } from './HubSpotAuthStrategy.js';
 import { IntercomAuthStrategy } from './IntercomAuthStrategy.js';
 import { SlackAuthStrategy } from './SlackAuthStrategy.js';
+import { TeamsAuthStrategy } from './TeamsAuthStrategy.js';
 import { createLogger } from '../../logger/index.js';
 
 // Logger for AuthStrategyFactory
@@ -130,6 +131,15 @@ export class AuthStrategyFactory {
           accessToken: config.accessToken,
           expiresAt: config.expiresAt,
           tokenMode: config.tokenMode,
+        });
+
+      case ServerAuthType.TeamsAuth:
+        return new TeamsAuthStrategy({
+          clientId: config.clientId,
+          clientSecret: config.clientSecret,
+          refreshToken: config.refreshToken,
+          accessToken: config.accessToken,
+          expiresAt: config.expiresAt,
         });
 
       case ServerAuthType.ApiKey:

@@ -251,6 +251,8 @@ export class AuthUtils {
         return 'intercom';
       case ServerAuthType.SlackAuth:
         return 'slack';
+      case ServerAuthType.TeamsAuth:
+        return 'teams';
       case ServerAuthType.ApiKey:
         return undefined;
       default:

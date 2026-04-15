@@ -558,8 +558,8 @@ export class ServerManager {
       case ServerAuthType.GithubAuth:
       case ServerAuthType.CanvaAuth:
       case ServerAuthType.HubSpotAuth:
-      case ServerAuthType.IntercomAuth:
       case ServerAuthType.SlackAuth:
+      case ServerAuthType.TeamsAuth:
         launchConfig.env = {
           ...launchConfig.env,
           accessToken: accessToken,
@@ -1538,7 +1538,8 @@ export class ServerManager {
     if (
       usePetaOauthConfig &&
       serverContext.serverEntity.authType !== ServerAuthType.ApiKey &&
-      serverContext.serverEntity.authType !== ServerAuthType.IntercomAuth
+      serverContext.serverEntity.authType !== ServerAuthType.IntercomAuth &&
+      serverContext.serverEntity.authType !== ServerAuthType.TeamsAuth
     ) {
       const initialToken = await this.initializePetaAuth(serverContext, launchConfig, token);
       this.injectOAuthTokenEnv(authType, launchConfig, initialToken);
@@ -1570,6 +1571,7 @@ export class ServerManager {
       case ServerAuthType.HubSpotAuth:
       case ServerAuthType.IntercomAuth:
       case ServerAuthType.SlackAuth:
+      case ServerAuthType.TeamsAuth:
         serverContext.userToken = token;
         await this.initializeOAuthWithRefresh(serverContext, launchConfig);
         break;

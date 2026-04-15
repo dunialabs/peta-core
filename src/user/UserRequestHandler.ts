@@ -311,6 +311,7 @@ export class UserRequestHandler {
           if (
             server.authType !== ServerAuthType.IntercomAuth &&
             server.authType !== ServerAuthType.SlackAuth &&
+            server.authType !== ServerAuthType.TeamsAuth &&
             oauth.clientId === oauthConfig.userClientId
           ) {
             // user peta client id
