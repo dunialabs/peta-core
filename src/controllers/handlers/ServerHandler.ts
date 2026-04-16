@@ -539,6 +539,9 @@ export class ServerHandler {
           const encryptedData = await CryptoService.encryptData(decryptedLaunchConfig, key);
           launchConfigStr = JSON.stringify(encryptedData);
           configTemplateValue.oAuthConfig.deskClientId = oauth.clientId;
+          if (oauth.redirectUri) {
+            configTemplateValue.oAuthConfig.redirectUri = oauth.redirectUri;
+          }
           configTemplateStr = JSON.stringify(configTemplateValue);
         }
       }
