@@ -227,6 +227,27 @@ export class ConfigController {
           }
           result = await this.serverHandler.handleUpdateServer(adminRequest, token!);
           break;
+        case AdminActionType.GET_SERVER_OAUTH_REAUTH_CONTEXT:
+          if (req.authContext?.role !== UserRole.Owner) {
+            throw new AdminError(
+              'Only Owner role can get OAuth reauthorization context.',
+              AdminErrorCode.FORBIDDEN,
+            );
+          }
+          result = await this.serverHandler.handleGetServerOAuthReauthContext(
+            adminRequest,
+            token!,
+          );
+          break;
+        case AdminActionType.REAUTHORIZE_SERVER_OAUTH:
+          if (req.authContext?.role !== UserRole.Owner) {
+            throw new AdminError(
+              'Only Owner role can reauthorize server OAuth.',
+              AdminErrorCode.FORBIDDEN,
+            );
+          }
+          result = await this.serverHandler.handleReauthorizeServerOAuth(adminRequest, token!);
+          break;
         case AdminActionType.DELETE_SERVER:
           result = await this.serverHandler.handleDeleteServer(adminRequest);
           break;

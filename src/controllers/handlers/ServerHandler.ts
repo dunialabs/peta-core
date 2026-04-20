@@ -28,6 +28,21 @@ import {
 const SLACK_TOKEN_ROTATION_REQUIRED_MESSAGE =
   'Slack OAuth requires Token Rotation. Enable Token Rotation in Slack OAuth settings.';
 
+type OAuthCredentialSource = 'peta' | 'custom';
+
+interface ServerOAuthReauthConfig {
+  authorizationUrl: string;
+  tokenUrl: string;
+  responseType: string;
+  scopes?: string;
+  extraParams?: Record<string, string>;
+  applyUrl?: string;
+  pkce?: {
+    required?: boolean;
+    method?: 'S256' | 'plain';
+  };
+}
+
 /**
  * Server operation handler (2000-2999)
  */
@@ -187,6 +202,264 @@ export class ServerHandler {
     return {
       successServers: successServers,
       failedServers: failedServers,
+    };
+  }
+
+  async handleGetServerOAuthReauthContext(
+    request: AdminRequest<any>,
+    token: string,
+  ): Promise<any> {
+    const { serverId } = request.data || {};
+
+    if (!serverId || typeof serverId !== 'string') {
+      throw new AdminError('Missing required field: serverId', AdminErrorCode.INVALID_REQUEST);
+    }
+
+    const server = await ServerRepository.findByServerId(serverId);
+    if (!server) {
+      throw new AdminError('Server not found', AdminErrorCode.SERVER_NOT_FOUND);
+    }
+
+    const context = await this.buildServerOAuthReauthContext(server, token);
+
+    return {
+      serverId,
+      credentialSource: context.credentialSource,
+      clientId: context.clientId,
+      oAuthConfig: context.oAuthConfig,
+      reauthorizeAvailable: context.reauthorizeAvailable,
+      missingFields: context.missingFields,
+    };
+  }
+
+  async handleReauthorizeServerOAuth(request: AdminRequest<any>, token: string): Promise<any> {
+    const { serverId, code, redirectUri, pkceVerifier } = request.data || {};
+
+    if (!serverId || typeof serverId !== 'string') {
+      throw new AdminError('Missing required field: serverId', AdminErrorCode.INVALID_REQUEST);
+    }
+    if (!code || typeof code !== 'string') {
+      throw new AdminError('Missing required field: code', AdminErrorCode.INVALID_REQUEST);
+    }
+    if (!redirectUri || typeof redirectUri !== 'string') {
+      throw new AdminError('Missing required field: redirectUri', AdminErrorCode.INVALID_REQUEST);
+    }
+    if (pkceVerifier !== undefined && typeof pkceVerifier !== 'string') {
+      throw new AdminError('Invalid pkceVerifier', AdminErrorCode.INVALID_REQUEST);
+    }
+
+    const server = await ServerRepository.findByServerId(serverId);
+    if (!server) {
+      throw new AdminError('Server not found', AdminErrorCode.SERVER_NOT_FOUND);
+    }
+    if (server.category !== ServerCategory.Template) {
+      throw new AdminError(
+        'OAuth reauthorization is only supported for template servers',
+        AdminErrorCode.INVALID_REQUEST,
+      );
+    }
+    if (server.allowUserInput) {
+      throw new AdminError(
+        'OAuth reauthorization is only supported for owner-configured servers',
+        AdminErrorCode.INVALID_REQUEST,
+      );
+    }
+    if (server.authType === ServerAuthType.ApiKey) {
+      throw new AdminError(
+        'OAuth reauthorization is not supported for API key authentication',
+        AdminErrorCode.INVALID_REQUEST,
+      );
+    }
+
+    const context = await this.buildServerOAuthReauthContext(server, token);
+    if (!context.reauthorizeAvailable || !context.oAuthConfig || !context.clientId) {
+      throw new AdminError(
+        `OAuth reauthorization is unavailable: ${context.missingFields.join(', ') || 'unknown reason'}`,
+        AdminErrorCode.INVALID_REQUEST,
+      );
+    }
+
+    const decryptedLaunchConfig = await CryptoService.decryptDataFromString(server.launchConfig, token);
+    const decryptedLaunchConfigValue = JSON.parse(decryptedLaunchConfig);
+    const existingOauthConfig = decryptedLaunchConfigValue.oauth ?? {};
+    const provider = AuthUtils.getOAuthProvider(server.authType);
+    const oauthScope = this.getOAuthScope(context.oAuthConfig);
+
+    if (!provider) {
+      throw new AdminError('Invalid OAuth provider', AdminErrorCode.INVALID_REQUEST);
+    }
+
+    if (context.credentialSource === 'peta') {
+      const keyLength = Math.ceil(token.length * 0.5);
+      const key = token.substring(keyLength) + serverId + server.allowUserInput.toString();
+      const hashKey = await CryptoService.hash(key);
+
+      const requestBody: {
+        clientId: string;
+        provider: string;
+        key: string;
+        code: string;
+        redirectUri: string;
+        tokenUrl?: string;
+        codeVerifier?: string;
+        scope?: string;
+      } = {
+        clientId: context.clientId,
+        provider,
+        key: hashKey,
+        code,
+        redirectUri,
+        codeVerifier: pkceVerifier,
+        scope: [ServerAuthType.ZendeskAuth].includes(server.authType) ? oauthScope : undefined,
+      };
+
+      if ((provider === 'zendesk' || provider === 'canvas') && context.oAuthConfig.tokenUrl) {
+        requestBody.tokenUrl = context.oAuthConfig.tokenUrl;
+      } else if (provider === 'zendesk' || provider === 'canvas') {
+        throw new AdminError('Missing OAuth tokenUrl', AdminErrorCode.INVALID_REQUEST);
+      }
+
+      try {
+        const response = await fetch(`${PETA_AUTH_CONFIG.BASE_URL}/v1/oauth/exchange`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result?.accessToken || !result?.expiresAt) {
+          this.logger.warn(
+            {
+              status: response.status,
+              provider,
+              clientId:
+                context.clientId.substring(0, 10) +
+                '...' +
+                context.clientId.substring(context.clientId.length - 10),
+            },
+            'Peta OAuth reauthorization exchange failed',
+          );
+          throw new AdminError(
+            'Failed to exchange OAuth code',
+            AdminErrorCode.INVALID_REQUEST,
+          );
+        }
+
+        decryptedLaunchConfigValue.oauth = {
+          clientId: context.clientId,
+          key: hashKey,
+          accessToken: result.accessToken,
+          expiresAt: result.expiresAt,
+        };
+      } catch (error) {
+        this.logger.error({ err: error }, 'Error reauthorizing Peta OAuth');
+        if (error instanceof AdminError) {
+          throw error;
+        }
+        throw new AdminError('Failed to exchange OAuth code', AdminErrorCode.INVALID_REQUEST);
+      }
+    } else {
+      const clientSecret = existingOauthConfig.clientSecret;
+      if (!clientSecret || typeof clientSecret !== 'string' || clientSecret.trim() === '') {
+        throw new AdminError('Invalid OAuth client secret', AdminErrorCode.INVALID_REQUEST);
+      }
+
+      try {
+        const exchangeResult = await exchangeAuthorizationCode({
+          provider,
+          tokenUrl: context.oAuthConfig.tokenUrl,
+          clientId: context.clientId,
+          clientSecret,
+          code,
+          redirectUri,
+          codeVerifier: pkceVerifier,
+          scope: [ServerAuthType.ZendeskAuth].includes(server.authType) ? oauthScope : undefined,
+          tokenMode: server.authType === ServerAuthType.SlackAuth ? 'user' : undefined,
+        });
+
+        if (server.authType === ServerAuthType.IntercomAuth && !exchangeResult.refreshToken) {
+          exchangeResult.refreshToken = INTERCOM_FAKE_REFRESH_TOKEN;
+        }
+
+        if (server.authType === ServerAuthType.SlackAuth && !exchangeResult.refreshToken) {
+          throw new AdminError(
+            SLACK_TOKEN_ROTATION_REQUIRED_MESSAGE,
+            AdminErrorCode.INVALID_REQUEST,
+          );
+        }
+
+        if (!exchangeResult.accessToken || !exchangeResult.refreshToken) {
+          throw new AdminError('Failed to exchange OAuth code', AdminErrorCode.INVALID_REQUEST);
+        }
+
+        const expiresAt =
+          exchangeResult.expiresAt ?? Date.now() + 30 * 24 * 60 * 60 * 1000;
+
+        decryptedLaunchConfigValue.oauth = {
+          ...existingOauthConfig,
+          clientId: context.clientId,
+          clientSecret,
+          accessToken: exchangeResult.accessToken,
+          refreshToken: exchangeResult.refreshToken,
+          expiresAt,
+        };
+        if (server.authType === ServerAuthType.SlackAuth) {
+          decryptedLaunchConfigValue.oauth.tokenMode = 'user';
+        }
+        if (server.authType === ServerAuthType.IntercomAuth) {
+          const intercomMetadata = await fetchIntercomTokenMetadata(exchangeResult.accessToken);
+          decryptedLaunchConfigValue.oauth.intercomRegion = intercomMetadata.intercomRegion;
+        }
+        if (server.authType === ServerAuthType.PipedriveAuth) {
+          if (!exchangeResult.apiDomain) {
+            throw new AdminError(
+              'Pipedrive OAuth response missing api_domain',
+              AdminErrorCode.INVALID_REQUEST,
+            );
+          }
+          decryptedLaunchConfigValue.oauth.apiDomain = exchangeResult.apiDomain;
+        }
+        if ([ServerAuthType.ZendeskAuth].includes(server.authType)) {
+          decryptedLaunchConfigValue.oauth.tokenUrl = context.oAuthConfig.tokenUrl;
+        }
+        if (server.authType === ServerAuthType.ZendeskAuth) {
+          if (oauthScope) {
+            decryptedLaunchConfigValue.oauth.scope = oauthScope;
+          }
+          if (
+            exchangeResult.raw.refresh_token_expires_in &&
+            typeof exchangeResult.raw.refresh_token_expires_in === 'number'
+          ) {
+            decryptedLaunchConfigValue.oauth.refreshTokenExpiresAt =
+              Date.now() + exchangeResult.raw.refresh_token_expires_in * 1000;
+          }
+        }
+      } catch (error) {
+        this.logger.error({ err: error }, 'Error reauthorizing custom OAuth');
+        if (error instanceof AdminError) {
+          throw error;
+        }
+        throw new AdminError('Failed to exchange OAuth code', AdminErrorCode.INVALID_REQUEST);
+      }
+    }
+
+    const encryptedLaunchConfig = await CryptoService.encryptData(
+      JSON.stringify(decryptedLaunchConfigValue),
+      token,
+    );
+    await this.updateServerLaunchConfig(serverId, JSON.stringify(encryptedLaunchConfig), token);
+
+    LogService.getInstance().enqueueLog({
+      action: MCPEventLogType.AdminServerEdit,
+      requestParams: JSON.stringify({ serverId, action: 'oauth_reauthorize' }),
+    });
+
+    const updatedServer = await ServerRepository.findByServerId(serverId);
+    return {
+      server: updatedServer,
+      message: 'OAuth reauthorized successfully',
     };
   }
 
@@ -1175,6 +1448,142 @@ export class ServerHandler {
       'launch_cmd_updated',
     );
     return true;
+  }
+
+  private async buildServerOAuthReauthContext(
+    server: Server,
+    token: string,
+  ): Promise<{
+    credentialSource: OAuthCredentialSource;
+    clientId: string | null;
+    oAuthConfig: ServerOAuthReauthConfig | null;
+    reauthorizeAvailable: boolean;
+    missingFields: string[];
+  }> {
+    const credentialSource: OAuthCredentialSource = server.usePetaOauthConfig ? 'peta' : 'custom';
+    const missingFields: string[] = [];
+
+    if (server.category !== ServerCategory.Template) {
+      missingFields.push('category');
+    }
+    if (server.allowUserInput) {
+      missingFields.push('allowUserInput');
+    }
+    if (server.authType === ServerAuthType.ApiKey) {
+      missingFields.push('authType');
+    }
+
+    let parsedConfigTemplate: any = null;
+    if (server.configTemplate && server.configTemplate.trim() !== '') {
+      try {
+        parsedConfigTemplate = JSON.parse(server.configTemplate);
+      } catch (error) {
+        this.logger.warn({ err: error, serverId: server.serverId }, 'Failed to parse configTemplate');
+      }
+    }
+
+    const rawOAuthConfig = parsedConfigTemplate?.oAuthConfig;
+    const oAuthConfig =
+      rawOAuthConfig && typeof rawOAuthConfig === 'object'
+        ? this.serializeServerOAuthReauthConfig(rawOAuthConfig)
+        : null;
+
+    if (!oAuthConfig) {
+      missingFields.push('oAuthConfig');
+    } else {
+      if (
+        !oAuthConfig.authorizationUrl ||
+        this.containsOAuthPlaceholder(oAuthConfig.authorizationUrl)
+      ) {
+        missingFields.push('authorizationUrl');
+      }
+      if (!oAuthConfig.tokenUrl || this.containsOAuthPlaceholder(oAuthConfig.tokenUrl)) {
+        missingFields.push('tokenUrl');
+      }
+      if (!oAuthConfig.responseType || oAuthConfig.responseType.trim() === '') {
+        missingFields.push('responseType');
+      }
+    }
+
+    let clientId: string | null = null;
+    if (credentialSource === 'peta') {
+      const templateClientId = rawOAuthConfig?.clientId;
+      if (typeof templateClientId === 'string' && templateClientId.trim() !== '') {
+        clientId = templateClientId;
+      }
+    } else {
+      try {
+        const decryptedLaunchConfig = await CryptoService.decryptDataFromString(server.launchConfig, token);
+        const decryptedLaunchConfigValue = JSON.parse(decryptedLaunchConfig);
+        const oauth = decryptedLaunchConfigValue?.oauth;
+        if (oauth && typeof oauth === 'object') {
+          if (typeof oauth.clientId === 'string' && oauth.clientId.trim() !== '') {
+            clientId = oauth.clientId;
+          } else {
+            missingFields.push('clientId');
+          }
+          if (
+            typeof oauth.clientSecret !== 'string' ||
+            oauth.clientSecret.trim() === ''
+          ) {
+            missingFields.push('clientSecret');
+          }
+        } else {
+          missingFields.push('launchConfig.oauth');
+        }
+      } catch (error) {
+        this.logger.warn(
+          { err: error, serverId: server.serverId },
+          'Failed to decrypt launchConfig for OAuth reauthorization context',
+        );
+        missingFields.push('launchConfig.oauth');
+      }
+    }
+
+    if (!clientId) {
+      missingFields.push('clientId');
+    }
+
+    return {
+      credentialSource,
+      clientId,
+      oAuthConfig,
+      reauthorizeAvailable: missingFields.length === 0,
+      missingFields: [...new Set(missingFields)],
+    };
+  }
+
+  private serializeServerOAuthReauthConfig(rawOAuthConfig: any): ServerOAuthReauthConfig {
+    return {
+      authorizationUrl: typeof rawOAuthConfig.authorizationUrl === 'string' ? rawOAuthConfig.authorizationUrl : '',
+      tokenUrl: typeof rawOAuthConfig.tokenUrl === 'string' ? rawOAuthConfig.tokenUrl : '',
+      responseType:
+        typeof rawOAuthConfig.responseType === 'string' ? rawOAuthConfig.responseType : '',
+      scopes: this.getOAuthScope(rawOAuthConfig),
+      extraParams:
+        rawOAuthConfig.extraParams && typeof rawOAuthConfig.extraParams === 'object'
+          ? rawOAuthConfig.extraParams
+          : undefined,
+      applyUrl: typeof rawOAuthConfig.applyUrl === 'string' ? rawOAuthConfig.applyUrl : undefined,
+      pkce:
+        rawOAuthConfig.pkce && typeof rawOAuthConfig.pkce === 'object'
+          ? rawOAuthConfig.pkce
+          : undefined,
+    };
+  }
+
+  private getOAuthScope(oauthConfig: any): string | undefined {
+    if (typeof oauthConfig?.scope === 'string' && oauthConfig.scope.trim() !== '') {
+      return oauthConfig.scope;
+    }
+    if (typeof oauthConfig?.scopes === 'string' && oauthConfig.scopes.trim() !== '') {
+      return oauthConfig.scopes;
+    }
+    return undefined;
+  }
+
+  private containsOAuthPlaceholder(value: string): boolean {
+    return /YOUR_[A-Z0-9_]+/.test(value);
   }
 
   private async updateLazyStartEnabled(

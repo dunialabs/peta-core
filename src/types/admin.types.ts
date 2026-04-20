@@ -29,6 +29,8 @@ export enum AdminActionType {
   DELETE_SERVER = 2013, // Delete server
   DELETE_SERVERS_BY_PROXY = 2014, // Batch delete servers by proxy
   COUNT_SERVERS = 2015, // Count number of servers
+  GET_SERVER_OAUTH_REAUTH_CONTEXT = 2016, // Get OAuth reauthorization context for a server
+  REAUTHORIZE_SERVER_OAUTH = 2017, // Reauthorize OAuth for a server
 
   // Query operations (3000-3999)
   GET_AVAILABLE_SERVERS_CAPABILITIES = 3002, // Get all server capabilities configuration
