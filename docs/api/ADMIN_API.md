@@ -48,6 +48,8 @@ UPDATE_SERVER = 2012, // Update server
 DELETE_SERVER = 2013, // Delete server
 DELETE_SERVERS_BY_PROXY = 2014, // Batch delete servers by proxy
 COUNT_SERVERS = 2015, // Count servers
+GET_SERVER_OAUTH_REAUTH_CONTEXT = 2016, // Get OAuth reauthorization context for a server
+REAUTHORIZE_SERVER_OAUTH = 2017, // Reauthorize OAuth for a server
 
 // Query operations (3000-3999)
 GET_AVAILABLE_SERVERS_CAPABILITIES = 3002, // Get all server capability configurations
@@ -870,6 +872,7 @@ null
 **OAuth Template note**:
 
 - If `configTemplate.oAuthConfig.clientId` exists, the decrypted `launchConfig` must include `oauth` fields (`clientId`, `clientSecret`, `code`, `redirectUri`, etc.); system exchanges and persists tokens.
+- For later owner-managed OAuth reauthorization, use `2016 GET_SERVER_OAUTH_REAUTH_CONTEXT` and `2017 REAUTHORIZE_SERVER_OAUTH` instead of `2012 UPDATE_SERVER`.
 - Intercom OAuth templates (`authType=16`) additionally persist `oauth.intercomRegion` after exchanging the authorization code. Intercom does not return refresh tokens, so Core stores a compatibility placeholder value internally and validates the access token through Intercom's `/me` endpoint at runtime.
 - If Intercom later reports that a stored token is invalid, owner-managed servers are disabled after Core clears the dynamic OAuth state. For `allowUserInput=true` servers, Core unconfigures the affected user's saved server configuration instead of keeping a stale temporary OAuth payload around.
 
@@ -1158,6 +1161,103 @@ null
   "count": 10
 }
 ```
+
+---
+
+#### 2016 GET_SERVER_OAUTH_REAUTH_CONTEXT
+
+**Permission**: **Owner only**
+**Function**: Return the persisted OAuth configuration needed to reauthorize an existing owner-managed Template server
+
+**Request Parameters** (data):
+
+- `serverId` (string, required): Server ID
+
+**Return Result** (data):
+
+```json
+{
+  "serverId": "zendesk",
+  "credentialSource": "custom",
+  "clientId": "your-client-id",
+  "oAuthConfig": {
+    "authorizationUrl": "https://example.zendesk.com/oauth/authorizations/new",
+    "tokenUrl": "https://example.zendesk.com/oauth/tokens",
+    "responseType": "code",
+    "scopes": "read write",
+    "extraParams": {
+      "access_type": "offline"
+    },
+    "applyUrl": "https://example.com/oauth-docs",
+    "pkce": {
+      "required": true,
+      "method": "S256"
+    }
+  },
+  "reauthorizeAvailable": true,
+  "missingFields": []
+}
+```
+
+**Function Description**:
+
+- This action does **not** start browser authorization. It only returns the server-specific OAuth metadata that Console or an external caller needs before sending the user to the provider.
+- `credentialSource` is derived from the persisted `usePetaOauthConfig` flag:
+  - `peta`: use Peta-managed OAuth app credentials
+  - `custom`: use credentials already stored inside the encrypted server launch config
+- `oAuthConfig` is read from the server's persisted `configTemplate.oAuthConfig`, not from the latest cloud template. This avoids template drift during reauthorization.
+- For `custom` servers, Core decrypts the current `launchConfig.oauth` to verify that `clientId` and `clientSecret` are present. `clientSecret` never appears in the response.
+- Availability rules:
+  - Only `Template` servers are eligible
+  - Only owner-managed servers (`allowUserInput=false`) are eligible
+  - `ApiKey` servers are not eligible
+  - Placeholder endpoints such as `YOUR_OAUTH_*` make the flow unavailable
+- If any prerequisite is missing, the action still succeeds and returns `reauthorizeAvailable=false`; callers must inspect `missingFields` to decide whether to disable the UI or fall back to manual remediation.
+
+---
+
+#### 2017 REAUTHORIZE_SERVER_OAUTH
+
+**Permission**: **Owner only**
+**Function**: Complete OAuth reauthorization for an existing owner-managed Template server and persist the refreshed OAuth state
+
+**Request Parameters** (data):
+
+- `serverId` (string, required): Server ID
+- `code` (string, required): OAuth authorization code returned by the provider
+- `redirectUri` (string, required): Redirect URI used in the browser authorization step
+- `pkceVerifier` (string, optional): PKCE verifier when the provider requires PKCE
+
+**Return Result** (data):
+
+```json
+{
+  "server": {
+    "serverId": "zendesk",
+    "serverName": "Zendesk",
+    "enabled": true,
+    "...": "..."
+  },
+  "message": "OAuth reauthorized successfully"
+}
+```
+
+**Function Description**:
+
+- This action reuses persisted server state. It does **not** accept raw `authConf`, `clientSecret`, or cloud template data from the caller.
+- Parameter sources are fixed:
+  - `credentialSource` comes from `usePetaOauthConfig`
+  - OAuth endpoints, response type, scopes, extra params, and PKCE metadata come from persisted `configTemplate.oAuthConfig`
+  - For `custom`, `clientId` / `clientSecret` come from the decrypted `launchConfig.oauth`
+- Execution rules:
+  - `peta` servers use the existing Peta-managed OAuth exchange path
+  - `custom` servers exchange the code with the stored app credentials and preserve provider-specific runtime metadata where applicable
+- Success behavior:
+  - Core replaces the relevant token fields inside the encrypted `launchConfig.oauth`
+  - Core then reuses the standard launch-config update / reconnect path so the managed server picks up the new OAuth state
+- Failure behavior:
+  - If the exchange fails, the previously stored token state remains unchanged
+  - Invalid category / auth mode / missing fields return an invalid-request style error rather than partially mutating the server
 
 ---
 
