@@ -16,9 +16,6 @@ import { SessionStore } from './SessionStore.js';
 import { ServerLogger } from '../../log/ServerLogger.js';
 import { MCPEventLogType } from '../../types/enums.js';
 import {
-  CreateMessageRequestSchema,
-  ListRootsRequestSchema,
-  ElicitRequestSchema,
   ToolListChangedNotificationSchema,
   ResourceListChangedNotificationSchema,
   PromptListChangedNotificationSchema,
@@ -38,7 +35,6 @@ import { APP_INFO } from '../../config/config.js';
 import { Server, User } from '@prisma/client';
 import { ClientSession } from './ClientSession.js';
 import { socketNotifier } from '../../socket/SocketNotifier.js';
-import { ProxyContext } from '../../types/mcp.types.js';
 import { createLogger } from '../../logger/index.js';
 import * as path from 'path';
 import { resolveHostPath } from '../../utils/DockerHostPathResolver.js';
@@ -80,10 +76,11 @@ export class ServerManager {
   private temporaryServers: Map<string, ServerContext> = new Map();
   private temporaryServerLoggers: Map<string, ServerLogger> = new Map();
   private plannedTransportCloses: WeakSet<object> = new WeakSet();
-  private globalRouter?: GlobalRequestRouter;
+  private readonly globalRouter: GlobalRequestRouter = GlobalRequestRouter.getInstance();
   private clientOptions: ClientOptions = {
     capabilities: {
-      // Declare client capabilities so server knows it can initiate reverse requests
+      // Shared downstream connections intentionally do not advertise standard reverse-request
+      // capabilities such as sampling, roots, or elicitation.
       // sampling: {},
       // roots: { listChanged: true },
       // elicitation: {}
@@ -1216,8 +1213,8 @@ export class ServerManager {
         }
       }
 
-      // 7. Register global reverse request handlers
-      this.registerReverseRequestHandlers(client, serverContext);
+      // 7. Register downstream notifications that remain supported in shared session mode.
+      this.registerDownstreamNotificationHandlers(client, serverContext);
 
       await client.ping({ timeout: 5000 });
 
@@ -1315,7 +1312,7 @@ export class ServerManager {
               try {
                 const tools = await client.listTools();
                 await serverContext.updateTools(tools);
-                this.globalRouter?.handleToolsListChanged(serverContext.serverEntity.serverId);
+                this.globalRouter.handleToolsListChanged(serverContext.serverEntity.serverId);
 
                 try {
                   const { discoveryIndexBuilder } =
@@ -1358,7 +1355,7 @@ export class ServerManager {
                 await serverContext.updateResources(resources);
                 const resourceTemplates = await client.listResourceTemplates();
                 await serverContext.updateResourceTemplates(resourceTemplates);
-                this.globalRouter?.handleResourcesListChanged(serverContext.serverEntity.serverId);
+                this.globalRouter.handleResourcesListChanged(serverContext.serverEntity.serverId);
 
                 // Log ServerCapabilityUpdate (1313)
                 const serverLogger = this.serverLoggers.get(serverContext.serverEntity.serverId);
@@ -1385,7 +1382,7 @@ export class ServerManager {
           client.setNotificationHandler(
             ResourceUpdatedNotificationSchema,
             async (notification: ResourceUpdatedNotification) => {
-              this.globalRouter?.handleResourceUpdated(
+              this.globalRouter.handleResourceUpdated(
                 serverContext.serverEntity.serverId,
                 notification,
                 serverContext.id,
@@ -1401,7 +1398,7 @@ export class ServerManager {
               try {
                 const prompts = await client.listPrompts();
                 await serverContext.updatePrompts(prompts);
-                this.globalRouter?.handlePromptsListChanged(serverContext.serverEntity.serverId);
+                this.globalRouter.handlePromptsListChanged(serverContext.serverEntity.serverId);
 
                 // Log ServerCapabilityUpdate (1313)
                 const serverLogger = this.serverLoggers.get(serverContext.serverEntity.serverId);
@@ -2004,130 +2001,16 @@ export class ServerManager {
   }
 
   /**
-   * Register reverse request handlers
-   * Handle requests initiated by Server (Sampling, Roots, Elicitation)
+   * Register downstream notification handlers that remain supported in shared session mode.
+   * Standard reverse requests such as sampling/roots/elicitation are intentionally unsupported.
    */
-  private registerReverseRequestHandlers(client: Client, serverContext: ServerContext): void {
-    if (!this.globalRouter) {
-      this.logger.warn(
-        'GlobalRequestRouter not initialized, skipping reverse request handler registration',
-      );
-      return;
-    }
-
+  private registerDownstreamNotificationHandlers(client: Client, serverContext: ServerContext): void {
     const router = this.globalRouter;
     const serverId = serverContext.serverEntity.serverId;
-
-    if (this.clientOptions.capabilities?.sampling) {
-      // Register Sampling request handler
-      client.setRequestHandler(CreateMessageRequestSchema, async (request, extra) => {
-        this.logger.debug(
-          {
-            serverId,
-            requestId: extra?.requestId,
-            sessionId: extra?.sessionId,
-            requestInfo: extra?.requestInfo,
-            hasAuthInfo: !!extra?.authInfo,
-            hasSendRequest: typeof extra?.sendRequest === 'function',
-            hasSendNotification: typeof extra?.sendNotification === 'function',
-          },
-          'Server requested sampling',
-        );
-
-        // Extract proxyContext from _meta
-        const proxyContext = request.params._meta?.proxyContext as ProxyContext | undefined;
-
-        if (!proxyContext || !proxyContext.proxyRequestId) {
-          this.logger.error(
-            {
-              serverId,
-              requestId: extra?.requestId,
-              params: request.params,
-            },
-            '[CRITICAL] No proxyContext in sampling request',
-          );
-          throw new McpError(
-            ErrorCode.InvalidRequest,
-            'Missing proxyContext for sampling request routing',
-          );
-        }
-
-        return router.handleSamplingRequest(serverId, request, proxyContext);
-      });
-    }
-
-    if (this.clientOptions.capabilities?.roots) {
-      // Register Roots list request handler
-      client.setRequestHandler(ListRootsRequestSchema, async (request, extra) => {
-        this.logger.debug(
-          {
-            serverId,
-            requestId: extra?.requestId,
-            sessionId: extra?.sessionId,
-            requestInfo: extra?.requestInfo,
-          },
-          'Server requested roots list',
-        );
-
-        // Extract proxyContext from _meta
-        const proxyContext = request.params?._meta?.proxyContext as ProxyContext | undefined;
-
-        if (!proxyContext || !proxyContext.proxyRequestId) {
-          this.logger.error(
-            {
-              serverId,
-              requestId: extra?.requestId,
-              params: request.params,
-            },
-            '[CRITICAL] No proxyContext in roots list request',
-          );
-          throw new McpError(
-            ErrorCode.InvalidRequest,
-            'Missing proxyContext for roots list request routing',
-          );
-        }
-
-        return router.handleRootsListRequest(serverId, request, proxyContext);
-      });
-    }
-
-    if (this.clientOptions.capabilities?.elicitation) {
-      // Register Elicitation request handler
-      client.setRequestHandler(ElicitRequestSchema, async (request, extra) => {
-        this.logger.debug(
-          {
-            serverId,
-            requestId: extra?.requestId,
-            sessionId: extra?.sessionId,
-            requestInfo: extra?.requestInfo,
-            params: request.params,
-          },
-          'Server requested user input',
-        );
-
-        // Extract proxyContext from _meta
-        const proxyContext = request.params._meta?.proxyContext as ProxyContext | undefined;
-
-        if (!proxyContext || !proxyContext.proxyRequestId) {
-          this.logger.error(
-            {
-              serverId,
-              requestId: extra?.requestId,
-              params: request.params,
-            },
-            '[CRITICAL] No proxyContext in elicitation request',
-          );
-          throw new McpError(
-            ErrorCode.InvalidRequest,
-            'Missing proxyContext for elicitation request routing',
-          );
-        }
-
-        return router.handleElicitationRequest(serverId, request, proxyContext);
-      });
-    }
-
-    this.logger.info({ serverId }, 'Reverse request handlers registered');
+    this.logger.info(
+      { serverId },
+      'Registered downstream notification handlers (reverse requests remain unsupported)',
+    );
 
     // Register cancellation notification handler from server
     client.setNotificationHandler(

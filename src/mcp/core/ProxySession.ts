@@ -1,7 +1,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { RequestHandlerExtra, RequestOptions } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import {
   CallToolRequestSchema,
   CallToolResultSchema,
@@ -15,12 +15,6 @@ import {
   CompleteRequestSchema,
   SetLevelRequestSchema,
   PingRequestSchema,
-  CreateMessageRequestSchema,
-  CreateMessageResultSchema,
-  ListRootsRequestSchema,
-  ListRootsResultSchema,
-  ElicitRequestSchema,
-  ElicitResultSchema,
   CancelledNotificationSchema,
   ProgressNotificationSchema,
   RootsListChangedNotificationSchema,
@@ -38,12 +32,6 @@ import {
   type CompleteRequest,
   type SetLevelRequest,
   type PingRequest,
-  type CreateMessageRequest,
-  type CreateMessageResult,
-  type ListRootsRequest,
-  type ListRootsResult,
-  type ElicitRequest,
-  type ElicitResult,
   type CancelledNotification,
   type ProgressNotification,
   type RootsListChangedNotification,
@@ -71,10 +59,6 @@ import {
 import { ClientSession } from './ClientSession.js';
 import { ServerManager } from './ServerManager.js';
 import { LogService } from '../../log/LogService.js';
-import {
-  getReverseRequestTimeout,
-  ReverseRequestTimeoutError,
-} from '../../config/reverseRequestConfig.js';
 import { SessionLogger } from '../../log/SessionLogger.js';
 import { Request, Response } from 'express';
 import { PersistentEventStore } from './PersistentEventStore.js';
@@ -82,7 +66,6 @@ import { RequestIdMapper } from './RequestIdMapper.js';
 import { APP_INFO } from '../../config/config.js';
 import { ApprovalStatus, DangerLevel, MCPEventLogType, PolicyDecision } from '../../types/enums.js';
 import { socketNotifier } from '../../socket/SocketNotifier.js';
-import { ProxyContext } from '../../types/mcp.types.js';
 import { createLogger } from '../../logger/index.js';
 import { policyEngine } from '../services/PolicyEngine.js';
 import { approvalService, ApprovalRateLimitError } from '../services/ApprovalService.js';
@@ -936,19 +919,9 @@ export class ProxySession {
       result.serverID,
     );
 
-    // Deep copy request and inject proxyContext for reverse request routing
-    const proxyContext: ProxyContext = {
-      proxyRequestId: proxyRequestId,
-      uniformRequestId: uniformRequestId,
-    };
-
     const copyParams = {
       ...request.params,
       name: result.originalName,
-      _meta: {
-        ...request.params._meta,
-        proxyContext: proxyContext,
-      },
     };
 
     this.logger.debug(
@@ -1779,20 +1752,10 @@ export class ProxySession {
       result.serverID,
     );
 
-    // Deep copy request and inject proxyContext for reverse request routing
-    const proxyContext: ProxyContext = {
-      proxyRequestId: proxyRequestId,
-      uniformRequestId: uniformRequestId,
-    };
-
     const requestCopy = JSON.parse(JSON.stringify(request));
     // Downstream servers expect their original resource URI, while the upstream client may use the
     // proxied URI exposed by this gateway.
     requestCopy.params.uri = result.originalName;
-    requestCopy.params._meta = {
-      ...requestCopy.params._meta,
-      proxyContext: proxyContext,
-    };
 
     let isReconnected: boolean | undefined;
 
@@ -2240,21 +2203,11 @@ export class ProxySession {
       parseResult.serverID,
     );
 
-    // Deep copy request and inject proxyContext for reverse request routing
-    const proxyContext: ProxyContext = {
-      proxyRequestId: proxyRequestId,
-      uniformRequestId: uniformRequestId,
-    };
-
     let isReconnected: boolean | undefined;
 
     try {
       const requestCopy = JSON.parse(JSON.stringify(request));
       requestCopy.params.name = parseResult.originalName;
-      requestCopy.params._meta = {
-        ...requestCopy.params._meta,
-        proxyContext: proxyContext,
-      };
 
       const promptCacheServiceForStore = ResultCacheService.instance;
       const storePromptCachePolicy = promptCacheServiceForStore.resolvePromptPolicy(
@@ -2589,214 +2542,6 @@ export class ProxySession {
   }
 
   /**
-   * Check if server can request Sampling
-   */
-  public canServerRequestSampling(): boolean {
-    // Check if server has sampling permission
-    return this.clientSession.canRequestSampling();
-  }
-
-  /**
-   * Check if server can request Elicitation
-   */
-  public canServerRequestElicitation(): boolean {
-    // Check if server has elicitation permission
-    return this.clientSession.canRequestElicitation();
-  }
-
-  /**
-   * Forward Sampling request to client
-   */
-  public async forwardSamplingToClient(
-    request: CreateMessageRequest,
-    options?: RequestOptions,
-  ): Promise<CreateMessageResult> {
-    this.logger.debug({
-      relatedRequestId: options?.relatedRequestId,
-      messageRole: request.params.messages?.[0]?.role,
-      messageContent: (() => {
-        const firstMessage = request.params.messages?.[0];
-        if (!firstMessage?.content) return undefined;
-        const content: any = firstMessage.content;
-        if (typeof content === 'string') {
-          return content.slice(0, 100);
-        }
-        return JSON.stringify(content).slice(0, 100);
-      })(),
-    });
-
-    // Handle relatedRequestId mapping
-    if (options?.relatedRequestId) {
-      const proxyRequestId = String(options.relatedRequestId);
-      const originalRequestId = this.requestIdMapper.getOriginalRequestId(proxyRequestId);
-
-      if (originalRequestId) {
-        // Replace with original requestId
-        options = {
-          ...options,
-          relatedRequestId: originalRequestId,
-        };
-        this.logger.debug(
-          { proxyRequestId, originalRequestId },
-          '[Sampling] Successfully mapped relatedRequestId',
-        );
-      } else {
-        this.logger.warn(
-          { proxyRequestId, stats: this.requestIdMapper.getStats() },
-          '[Sampling] CRITICAL: No original requestId found',
-        );
-      }
-    } else {
-      this.logger.warn('[Sampling] WARNING: No relatedRequestId provided in options');
-    }
-
-    // Add timeout control
-    const timeout = getReverseRequestTimeout('sampling');
-    let timeoutReject: ((reason: ReverseRequestTimeoutError) => void) | undefined;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutReject = reject;
-    });
-    const timeoutId = setTimeout(() => {
-      timeoutReject?.(new ReverseRequestTimeoutError('sampling', timeout));
-    }, timeout);
-    try {
-      return await Promise.race([
-        this.upstreamServer.createMessage(request.params, options),
-        timeoutPromise,
-      ]);
-    } catch (error) {
-      if (error instanceof ReverseRequestTimeoutError) {
-        this.logger.error({ timeout }, '[Sampling] Request timeout');
-      }
-      throw error;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  /**
-   * Forward Roots List request to client
-   */
-  public async forwardRootsListToClient(
-    request: ListRootsRequest,
-    options?: RequestOptions,
-  ): Promise<ListRootsResult> {
-    this.logger.debug(
-      { relatedRequestId: options?.relatedRequestId },
-      'Forwarding roots list request to client',
-    );
-
-    // Handle relatedRequestId mapping
-    if (options?.relatedRequestId) {
-      const proxyRequestId = String(options.relatedRequestId);
-      const originalRequestId = this.requestIdMapper.getOriginalRequestId(proxyRequestId);
-
-      if (originalRequestId) {
-        // Replace with original requestId
-        options = {
-          ...options,
-          relatedRequestId: originalRequestId,
-        };
-        this.logger.debug(
-          { proxyRequestId, originalRequestId },
-          '[ListRoots] Successfully mapped relatedRequestId',
-        );
-      } else {
-        this.logger.warn(
-          { proxyRequestId, stats: this.requestIdMapper.getStats() },
-          '[ListRoots] CRITICAL: No original requestId found',
-        );
-      }
-    } else {
-      this.logger.warn('[ListRoots] WARNING: No relatedRequestId provided in options');
-    }
-
-    // Add timeout control
-    const timeout = getReverseRequestTimeout('roots');
-    let timeoutReject: ((reason: ReverseRequestTimeoutError) => void) | undefined;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutReject = reject;
-    });
-    const timeoutId = setTimeout(() => {
-      timeoutReject?.(new ReverseRequestTimeoutError('roots', timeout));
-    }, timeout);
-    try {
-      return await Promise.race([
-        this.upstreamServer.listRoots(request.params, options),
-        timeoutPromise,
-      ]);
-    } catch (error) {
-      if (error instanceof ReverseRequestTimeoutError) {
-        this.logger.error({ timeout }, '[ListRoots] Request timeout');
-      }
-      throw error;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  /**
-   * Forward Elicitation request to client
-   */
-  public async forwardElicitationToClient(
-    request: ElicitRequest,
-    options?: RequestOptions,
-  ): Promise<ElicitResult> {
-    this.logger.debug({
-      relatedRequestId: options?.relatedRequestId,
-      requestedSchema: request.params,
-    });
-
-    // Handle relatedRequestId mapping
-    if (options?.relatedRequestId) {
-      const proxyRequestId = String(options.relatedRequestId);
-      const originalRequestId = this.requestIdMapper.getOriginalRequestId(proxyRequestId);
-
-      if (originalRequestId) {
-        // Replace with original requestId
-        options = {
-          ...options,
-          relatedRequestId: originalRequestId,
-        };
-        this.logger.debug(
-          { proxyRequestId, originalRequestId },
-          '[Elicitation] Successfully mapped relatedRequestId',
-        );
-      } else {
-        this.logger.warn(
-          { proxyRequestId, stats: this.requestIdMapper.getStats() },
-          '[Elicitation] CRITICAL: No original requestId found',
-        );
-      }
-    } else {
-      this.logger.warn('[Elicitation] WARNING: No relatedRequestId provided in options');
-    }
-
-    // Add timeout control
-    const timeout = getReverseRequestTimeout('elicitation');
-    let timeoutReject: ((reason: ReverseRequestTimeoutError) => void) | undefined;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutReject = reject;
-    });
-    const timeoutId = setTimeout(() => {
-      timeoutReject?.(new ReverseRequestTimeoutError('elicitation', timeout));
-    }, timeout);
-    try {
-      return await Promise.race([
-        this.upstreamServer.elicitInput(request.params, options),
-        timeoutPromise,
-      ]);
-    } catch (error) {
-      if (error instanceof ReverseRequestTimeoutError) {
-        this.logger.error({ timeout }, '[Elicitation] Request timeout');
-      }
-      throw error;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  /**
    * Send resource list changed notification to client
    */
   public async sendResourcesListChangedToClient(): Promise<void> {
@@ -2808,13 +2553,6 @@ export class ProxySession {
    */
   public async sendPromptsListChangedToClient(): Promise<void> {
     this.clientSession.sendPromptListChanged();
-  }
-
-  /**
-   * Check if client supports Roots
-   */
-  public clientSupportsRoots(): boolean {
-    return this.clientSession.canRequestRoots();
   }
 
   /**

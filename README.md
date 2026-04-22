@@ -15,7 +15,7 @@ Supports the core infrastructure components required to run MCP in production: g
 - **Policy engine.** RBAC/ABAC with per-user, per-tool capability filtering. Optional human-in-the-loop approval for high-risk operations.
 - **Audit trail.** Every tool call is logged with caller identity, policy decision, and outcome. Secrets are never included in logs.
 - **Managed runtime.** Supervises downstream MCP servers with lifecycle controls and automated recovery.
-- **Protocol compatibility.** Standard MCP upstream and downstream. Existing clients and servers work without modification or custom extensions.
+- **Protocol compatibility.** Standard MCP upstream, plus downstream compatibility for the shared gateway flows that Peta Core currently supports. Standard server-initiated reverse requests (`sampling`, `roots`, `elicitation`) are intentionally not exposed in the current shared runtime.
 - **Self-hosted.** On-premises deployment model. No hosted SaaS dependency.
 
 [Quick Start](https://peta.io/quick-start) | [Website](https://peta.io) | [Documentation](https://docs.peta.io)
@@ -26,7 +26,7 @@ Supports the core infrastructure components required to run MCP in production: g
 
 ![Peta MCP Stack Overview](docs/overview.png)
 
-Peta Core sits between MCP clients (Claude, ChatGPT, Cursor, n8n, or any MCP-compatible client) and downstream MCP servers. From the client's perspective, it connects to a single MCP server. Behind that endpoint, Peta Core routes to multiple downstream servers using standard MCP in both directions.
+Peta Core sits between MCP clients (Claude, ChatGPT, Cursor, n8n, or any MCP-compatible client) and downstream MCP servers. From the client's perspective, it connects to a single MCP server. Behind that endpoint, Peta Core routes to multiple downstream servers using standard MCP for the shared forward-request flows it supports.
 
 Peta Core is one component of the Peta MCP stack:
 

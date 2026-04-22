@@ -82,7 +82,7 @@ Key architectural files:
 - `src/mcp/core/ProxySession.ts` - Core proxy session implementation
 - `src/mcp/core/ServerManager.ts` - Global singleton managing downstream server connections
 - `src/mcp/core/SessionStore.ts` - Client session lifecycle management
-- `src/mcp/core/GlobalRequestRouter.ts` - Routes reverse requests (sampling, elicitation, roots) from servers back to correct client sessions
+- `src/mcp/core/GlobalRequestRouter.ts` - Broadcasts downstream list/resource update notifications to eligible client sessions
 
 ### Request ID Mapping System
 
@@ -90,12 +90,11 @@ Key architectural files:
 
 1. **Client → Proxy**: Maps original client requestId to unique proxy requestId (format: `{sessionId}:{originalId}:{timestamp}`)
 2. **Proxy → Server**: Proxy requestId sent to downstream servers
-3. **Server → Client**: Reverse mapping for server-initiated requests (sampling, elicitation)
+3. **Server → Client notifications**: Proxy requestId is reused for cancellation/progress correlation on supported notification paths
 
 Implementation:
 - `src/mcp/core/RequestIdMapper.ts` - Per-session ID mapping
-- `src/mcp/core/RequestContextRegistry.ts` - Global request context (singleton)
-- See `MCP_PROXY_REQUESTID_SOLUTION.md` for detailed design
+- `src/mcp/core/GlobalRequestRouter.ts` - Notification fan-out and deduplication for list/resource update broadcasts
 
 ### Event Store for Reconnection
 
@@ -504,12 +503,15 @@ MCP endpoint requests flow through middleware in this order:
 
 ### 1. Reverse Request Handling
 
-When downstream servers initiate requests (sampling, elicitation, roots/list), the system:
-1. Server sends request with `relatedRequestId` (the proxy requestId from original client request)
-2. `GlobalRequestRouter` looks up request context in `RequestContextRegistry`
-3. Routes request to correct `ProxySession` via stored reference
-4. `ProxySession` maps proxy requestId back to original client requestId
-5. Forwards to client with correct relatedRequestId
+Standard MCP reverse requests (`sampling`, `elicitation`, `roots/list`) are intentionally unsupported
+under Peta's shared downstream connection model, including the current per-user temporary server mode.
+
+Supported server-to-client correlation is limited to notifications tied to an existing proxied request:
+1. Client request is assigned a proxy requestId by `RequestIdMapper`
+2. Proxy requestId is sent downstream as `relatedRequestId`
+3. Downstream may emit cancellation/progress notifications referencing that proxy requestId
+4. `ProxySession` maps the proxy requestId back to the original upstream requestId
+5. Notification is forwarded to the correct upstream session
 
 Critical: Always preserve `relatedRequestId` through the entire chain.
 
@@ -566,7 +568,7 @@ Client sessions flow:
 - Checks `lastActive` timestamp against timeout
 - Calls `removeSingleSession()` for expired sessions
 - Removes from maps: `sessions`, `proxySessions`, `userSessions`
-- Triggers `ProxySession.cleanup()` → unregisters from `GlobalRequestRouter`
+- Triggers `ProxySession.cleanup()` and clears `GlobalRequestRouter` notification dedupe state for the session
 
 ### 5. Dual Logging Architecture
 
@@ -623,7 +625,6 @@ Configuration is distributed across multiple files:
 
 - **`src/config/config.ts`** - App metadata from package.json (APP_INFO)
 - **`src/config/auth.config.ts`** - Token expiration, cookie settings
-- **`src/config/reverseRequestConfig.ts`** - Reverse request timeouts (30s)
 - **`.env`** - Runtime environment variables (DATABASE_URL, ports, SSL)
 
 Note: EventStore configuration (cache sizes, retention) is hardcoded in `PersistentEventStore` class.
@@ -757,7 +758,7 @@ When implementing tests in the future:
 
 1. **RequestId mapping**: Always use `RequestIdMapper` when forwarding requests. Never use raw client requestIds with downstream servers.
 
-2. **Session references**: `GlobalRequestRouter` stores `ProxySession` references in context. Must unregister on cleanup to avoid leaks.
+2. **Notification cleanup**: `GlobalRequestRouter` keeps per-session dedupe state for downstream notifications. Clear it during session cleanup to avoid leaks.
 
 3. **Server connection sharing**: Downstream server connections are shared across all client sessions via `ServerManager` singleton. Never close connections from `ProxySession`.
 

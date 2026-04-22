@@ -110,6 +110,11 @@ When the client has a previously delivered event ID, include it as `Last-Event-I
 - `prompts/list` - List prompts
 - `prompts/get` - Get prompt
 
+Peta Core does not expose standard downstream reverse-request capabilities such as
+`sampling`, `roots`, or `elicitation` in its current shared managed-connection and
+per-user temporary-connection modes. Downstream MCP servers should not expect the
+gateway to route those server-initiated requests back to upstream clients.
+
 #### Resource Namespace
 
 Peta Gateway uses namespaces to isolate resources from different servers:

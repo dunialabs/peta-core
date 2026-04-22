@@ -265,14 +265,14 @@ Test files follow these naming conventions:
 
 ### Current Test Status
 
-- Automated test coverage is being added; no test files are currently committed.
+- Automated test coverage continues to expand.
 - Integration and end-to-end scenarios are especially valuable.
 
 Additional test contributions are especially useful for:
 
 - Complete `ProxySession` lifecycle tests.
 - `RequestIdMapper` edge-case coverage.
-- `GlobalRequestRouter` routing behavior.
+- `GlobalRequestRouter` notification fan-out and deduplication behavior.
 - Concurrency tests for the persistent event store.
 - OAuth 2.0 flows.
 - Socket.IO connection and notification scenarios.

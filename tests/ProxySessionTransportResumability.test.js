@@ -75,11 +75,6 @@ jest.unstable_mockModule('../dist/log/LogService.js', () => ({
   },
 }));
 
-jest.unstable_mockModule('../dist/config/reverseRequestConfig.js', () => ({
-  getReverseRequestTimeout: () => 1000,
-  ReverseRequestTimeoutError: class ReverseRequestTimeoutError extends Error {},
-}));
-
 jest.unstable_mockModule('../dist/config/config.js', () => ({
   APP_INFO: {
     name: 'peta-core-test',
