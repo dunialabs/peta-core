@@ -124,13 +124,12 @@ export class MCPController {
 
       this.trackGetSseConnection(clientSession, res);
 
-      // Check Last-Event-ID header to support resumability
       const lastEventId = req.headers['last-event-id'] as string | undefined;
       if (lastEventId) {
-        this.logger.debug({ sessionId, lastEventId }, 'Client reconnecting with Last-Event-ID');
-        // Handle reconnection request
-        await proxySession.handleReconnection(lastEventId, res);
-        return;
+        this.logger.debug(
+          { sessionId, lastEventId },
+          'Client reconnecting with Last-Event-ID; delegating to transport',
+        );
       }
 
       this.logger.info({ sessionId }, 'Establishing new SSE stream for session');

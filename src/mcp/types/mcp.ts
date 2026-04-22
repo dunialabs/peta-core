@@ -107,6 +107,13 @@ export interface EventStore {
   storeEvent(streamId: StreamId, message: JSONRPCMessage): Promise<EventId>;
 
   /**
+   * Resolve stream ID for a stored event
+   * @param eventId Stored event ID
+   * @returns Stream ID when the event exists
+   */
+  getStreamIdForEventId?(eventId: EventId): Promise<StreamId | undefined>;
+
+  /**
    * Replay events after specified event ID
    * @param lastEventId Last received event ID
    * @param options Replay options

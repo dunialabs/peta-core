@@ -97,6 +97,9 @@ Peta Core fully implements the **Model Context Protocol (MCP)** standard protoco
 | `POST` | `/mcp` | Send MCP JSON-RPC 2.0 request |
 | `DELETE` | `/mcp` | Close current session |
 
+For SSE reconnects, clients continue using the same `GET /mcp` endpoint with `Mcp-Session-Id`.
+When the client has a previously delivered event ID, include it as `Last-Event-ID` so the MCP transport can replay missed events and resume the live stream.
+
 #### Main MCP Methods
 
 - `initialize` - Initialize session

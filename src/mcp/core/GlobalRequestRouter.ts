@@ -437,12 +437,13 @@ export class GlobalRequestRouter {
   async handleResourceUpdated(
     serverId: string,
     notification: ResourceUpdatedNotification,
+    scopeId?: string,
   ): Promise<void> {
     const resourceUri = notification.params.uri;
-    const subscriptionKey = `${serverId}::${resourceUri}`;
-
-    // Get subscribers for this resource
-    const subscribers = ServerManager.instance.getResourceSubscribers(subscriptionKey);
+    const subscriptionKey = scopeId ? `${scopeId}::${resourceUri}` : `${serverId}::${resourceUri}`;
+    const subscribers = scopeId
+      ? ServerManager.instance.getResourceSubscribersForScope(scopeId, resourceUri)
+      : ServerManager.instance.getResourceSubscribersForServer(serverId, resourceUri);
 
     try {
       const cacheService = ResultCacheService.instance;

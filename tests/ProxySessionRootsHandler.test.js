@@ -1,0 +1,181 @@
+import { jest } from '@jest/globals';
+import { RootsListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
+
+const transportHandleRequest = jest.fn(async () => {});
+
+class FakeServer {
+  static instances = [];
+
+  constructor() {
+    this.notificationHandlers = new Map();
+    this.requestHandlers = new Map();
+    FakeServer.instances.push(this);
+  }
+
+  async connect(transport) {
+    this.transport = transport;
+  }
+
+  setRequestHandler(schema, handler) {
+    this.requestHandlers.set(schema, handler);
+  }
+
+  setNotificationHandler(schema, handler) {
+    this.notificationHandlers.set(schema, handler);
+  }
+
+  getClientCapabilities() {
+    return undefined;
+  }
+
+  getClientVersion() {
+    return undefined;
+  }
+
+  async close() {}
+
+  async ping() {
+    return {};
+  }
+}
+
+class FakeTransport {
+  constructor(options) {
+    this.options = options;
+  }
+
+  async handleRequest(req, res, body) {
+    return transportHandleRequest(req, res, body);
+  }
+}
+
+jest.unstable_mockModule('@modelcontextprotocol/sdk/server/index.js', () => ({
+  Server: FakeServer,
+}));
+
+jest.unstable_mockModule('@modelcontextprotocol/sdk/server/streamableHttp.js', () => ({
+  StreamableHTTPServerTransport: FakeTransport,
+}));
+
+jest.unstable_mockModule('../dist/mcp/core/ServerManager.js', () => ({
+  ServerManager: {
+    instance: {
+      cleanupSessionSubscriptions: jest.fn(async () => {}),
+    },
+  },
+}));
+
+jest.unstable_mockModule('../dist/log/LogService.js', () => ({
+  LogService: {
+    getInstance: () => ({
+      enqueueLog: jest.fn(),
+      generateUniformRequestId: jest.fn(() => 'uniform-1'),
+    }),
+  },
+}));
+
+jest.unstable_mockModule('../dist/config/reverseRequestConfig.js', () => ({
+  getReverseRequestTimeout: () => 1000,
+  ReverseRequestTimeoutError: class ReverseRequestTimeoutError extends Error {},
+}));
+
+jest.unstable_mockModule('../dist/config/config.js', () => ({
+  APP_INFO: {
+    name: 'peta-core-test',
+    version: '1.0.0-test',
+  },
+}));
+
+jest.unstable_mockModule('../dist/socket/SocketNotifier.js', () => ({
+  socketNotifier: {},
+}));
+
+jest.unstable_mockModule('../dist/logger/index.js', () => ({
+  createLogger: () => ({
+    trace: jest.fn(),
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    fatal: jest.fn(),
+  }),
+}));
+
+jest.unstable_mockModule('../dist/mcp/services/PolicyEngine.js', () => ({
+  policyEngine: {},
+}));
+
+jest.unstable_mockModule('../dist/mcp/services/ApprovalService.js', () => ({
+  approvalService: {},
+  ApprovalRateLimitError: class ApprovalRateLimitError extends Error {},
+}));
+
+jest.unstable_mockModule('../dist/mcp/services/DiscoveryNativeToolHandlers.js', () => ({
+  handleCatalogSearch: jest.fn(),
+  handleCatalogDescribe: jest.fn(),
+  handleCatalogExecute: jest.fn(),
+}));
+
+jest.unstable_mockModule('../dist/mcp/services/DiscoveryConfigService.js', () => ({
+  discoveryConfigService: {
+    getActiveProfile: jest.fn(async () => null),
+  },
+}));
+
+jest.unstable_mockModule('../dist/mcp/core/cache/ResultCacheService.js', () => ({
+  ResultCacheService: {
+    instance: {
+      enabled: false,
+    },
+  },
+}));
+
+const { ProxySession } = await import('../dist/mcp/core/ProxySession.js');
+
+describe('ProxySession roots notification registration', () => {
+  beforeEach(() => {
+    transportHandleRequest.mockClear();
+    FakeServer.instances.length = 0;
+  });
+
+  test('registers roots/list_changed handler before client capabilities are populated', async () => {
+    const proxySession = new ProxySession(
+      'session-1',
+      'user-1',
+      {
+        authContext: {},
+        capabilities: undefined,
+        canRequestRoots: jest.fn(() => false),
+        connectionInitialized: jest.fn(),
+      },
+      {},
+      {
+        storeEvent: jest.fn(async () => 'event-1'),
+        replayEventsAfter: jest.fn(async () => '_GET_stream'),
+      },
+      async () => {},
+    );
+
+    const initializeRequest = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-03-26',
+        capabilities: {},
+        clientInfo: { name: 'test-client', version: '1.0.0' },
+      },
+    };
+
+    await proxySession.handleRequest(
+      { method: 'POST', body: initializeRequest },
+      {},
+      initializeRequest,
+    );
+
+    expect(FakeServer.instances).toHaveLength(1);
+    expect(FakeServer.instances[0].notificationHandlers.has(RootsListChangedNotificationSchema)).toBe(
+      true,
+    );
+  });
+});

@@ -62,6 +62,14 @@ export class PersistentEventStore implements EventStore {
   }
 
   /**
+   * Resolve the stream that owns the specified event
+   */
+  async getStreamIdForEventId(eventId: EventId): Promise<StreamId | undefined> {
+    const event = await EventRepository.findByEventId(eventId);
+    return event?.streamId;
+  }
+
+  /**
    * Replay events after specified event ID
    * @param lastEventId Last received event ID
    * @param options Replay options
@@ -69,11 +77,12 @@ export class PersistentEventStore implements EventStore {
    */
   async replayEventsAfter(lastEventId: EventId, options: ReplayOptions): Promise<StreamId> {
     try {
-      // Extract stream ID from event ID
-      const streamId = lastEventId.split('-')[0] || lastEventId;
-      if (!streamId || streamId.length === 0) {
-        throw new Error(`Invalid event ID format: ${lastEventId}`);
+      const anchorEvent = await EventRepository.findByEventId(lastEventId);
+      if (!anchorEvent) {
+        throw new Error(`Invalid event ID: ${lastEventId}`);
       }
+
+      const streamId = anchorEvent.streamId;
 
       this.logger.debug({ streamId, lastEventId }, 'Replaying events for stream after event');
 

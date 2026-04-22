@@ -55,6 +55,10 @@ import { UserRequestHandler } from '../../user/UserRequestHandler.js';
  * Subscription state structure
  */
 interface SubscriptionState {
+  serverId: string;
+  userId?: string;
+  resourceUri: string;
+  scopeId: string;
   subscribedSessions: Set<string>; // Session IDs subscribed to this resource
   downstreamSubscribed: boolean; // Whether already subscribed to downstream
 }
@@ -86,7 +90,7 @@ export class ServerManager {
     },
   };
 
-  // Resource subscription state management key: `${serverId}::${resourceUri}`
+  // Resource subscription state management key: `${scopeId}::${resourceUri}`
   private resourceSubscriptions: Map<string, SubscriptionState> = new Map();
 
   // Concurrent protection: waiting queues for servers being started
@@ -1213,7 +1217,7 @@ export class ServerManager {
       }
 
       // 7. Register global reverse request handlers
-      this.registerReverseRequestHandlers(client, serverEntity.serverId);
+      this.registerReverseRequestHandlers(client, serverContext);
 
       await client.ping({ timeout: 5000 });
 
@@ -1384,6 +1388,7 @@ export class ServerManager {
               this.globalRouter?.handleResourceUpdated(
                 serverContext.serverEntity.serverId,
                 notification,
+                serverContext.id,
               );
             },
           );
@@ -2002,7 +2007,7 @@ export class ServerManager {
    * Register reverse request handlers
    * Handle requests initiated by Server (Sampling, Roots, Elicitation)
    */
-  private registerReverseRequestHandlers(client: Client, serverId: string): void {
+  private registerReverseRequestHandlers(client: Client, serverContext: ServerContext): void {
     if (!this.globalRouter) {
       this.logger.warn(
         'GlobalRequestRouter not initialized, skipping reverse request handler registration',
@@ -2011,6 +2016,7 @@ export class ServerManager {
     }
 
     const router = this.globalRouter;
+    const serverId = serverContext.serverEntity.serverId;
 
     if (this.clientOptions.capabilities?.sampling) {
       // Register Sampling request handler
@@ -2197,7 +2203,7 @@ export class ServerManager {
       async (notification: ResourceUpdatedNotification) => {
         this.logger.debug({ serverId }, 'Server sent resource updated notification');
 
-        router.handleResourceUpdated(serverId, notification);
+        router.handleResourceUpdated(serverId, notification, serverContext.id);
       },
     );
   }
@@ -2310,25 +2316,112 @@ export class ServerManager {
    * @param resourceUri Original resource URI (without prefix)
    * @param sessionId Session ID
    */
+  private buildResourceSubscriptionKey(scopeId: string, resourceUri: string): string {
+    return `${scopeId}::${resourceUri}`;
+  }
+
+  private findServerContextByScopeId(scopeId: string): ServerContext | undefined {
+    for (const context of this.serverContexts.values()) {
+      if (context.id === scopeId) {
+        return context;
+      }
+    }
+
+    for (const context of this.temporaryServers.values()) {
+      if (context.id === scopeId) {
+        return context;
+      }
+    }
+
+    return undefined;
+  }
+
+  private findResourceSubscriptionEntry(
+    serverId: string,
+    resourceUri: string,
+    userId: string,
+    scopeId?: string,
+  ): [string, SubscriptionState] | undefined {
+    if (scopeId) {
+      const subscriptionKey = this.buildResourceSubscriptionKey(scopeId, resourceUri);
+      const state = this.resourceSubscriptions.get(subscriptionKey);
+      if (state) {
+        return [subscriptionKey, state];
+      }
+    }
+
+    const exactUserMatch = Array.from(this.resourceSubscriptions.entries()).find(
+      ([, state]) =>
+        state.serverId === serverId && state.resourceUri === resourceUri && state.userId === userId,
+    );
+    if (exactUserMatch) {
+      return exactUserMatch;
+    }
+
+    return Array.from(this.resourceSubscriptions.entries()).find(
+      ([, state]) =>
+        state.serverId === serverId &&
+        state.resourceUri === resourceUri &&
+        state.userId === undefined,
+    );
+  }
+
+  private async unsubscribeResourceState(
+    subscriptionKey: string,
+    state: SubscriptionState,
+    sessionId: string,
+  ): Promise<void> {
+    state.subscribedSessions.delete(sessionId);
+
+    if (state.subscribedSessions.size === 0 && state.downstreamSubscribed) {
+      const serverContext = this.findServerContextByScopeId(state.scopeId);
+      if (serverContext && serverContext.connection) {
+        try {
+          await serverContext.connection.unsubscribeResource({
+            uri: state.resourceUri,
+          });
+
+          this.logger.info({ subscriptionKey }, 'Unsubscribed from downstream resource');
+        } catch (error) {
+          this.logger.error(
+            { error, subscriptionKey },
+            'Failed to unsubscribe from downstream resource',
+          );
+        }
+      }
+
+      this.resourceSubscriptions.delete(subscriptionKey);
+    }
+
+    this.logger.info(
+      { subscriptionKey, remainingSubscribers: state.subscribedSessions.size },
+      'Unsubscription successful',
+    );
+  }
+
   async subscribeResource(
     serverId: string,
     resourceUri: string,
     sessionId: string,
     userId: string,
   ): Promise<void> {
-    const subscriptionKey = `${serverId}::${resourceUri}`;
-    this.logger.debug({ subscriptionKey, sessionId }, 'Subscribe request');
-
     const serverContext = this.getServerContext(serverId, userId);
     if (serverContext?.capabilities?.resources?.subscribe !== true) {
       this.logger.debug({ serverId }, 'Server does not support resource subscription');
       return;
     }
 
+    const subscriptionKey = this.buildResourceSubscriptionKey(serverContext.id, resourceUri);
+    this.logger.debug({ subscriptionKey, sessionId }, 'Subscribe request');
+
     // Get or create subscription state
     let state = this.resourceSubscriptions.get(subscriptionKey);
     if (!state) {
       state = {
+        serverId,
+        userId: serverContext.userId,
+        resourceUri,
+        scopeId: serverContext.id,
         subscribedSessions: new Set(),
         downstreamSubscribed: false,
       };
@@ -2387,56 +2480,45 @@ export class ServerManager {
     sessionId: string,
     userId: string,
   ): Promise<void> {
-    const subscriptionKey = `${serverId}::${resourceUri}`;
-    this.logger.debug({ subscriptionKey, sessionId }, 'Unsubscribe request');
-
-    const state = this.resourceSubscriptions.get(subscriptionKey);
-    if (!state) {
-      this.logger.debug({ subscriptionKey }, 'No subscription found');
+    const serverContext = this.getServerContext(serverId, userId);
+    const entry = this.findResourceSubscriptionEntry(
+      serverId,
+      resourceUri,
+      userId,
+      serverContext?.id,
+    );
+    if (!entry) {
+      this.logger.debug({ serverId, resourceUri, sessionId, userId }, 'No subscription found');
       return;
     }
 
-    // Remove session
-    state.subscribedSessions.delete(sessionId);
-
-    // If no sessions are subscribed, unsubscribe from downstream
-    if (state.subscribedSessions.size === 0 && state.downstreamSubscribed) {
-      const serverContext = this.getServerContext(serverId, userId);
-      if (serverContext && serverContext.connection) {
-        try {
-          // Send unsubscription request to downstream
-          await serverContext.connection.unsubscribeResource({
-            uri: resourceUri,
-          });
-
-          this.logger.info({ subscriptionKey }, 'Unsubscribed from downstream resource');
-        } catch (error) {
-          this.logger.error(
-            { error, subscriptionKey },
-            'Failed to unsubscribe from downstream resource',
-          );
-        }
-      }
-
-      // Clean up subscription state
-      this.resourceSubscriptions.delete(subscriptionKey);
-    }
-
-    this.logger.info(
-      { subscriptionKey, remainingSubscribers: state.subscribedSessions.size },
-      'Unsubscription successful',
-    );
+    const [subscriptionKey, state] = entry;
+    this.logger.debug({ subscriptionKey, sessionId }, 'Unsubscribe request');
+    await this.unsubscribeResourceState(subscriptionKey, state, sessionId);
   }
 
   /**
-   * Get resource subscriber set
-   *
-   * @param subscriptionKey Subscription key `${serverId}::${resourceUri}`
-   * @returns Set of subscribed session IDs
+   * Get resource subscribers for a specific downstream scope
    */
-  getResourceSubscribers(subscriptionKey: string): Set<string> {
-    const state = this.resourceSubscriptions.get(subscriptionKey);
+  getResourceSubscribersForScope(scopeId: string, resourceUri: string): Set<string> {
+    const state = this.resourceSubscriptions.get(
+      this.buildResourceSubscriptionKey(scopeId, resourceUri),
+    );
     return state ? state.subscribedSessions : new Set();
+  }
+
+  getResourceSubscribersForServer(serverId: string, resourceUri: string): Set<string> {
+    const subscribers = new Set<string>();
+
+    for (const state of this.resourceSubscriptions.values()) {
+      if (state.serverId === serverId && state.resourceUri === resourceUri) {
+        for (const sessionId of state.subscribedSessions) {
+          subscribers.add(sessionId);
+        }
+      }
+    }
+
+    return subscribers;
   }
 
   /**
@@ -2451,11 +2533,7 @@ export class ServerManager {
 
     for (const [subscriptionKey, state] of this.resourceSubscriptions.entries()) {
       if (state.subscribedSessions.has(sessionId)) {
-        // Parse subscriptionKey
-        const [serverId, resourceUri] = subscriptionKey.split('::', 2);
-        unsubscribePromises.push(
-          this.unsubscribeResource(serverId, resourceUri, sessionId, userId),
-        );
+        unsubscribePromises.push(this.unsubscribeResourceState(subscriptionKey, state, sessionId));
       }
     }
 

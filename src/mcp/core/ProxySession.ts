@@ -269,13 +269,11 @@ export class ProxySession {
   }
 
   private setupNotificationHandlers(): void {
-    if (this.clientSupportsRoots()) {
-      this.upstreamServer.setNotificationHandler(
-        RootsListChangedNotificationSchema,
-        async (notification: RootsListChangedNotification) =>
-          this.handleRootsListChanged(notification),
-      );
-    }
+    this.upstreamServer.setNotificationHandler(
+      RootsListChangedNotificationSchema,
+      async (notification: RootsListChangedNotification) =>
+        this.handleRootsListChanged(notification),
+    );
 
     this.upstreamServer.setNotificationHandler(
       CancelledNotificationSchema,
@@ -300,6 +298,7 @@ export class ProxySession {
         // New initialization request
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => this.sessionId,
+          eventStore: this.eventStore,
           onsessioninitialized: async (sessionId) => {
             this.clientSession.capabilities = this.upstreamServer.getClientCapabilities();
             this.clientSession.clientInfo = this.upstreamServer.getClientVersion();
@@ -2535,69 +2534,6 @@ export class ProxySession {
   ): Promise<EmptyResult> {
     this.logger.debug('Ping received');
     return await this.upstreamServer.ping();
-  }
-
-  /**
-   * Handle client reconnection request
-   * @param lastEventId Last received event ID
-   * @param res HTTP response object
-   */
-  async handleReconnection(lastEventId: string, res: Response): Promise<void> {
-    try {
-      if (!this.eventStore) {
-        throw new Error('EventStore not available for this session');
-      }
-
-      this.logger.info({ lastEventId }, 'Handling reconnection');
-
-      // Set SSE response headers
-      const headers: Record<string, string> = {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache, no-transform',
-        Connection: 'keep-alive',
-      };
-
-      if (this.sessionId) {
-        headers['Mcp-Session-Id'] = this.sessionId;
-        headers['mcp-session-id'] = this.sessionId;
-      }
-
-      res.writeHead(200, headers).flushHeaders();
-
-      // Replay events using EventStore
-      await this.eventStore.replayEventsAfter(lastEventId, {
-        send: async (eventId: string, message: any) => {
-          const eventData = this.formatSSEEvent(message, eventId);
-          if (!res.write(eventData)) {
-            throw new Error('Failed to write SSE event');
-          }
-        },
-      });
-
-      this.logger.info('Reconnection completed');
-    } catch (error) {
-      this.logger.error({ error }, 'Failed to handle reconnection');
-      // Log error
-      await this.sessionLogger.logError({
-        action: MCPEventLogType.ErrorInternal,
-        upstreamRequestId: lastEventId,
-        uniformRequestId: LogService.getInstance().generateUniformRequestId(this.sessionId),
-        error: String(error),
-      });
-      res.end();
-    }
-  }
-
-  /**
-   * Format SSE event
-   */
-  private formatSSEEvent(message: any, eventId?: string): string {
-    let eventData = `event: message\n`;
-    if (eventId) {
-      eventData += `id: ${eventId}\n`;
-    }
-    eventData += `data: ${JSON.stringify(message)}\n\n`;
-    return eventData;
   }
 
   /**
