@@ -192,7 +192,184 @@ describe('ProxySession downstream request metadata', () => {
     policyEvaluate.mockClear();
   });
 
-  test('tool calls preserve client _meta without injecting proxyContext', async () => {
+  test('tool calls rewrite progressToken to proxyRequestId while preserving other _meta fields', async () => {
+    const connection = {
+      callTool: jest.fn(async () => ({
+        content: [{ type: 'text', text: 'ok' }],
+        isError: false,
+      })),
+    };
+    const serverContext = {
+      connection,
+      capabilitiesConfig: {},
+      serverEntity: { serverId: 'server-1' },
+      getDangerLevel: jest.fn(() => undefined),
+      clearTimeout: jest.fn(),
+      recordTimeout: jest.fn(async () => false),
+    };
+    const clientSession = createClientSession();
+    const proxySession = createProxySession(clientSession);
+    const request = {
+      method: 'tools/call',
+      params: {
+        name: 'custom-tool',
+        arguments: { x: 1 },
+        _meta: { clientTag: 'keep-me', progressToken: 'client-progress-1' },
+      },
+    };
+
+    getServerContext.mockReturnValue(serverContext);
+
+    await proxySession.handleToolCall(request, createExtra());
+
+    expect(connection.callTool).toHaveBeenCalledTimes(1);
+    const relatedRequestId = connection.callTool.mock.calls[0][2].relatedRequestId;
+    expect(relatedRequestId).toMatch(/^session-1:req-1:\d+$/);
+    expect(connection.callTool.mock.calls[0][0]).toEqual({
+      name: 'tool-1',
+      arguments: { x: 1 },
+      _meta: { clientTag: 'keep-me', progressToken: relatedRequestId },
+    });
+    expect(connection.callTool.mock.calls[0][2]).toEqual(
+      expect.objectContaining({
+        relatedRequestId,
+      }),
+    );
+    expect(request.params._meta).toEqual({ clientTag: 'keep-me', progressToken: 'client-progress-1' });
+  });
+
+  test('resource reads rewrite progressToken to proxyRequestId while preserving other _meta fields', async () => {
+    const connection = {
+      readResource: jest.fn(async () => ({
+        contents: [],
+      })),
+    };
+    const serverContext = {
+      connection,
+      capabilitiesConfig: {},
+      serverEntity: { serverId: 'server-1' },
+      clearTimeout: jest.fn(),
+      recordTimeout: jest.fn(async () => false),
+    };
+    const clientSession = createClientSession();
+    const proxySession = createProxySession(clientSession);
+    const request = {
+      method: 'resources/read',
+      params: {
+        uri: 'gateway://resource',
+        _meta: { clientTag: 'keep-me', progressToken: 'client-progress-2' },
+      },
+    };
+
+    getServerContext.mockReturnValue(serverContext);
+
+    await proxySession.handleResourceRead(request, createExtra());
+
+    expect(connection.readResource).toHaveBeenCalledTimes(1);
+    const relatedRequestId = connection.readResource.mock.calls[0][1].relatedRequestId;
+    expect(relatedRequestId).toMatch(/^session-1:req-1:\d+$/);
+    expect(connection.readResource.mock.calls[0][0]).toEqual({
+      uri: 'resource://downstream',
+      _meta: { clientTag: 'keep-me', progressToken: relatedRequestId },
+    });
+    expect(connection.readResource.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        relatedRequestId,
+      }),
+    );
+    expect(request.params._meta).toEqual({ clientTag: 'keep-me', progressToken: 'client-progress-2' });
+  });
+
+  test('prompt gets rewrite progressToken to proxyRequestId while preserving other _meta fields', async () => {
+    const connection = {
+      getPrompt: jest.fn(async () => ({
+        description: 'Prompt',
+        messages: [],
+      })),
+    };
+    const serverContext = {
+      connection,
+      capabilitiesConfig: {},
+      serverEntity: { serverId: 'server-1' },
+      clearTimeout: jest.fn(),
+      recordTimeout: jest.fn(async () => false),
+    };
+    const clientSession = createClientSession();
+    const proxySession = createProxySession(clientSession);
+    const request = {
+      method: 'prompts/get',
+      params: {
+        name: 'gateway://prompt',
+        arguments: { topic: 'test' },
+        _meta: { clientTag: 'keep-me', progressToken: 'client-progress-3' },
+      },
+    };
+
+    getServerContext.mockReturnValue(serverContext);
+
+    await proxySession.handlePromptGet(request, createExtra());
+
+    expect(connection.getPrompt).toHaveBeenCalledTimes(1);
+    const relatedRequestId = connection.getPrompt.mock.calls[0][1].relatedRequestId;
+    expect(relatedRequestId).toMatch(/^session-1:req-1:\d+$/);
+    expect(connection.getPrompt.mock.calls[0][0]).toEqual({
+      name: 'prompt-1',
+      arguments: { topic: 'test' },
+      _meta: { clientTag: 'keep-me', progressToken: relatedRequestId },
+    });
+    expect(connection.getPrompt.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        relatedRequestId,
+      }),
+    );
+    expect(request.params._meta).toEqual({ clientTag: 'keep-me', progressToken: 'client-progress-3' });
+  });
+
+  test('completion rewrites progressToken to proxyRequestId while preserving other _meta fields', async () => {
+    const connection = {
+      complete: jest.fn(async () => ({
+        completion: { values: ['ok'] },
+      })),
+    };
+    const serverContext = {
+      connection,
+      capabilitiesConfig: {},
+      serverEntity: { serverId: 'server-1' },
+      clearTimeout: jest.fn(),
+      recordTimeout: jest.fn(async () => false),
+    };
+    const clientSession = createClientSession();
+    const proxySession = createProxySession(clientSession);
+    const request = {
+      method: 'completion/complete',
+      params: {
+        ref: { type: 'ref/prompt', name: 'gateway://prompt' },
+        argument: { name: 'topic', value: 'test' },
+        _meta: { clientTag: 'keep-me', progressToken: 'client-progress-4' },
+      },
+    };
+
+    getServerContext.mockReturnValue(serverContext);
+
+    await proxySession.handleComplete(request, createExtra());
+
+    expect(connection.complete).toHaveBeenCalledTimes(1);
+    const relatedRequestId = connection.complete.mock.calls[0][1].relatedRequestId;
+    expect(relatedRequestId).toMatch(/^session-1:req-1:\d+$/);
+    expect(connection.complete.mock.calls[0][0]).toEqual({
+      ref: { type: 'ref/prompt', name: 'prompt-1' },
+      argument: { name: 'topic', value: 'test' },
+      _meta: { clientTag: 'keep-me', progressToken: relatedRequestId },
+    });
+    expect(connection.complete.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        relatedRequestId,
+      }),
+    );
+    expect(request.params._meta).toEqual({ clientTag: 'keep-me', progressToken: 'client-progress-4' });
+  });
+
+  test('tool calls do not inject progressToken when client did not provide one', async () => {
     const connection = {
       callTool: jest.fn(async () => ({
         content: [{ type: 'text', text: 'ok' }],
@@ -228,94 +405,5 @@ describe('ProxySession downstream request metadata', () => {
       arguments: { x: 1 },
       _meta: { clientTag: 'keep-me' },
     });
-    expect(connection.callTool.mock.calls[0][2]).toEqual(
-      expect.objectContaining({
-        relatedRequestId: expect.stringMatching(/^session-1:req-1:\d+$/),
-      }),
-    );
-    expect(request.params._meta).toEqual({ clientTag: 'keep-me' });
-  });
-
-  test('resource reads preserve client _meta without injecting proxyContext', async () => {
-    const connection = {
-      readResource: jest.fn(async () => ({
-        contents: [],
-      })),
-    };
-    const serverContext = {
-      connection,
-      capabilitiesConfig: {},
-      serverEntity: { serverId: 'server-1' },
-      clearTimeout: jest.fn(),
-      recordTimeout: jest.fn(async () => false),
-    };
-    const clientSession = createClientSession();
-    const proxySession = createProxySession(clientSession);
-    const request = {
-      method: 'resources/read',
-      params: {
-        uri: 'gateway://resource',
-        _meta: { clientTag: 'keep-me' },
-      },
-    };
-
-    getServerContext.mockReturnValue(serverContext);
-
-    await proxySession.handleResourceRead(request, createExtra());
-
-    expect(connection.readResource).toHaveBeenCalledTimes(1);
-    expect(connection.readResource.mock.calls[0][0]).toEqual({
-      uri: 'resource://downstream',
-      _meta: { clientTag: 'keep-me' },
-    });
-    expect(connection.readResource.mock.calls[0][1]).toEqual(
-      expect.objectContaining({
-        relatedRequestId: expect.stringMatching(/^session-1:req-1:\d+$/),
-      }),
-    );
-    expect(request.params._meta).toEqual({ clientTag: 'keep-me' });
-  });
-
-  test('prompt gets preserve client _meta without injecting proxyContext', async () => {
-    const connection = {
-      getPrompt: jest.fn(async () => ({
-        description: 'Prompt',
-        messages: [],
-      })),
-    };
-    const serverContext = {
-      connection,
-      capabilitiesConfig: {},
-      serverEntity: { serverId: 'server-1' },
-      clearTimeout: jest.fn(),
-      recordTimeout: jest.fn(async () => false),
-    };
-    const clientSession = createClientSession();
-    const proxySession = createProxySession(clientSession);
-    const request = {
-      method: 'prompts/get',
-      params: {
-        name: 'gateway://prompt',
-        arguments: { topic: 'test' },
-        _meta: { clientTag: 'keep-me' },
-      },
-    };
-
-    getServerContext.mockReturnValue(serverContext);
-
-    await proxySession.handlePromptGet(request, createExtra());
-
-    expect(connection.getPrompt).toHaveBeenCalledTimes(1);
-    expect(connection.getPrompt.mock.calls[0][0]).toEqual({
-      name: 'prompt-1',
-      arguments: { topic: 'test' },
-      _meta: { clientTag: 'keep-me' },
-    });
-    expect(connection.getPrompt.mock.calls[0][1]).toEqual(
-      expect.objectContaining({
-        relatedRequestId: expect.stringMatching(/^session-1:req-1:\d+$/),
-      }),
-    );
-    expect(request.params._meta).toEqual({ clientTag: 'keep-me' });
   });
 });

@@ -95,6 +95,15 @@ Downstream MCP Server (ProxySession acts as MCP Client to send request)
 Response returns along the same path
 ```
 
+For forward requests, Peta keeps three IDs separate: the upstream client's
+`originalRequestId`, Peta's internal `proxyRequestId`, and the downstream SDK
+client's actual JSON-RPC `downstreamRequestId`. When an upstream request includes
+`_meta.progressToken`, the proxy preserves the client's original token internally,
+rewrites the downstream payload to use `proxyRequestId` for routing, and restores the
+original token before sending progress notifications back upstream. Upstream
+`notifications/cancelled` are translated to the captured `downstreamRequestId` so the
+downstream SDK cancels the real in-flight request instead of a proxy-only ID.
+
 #### 2. Reverse Request Flow (Downstream → Client)
 
 ```text

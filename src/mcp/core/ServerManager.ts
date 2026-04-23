@@ -3,6 +3,7 @@ import { ServerRepository } from '../../repositories/ServerRepository.js';
 import { UserRepository } from '../../repositories/UserRepository.js';
 import { DownstreamTransportFactory } from './DownstreamTransportFactory.js';
 import { Client, ClientOptions } from '@modelcontextprotocol/sdk/client/index.js';
+import type { Transport, TransportSendOptions } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { ServerAuthType, ServerCategory, ServerStatus } from '../../types/enums.js';
 import { Permissions, ServerConfigCapabilities } from '../types/mcp.js';
 import { CryptoService } from '../../security/CryptoService.js';
@@ -19,10 +20,9 @@ import {
   ToolListChangedNotificationSchema,
   ResourceListChangedNotificationSchema,
   PromptListChangedNotificationSchema,
-  CancelledNotificationSchema,
   ProgressNotificationSchema,
-  type CancelledNotification,
   type ProgressNotification,
+  type RequestId,
   type ToolListChangedNotification,
   type ResourceListChangedNotification,
   type PromptListChangedNotification,
@@ -218,6 +218,75 @@ export class ServerManager {
     if (context.transport && typeof context.transport === 'object') {
       this.plannedTransportCloses.add(context.transport as object);
     }
+  }
+
+  private extractSessionIdFromProxyRequestId(proxyRequestId: string): string | undefined {
+    const separatorIndex = proxyRequestId.indexOf(':');
+    return separatorIndex > 0 ? proxyRequestId.slice(0, separatorIndex) : undefined;
+  }
+
+  private isJsonRpcRequestMessage(message: unknown): message is { id: RequestId; method: string } {
+    if (typeof message !== 'object' || message === null) {
+      return false;
+    }
+
+    return (
+      'id' in message &&
+      'method' in message &&
+      typeof (message as { method?: unknown }).method === 'string'
+    );
+  }
+
+  private wrapTransportWithRequestTracking(
+    transport: Transport,
+    serverContext: ServerContext,
+    client: Client,
+  ): Transport {
+    const serverId = serverContext.serverEntity.serverId;
+
+    return new Proxy(transport, {
+      get: (target, prop, receiver) => {
+        if (prop === 'send') {
+          return async (message: unknown, options?: TransportSendOptions): Promise<void> => {
+            if (
+              this.isJsonRpcRequestMessage(message) &&
+              typeof options?.relatedRequestId === 'string'
+            ) {
+              const proxyRequestId = options.relatedRequestId;
+              const sessionId = this.extractSessionIdFromProxyRequestId(proxyRequestId);
+
+              if (!sessionId) {
+                this.logger.warn(
+                  { proxyRequestId, serverId },
+                  'Failed to extract sessionId while tracking downstream request',
+                );
+              } else {
+                const proxySession = SessionStore.instance?.getProxySession(sessionId);
+                if (proxySession) {
+                  proxySession.registerDownstreamRequestId(
+                    proxyRequestId,
+                    message.id,
+                    serverId,
+                    client,
+                  );
+                } else {
+                  this.logger.warn(
+                    { proxyRequestId, sessionId, serverId },
+                    'No ProxySession found while tracking downstream request',
+                  );
+                }
+              }
+            }
+
+            await target.send(message as any, options);
+          };
+        }
+
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+      set: (target, prop, value) => Reflect.set(target, prop, value),
+    });
   }
 
   private async disconnectServerContext(
@@ -1062,10 +1131,10 @@ export class ServerManager {
       }
 
       // 4. Create transport using dynamic transport factory
-      const { transport, transportType } =
+      const { transport: rawTransport, transportType } =
         await DownstreamTransportFactory.create(resolvedLaunchConfig);
       const runnerExecutionTrace = runnerMetadata
-        ? customStdioRunnerService.attachExecutionTrace(transport)
+        ? customStdioRunnerService.attachExecutionTrace(rawTransport)
         : undefined;
 
       // 1.5 Detect and cache transport type if not already set
@@ -1087,6 +1156,7 @@ export class ServerManager {
         },
         this.clientOptions,
       );
+      const transport = this.wrapTransportWithRequestTracking(rawTransport, serverContext, client);
       startupDiagnostics = createConnectionStartupDiagnostics(transport, client);
 
       transport.onclose = () => {
@@ -2012,71 +2082,53 @@ export class ServerManager {
       'Registered downstream notification handlers (reverse requests remain unsupported)',
     );
 
-    // Register cancellation notification handler from server
-    client.setNotificationHandler(
-      CancelledNotificationSchema,
-      async (notification: CancelledNotification) => {
-        this.logger.debug(
-          { serverId, requestId: notification.params.requestId },
-          'Server sent cancellation',
-        );
-
-        // Extract sessionId from proxyRequestId (format: "sessionId:originalId:timestamp")
-        const proxyRequestId = String(notification.params.requestId);
-        const sessionId = proxyRequestId.split(':')[0];
-
-        if (!sessionId) {
-          this.logger.error({ proxyRequestId }, 'Failed to extract sessionId from proxyRequestId');
-          return;
-        }
-
-        // Get ProxySession through SessionStore
-        const proxySession = SessionStore.instance!.getProxySession(sessionId);
-        if (proxySession) {
-          try {
-            // Forward cancellation notification to client
-            await proxySession.forwardCancellationToClient(notification);
-          } catch (error) {
-            this.logger.error(
-              { error, serverId, sessionId },
-              'Failed to forward cancellation from server',
-            );
-          }
-        } else {
-          this.logger.warn({ sessionId }, 'No ProxySession found for sessionId');
-        }
-      },
-    );
-
+    // Shared downstream connections do not route server-initiated cancellation upstream.
     // Register progress notification handler from server
     client.setNotificationHandler(
       ProgressNotificationSchema,
       async (notification: ProgressNotification) => {
-        this.logger.debug({ serverId }, 'Server sent progress notification');
-
-        // progressToken is actually proxyRequestId (format: "sessionId:originalId:timestamp")
-        const proxyRequestId = String(notification.params.progressToken);
-        const sessionId = proxyRequestId.split(':')[0];
-
-        if (!sessionId) {
-          this.logger.error({ proxyRequestId }, 'Failed to extract sessionId from progressToken');
+        const { progressToken } = notification.params;
+        if (typeof progressToken !== 'string') {
+          this.logger.warn(
+            { serverId, progressToken },
+            'Dropping downstream progress notification with non-string token',
+          );
           return;
         }
 
-        // Get ProxySession through SessionStore
-        const proxySession = SessionStore.instance!.getProxySession(sessionId);
-        if (proxySession) {
-          try {
-            // Forward progress notification to client
-            await proxySession.forwardProgressToClient(notification);
-          } catch (error) {
-            this.logger.error(
-              { error, serverId, sessionId },
-              'Failed to forward progress from server',
-            );
-          }
-        } else {
-          this.logger.warn({ sessionId }, 'No ProxySession found for sessionId');
+        const sessionId = this.extractSessionIdFromProxyRequestId(progressToken);
+        if (!sessionId) {
+          this.logger.warn(
+            { serverId, progressToken },
+            'Dropping downstream progress notification with invalid proxy request id',
+          );
+          return;
+        }
+
+        const proxySession = SessionStore.instance?.getProxySession(sessionId);
+        if (!proxySession) {
+          this.logger.warn(
+            { serverId, sessionId, progressToken },
+            'No ProxySession found for downstream progress notification',
+          );
+          return;
+        }
+
+        if (!proxySession.hasTrackedProgressToken(progressToken)) {
+          this.logger.warn(
+            { serverId, sessionId, progressToken },
+            'Dropping downstream progress notification with unknown proxy request id',
+          );
+          return;
+        }
+
+        try {
+          await proxySession.forwardProgressToClient(notification);
+        } catch (error) {
+          this.logger.error(
+            { error, serverId, sessionId, progressToken },
+            'Failed to forward progress from server',
+          );
         }
       },
     );

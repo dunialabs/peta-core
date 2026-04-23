@@ -1,6 +1,5 @@
 import { jest } from '@jest/globals';
 import {
-  CancelledNotificationSchema,
   ProgressNotificationSchema,
   ResourceUpdatedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
@@ -256,7 +255,8 @@ describe('ServerManager downstream notification boundary', () => {
   test('managed connections keep reverse-request capabilities disabled and register only supported notifications', async () => {
     const server = makeServer({ serverId: 'managed-server' });
     const fakeProxySession = {
-      forwardCancellationToClient: jest.fn(async () => {}),
+      registerDownstreamRequestId: jest.fn(),
+      hasTrackedProgressToken: jest.fn((proxyRequestId) => proxyRequestId === 'session-1:req-1:123'),
       forwardProgressToClient: jest.fn(async () => {}),
     };
     const resourceUpdatedNotification = { params: { uri: 'resource://updated' } };
@@ -271,23 +271,56 @@ describe('ServerManager downstream notification boundary', () => {
 
     expect(createdClient.options.capabilities).toEqual({});
     expect(createdClient.requestHandlers.size).toBe(0);
-    expect(createdClient.notificationHandlers.has(CancelledNotificationSchema)).toBe(true);
     expect(createdClient.notificationHandlers.has(ProgressNotificationSchema)).toBe(true);
     expect(createdClient.notificationHandlers.has(ResourceUpdatedNotificationSchema)).toBe(true);
+    expect(createdClient.transport).toBeDefined();
 
-    await createdClient.notificationHandlers.get(CancelledNotificationSchema)({
-      params: { requestId: 'session-1:req-1:123' },
-    });
-    expect(fakeProxySession.forwardCancellationToClient).toHaveBeenCalledWith({
-      params: { requestId: 'session-1:req-1:123' },
-    });
+    await createdClient.transport.send(
+      {
+        jsonrpc: '2.0',
+        id: 42,
+        method: 'tools/call',
+        params: {},
+      },
+      { relatedRequestId: 'session-1:req-1:123' },
+    );
+    expect(fakeProxySession.registerDownstreamRequestId).toHaveBeenCalledWith(
+      'session-1:req-1:123',
+      42,
+      server.serverId,
+      createdClient,
+    );
+
+    await createdClient.transport.send(
+      {
+        jsonrpc: '2.0',
+        id: 42,
+        result: {},
+      },
+      { relatedRequestId: 'session-1:req-1:123' },
+    );
+    await createdClient.transport.send(
+      {
+        jsonrpc: '2.0',
+        method: 'notifications/resources/updated',
+        params: {},
+      },
+      { relatedRequestId: 'session-1:req-1:123' },
+    );
+    expect(fakeProxySession.registerDownstreamRequestId).toHaveBeenCalledTimes(1);
 
     await createdClient.notificationHandlers.get(ProgressNotificationSchema)({
       params: { progressToken: 'session-1:req-1:123', progress: 50 },
     });
+    expect(fakeProxySession.hasTrackedProgressToken).toHaveBeenCalledWith('session-1:req-1:123');
     expect(fakeProxySession.forwardProgressToClient).toHaveBeenCalledWith({
       params: { progressToken: 'session-1:req-1:123', progress: 50 },
     });
+
+    await createdClient.notificationHandlers.get(ProgressNotificationSchema)({
+      params: { progressToken: 'session-1:req-2:123', progress: 75 },
+    });
+    expect(fakeProxySession.forwardProgressToClient).toHaveBeenCalledTimes(1);
 
     await createdClient.notificationHandlers.get(ResourceUpdatedNotificationSchema)(
       resourceUpdatedNotification,
@@ -312,7 +345,6 @@ describe('ServerManager downstream notification boundary', () => {
     expect(createdClients).toHaveLength(1);
     expect(createdClients[0].options.capabilities).toEqual({});
     expect(createdClients[0].requestHandlers.size).toBe(0);
-    expect(createdClients[0].notificationHandlers.has(CancelledNotificationSchema)).toBe(true);
     expect(createdClients[0].notificationHandlers.has(ProgressNotificationSchema)).toBe(true);
     expect(createdClients[0].notificationHandlers.has(ResourceUpdatedNotificationSchema)).toBe(
       true,

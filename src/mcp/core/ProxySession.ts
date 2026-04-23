@@ -46,6 +46,8 @@ import {
   type ListPromptsResult,
   type CompleteResult,
   type EmptyResult,
+  type ProgressToken,
+  type RequestId,
   type Tool,
   type Resource,
   type Prompt,
@@ -267,6 +269,46 @@ export class ProxySession {
     //   ProgressNotificationSchema,
     //   async (notification: ProgressNotification) => this.handleProgressNotification(notification)
     // );
+  }
+
+  private rewriteProgressTokenForDownstream<T>(params: T, proxyRequestId: string): T {
+    if (typeof params !== 'object' || params === null) {
+      return params;
+    }
+
+    const typedParams = params as { _meta?: { progressToken?: ProgressToken } };
+    const originalProgressToken = typedParams._meta?.progressToken;
+    if (originalProgressToken === undefined) {
+      return params;
+    }
+
+    this.requestIdMapper.setOriginalProgressToken(proxyRequestId, originalProgressToken);
+
+    return {
+      ...(params as Record<string, unknown>),
+      _meta: {
+        ...(typedParams._meta as Record<string, unknown>),
+        progressToken: proxyRequestId,
+      },
+    } as T;
+  }
+
+  public registerDownstreamRequestId(
+    proxyRequestId: string,
+    downstreamRequestId: RequestId,
+    serverId: string,
+    client?: Client,
+  ): void {
+    this.requestIdMapper.registerDownstreamMapping(
+      proxyRequestId,
+      downstreamRequestId,
+      serverId,
+      client,
+    );
+  }
+
+  public hasTrackedProgressToken(proxyRequestId: string): boolean {
+    return this.requestIdMapper.getOriginalProgressToken(proxyRequestId) !== undefined;
   }
 
   /**
@@ -923,6 +965,7 @@ export class ProxySession {
       ...request.params,
       name: result.originalName,
     };
+    const downstreamParams = this.rewriteProgressTokenForDownstream(copyParams, proxyRequestId);
 
     this.logger.debug(
       {
@@ -971,7 +1014,7 @@ export class ProxySession {
 
       const forwardToolCall = async (): Promise<CallToolResult> => {
         // Forward request to downstream server, passing signal and proxyRequestId
-        const rawResult = (await client.callTool(copyParams, CallToolResultSchema, {
+        const rawResult = (await client.callTool(downstreamParams, CallToolResultSchema, {
           signal: extra.signal,
           relatedRequestId: proxyRequestId,
         })) as CallToolResult;
@@ -1756,6 +1799,7 @@ export class ProxySession {
     // Downstream servers expect their original resource URI, while the upstream client may use the
     // proxied URI exposed by this gateway.
     requestCopy.params.uri = result.originalName;
+    requestCopy.params = this.rewriteProgressTokenForDownstream(requestCopy.params, proxyRequestId);
 
     let isReconnected: boolean | undefined;
 
@@ -2208,6 +2252,7 @@ export class ProxySession {
     try {
       const requestCopy = JSON.parse(JSON.stringify(request));
       requestCopy.params.name = parseResult.originalName;
+      requestCopy.params = this.rewriteProgressTokenForDownstream(requestCopy.params, proxyRequestId);
 
       const promptCacheServiceForStore = ResultCacheService.instance;
       const storePromptCachePolicy = promptCacheServiceForStore.resolvePromptPolicy(
@@ -2405,6 +2450,7 @@ export class ProxySession {
       request.method,
       result.serverID,
     );
+    requestCopy.params = this.rewriteProgressTokenForDownstream(requestCopy.params, proxyRequestId);
 
     let isReconnected: boolean | undefined;
 
@@ -2571,8 +2617,13 @@ export class ProxySession {
     const requestId = notification.params.requestId;
     this.logger.debug({ requestId }, 'Handling cancellation');
 
+    if (requestId === undefined) {
+      this.logger.warn('Cancelled notification missing requestId');
+      return;
+    }
+
     // Get original requestId
-    const proxyRequestId = this.requestIdMapper.getProxyRequestId(String(requestId));
+    const proxyRequestId = this.requestIdMapper.getProxyRequestId(requestId);
     if (!proxyRequestId) {
       this.logger.warn({ requestId }, 'No proxy requestId found');
       return;
@@ -2583,6 +2634,15 @@ export class ProxySession {
     if (!mappingEntry || !mappingEntry.serverId) {
       // Request may have completed or doesn't exist
       this.logger.debug({ requestId }, 'No mapping entry found for cancelled request');
+      return;
+    }
+
+    const downstreamRequestId = this.requestIdMapper.getDownstreamRequestId(proxyRequestId);
+    if (downstreamRequestId === undefined) {
+      this.logger.warn(
+        { requestId, proxyRequestId, serverId: mappingEntry.serverId },
+        'No downstream requestId found for cancelled request',
+      );
       return;
     }
 
@@ -2597,14 +2657,14 @@ export class ProxySession {
       try {
         // Deep copy notification
         const notificationCopy = JSON.parse(JSON.stringify(notification)) as CancelledNotification;
-        notificationCopy.params.requestId = proxyRequestId;
+        notificationCopy.params.requestId = downstreamRequestId;
 
         // Forward cancellation notification to downstream server
         await client.notification(notificationCopy, {
           relatedRequestId: proxyRequestId,
         });
         this.logger.debug(
-          { requestId, serverId: mappingEntry.serverId },
+          { requestId, proxyRequestId, downstreamRequestId, serverId: mappingEntry.serverId },
           'Forwarded cancellation to server',
         );
       } catch (error) {
@@ -2631,66 +2691,37 @@ export class ProxySession {
   }
 
   /**
-   * Forward cancellation notification to client
-   * Used to handle cancellations initiated by server
-   */
-  public async forwardCancellationToClient(notification: CancelledNotification): Promise<void> {
-    try {
-      // Convert proxyRequestId back to original requestId
-      const proxyRequestId = String(notification.params.requestId);
-      const originalRequestId = this.requestIdMapper.getOriginalRequestId(proxyRequestId);
-
-      if (!originalRequestId) {
-        this.logger.warn({ proxyRequestId }, 'No original requestId found for proxy requestId');
-        return;
-      }
-
-      // Modify requestId in notification to original value
-      const modifiedNotification = {
-        ...notification,
-        params: {
-          ...notification.params,
-          requestId: originalRequestId,
-        },
-      };
-
-      await this.upstreamServer.notification(modifiedNotification, {
-        relatedRequestId: originalRequestId,
-      });
-      this.logger.debug({ proxyRequestId, originalRequestId }, 'Forwarded cancellation to client');
-    } catch (error) {
-      this.logger.error({ error }, 'Failed to forward cancellation to client');
-      throw error;
-    }
-  }
-
-  /**
    * Forward progress notification to client
    */
   public async forwardProgressToClient(notification: ProgressNotification): Promise<void> {
     try {
-      // progressToken is actually the proxyRequestId
       const proxyRequestId = String(notification.params.progressToken);
+      const originalProgressToken = this.requestIdMapper.getOriginalProgressToken(proxyRequestId);
       const originalRequestId = this.requestIdMapper.getOriginalRequestId(proxyRequestId);
 
-      if (!originalRequestId) {
-        this.logger.warn({ proxyRequestId }, 'No original requestId found for progress token');
+      if (originalProgressToken === undefined || originalRequestId === undefined) {
+        this.logger.warn(
+          { proxyRequestId },
+          'No original progress routing metadata found for progress token',
+        );
         return;
       }
 
-      // Modify progressToken in notification to original value
       const modifiedNotification = {
         ...notification,
         params: {
           ...notification.params,
-          progressToken: originalRequestId,
+          progressToken: originalProgressToken,
         },
       };
 
       await this.upstreamServer.notification(modifiedNotification, {
         relatedRequestId: originalRequestId,
       });
-      this.logger.debug({ proxyRequestId, originalRequestId }, 'Forwarded progress to client');
+      this.logger.debug(
+        { proxyRequestId, originalRequestId, originalProgressToken },
+        'Forwarded progress to client',
+      );
     } catch (error) {
       this.logger.error({ error }, 'Failed to forward progress to client');
       throw error;

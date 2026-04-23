@@ -115,6 +115,13 @@ Peta Core does not expose standard downstream reverse-request capabilities such 
 per-user temporary-connection modes. Downstream MCP servers should not expect the
 gateway to route those server-initiated requests back to upstream clients.
 
+For normal upstream client requests, Peta Core preserves MCP progress and cancellation
+semantics across the proxy boundary. Downstream progress notifications are routed back
+to the originating upstream session and restored to the client's original
+`progressToken`, while upstream `notifications/cancelled` are translated to the actual
+downstream in-flight request ID. Downstream server-initiated cancellation notifications
+are not routed upstream in shared managed-connection mode.
+
 #### Resource Namespace
 
 Peta Gateway uses namespaces to isolate resources from different servers:
