@@ -46,6 +46,7 @@ export class AuthMiddleware {
       // 1. Check if there's already a valid session
       const sessionId = req.headers['Mcp-Session-Id'] as string || req.headers['mcp-session-id'] as string;
       if (sessionId && sessionId.length > 0) {
+        this.logger.debug({ sessionId }, 'Session ID found');
         const existingSession = SessionStore.instance.getSession(sessionId);
         if (existingSession) {
 
@@ -112,15 +113,16 @@ export class AuthMiddleware {
           if (req.method === 'DELETE') {
             return next();
           }
-          res.status(400).json({
-            jsonrpc: '2.0',
-            error: {
-              code: ErrorCode.ConnectionClosed,
-              message: 'Bad Request: No valid session ID provided',
-            },
-            id: null,
-          });
-          return ;
+          this.logger.debug({ sessionId }, 'No valid session ID provided');
+          // res.status(400).json({
+          //   jsonrpc: '2.0',
+          //   error: {
+          //     code: ErrorCode.ConnectionClosed,
+          //     message: 'Bad Request: No valid session ID provided',
+          //   },
+          //   id: null,
+          // });
+          // return ;
         }
       }
 
@@ -240,7 +242,7 @@ export class AuthMiddleware {
 
       // 4. Create new client session
       const clientSession = await SessionStore.instance.createSession(
-        AuthUtils.generateSessionId(),
+        sessionId ?? AuthUtils.generateSessionId(),
         authContext.userId,
         token,
         authContext,
