@@ -39,6 +39,12 @@ export class EventRepository {
     });
   }
 
+  static async findByEventIdForSession(eventId: string, sessionId: string): Promise<Event | null> {
+    return await prisma.event.findFirst({
+      where: { eventId, sessionId },
+    });
+  }
+
   /**
    * Find events by stream ID
    */
@@ -71,6 +77,21 @@ export class EventRepository {
         createdAt: { gt: afterEvent.createdAt },
       },
       orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  static async findByStreamIdForSessionAfterId(
+    sessionId: string,
+    streamId: string,
+    afterId: number,
+  ): Promise<Event[]> {
+    return await prisma.event.findMany({
+      where: {
+        sessionId,
+        streamId,
+        id: { gt: afterId },
+      },
+      orderBy: { id: 'asc' },
     });
   }
 

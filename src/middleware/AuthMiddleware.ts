@@ -241,8 +241,12 @@ export class AuthMiddleware {
       req.authContext = authContext;
 
       // 4. Create new client session
+      const newSessionId = SessionStore.instance.consumeTerminatedSession(sessionId, authContext, token)
+        ? sessionId
+        : AuthUtils.generateSessionId();
+
       const clientSession = await SessionStore.instance.createSession(
-        sessionId ?? AuthUtils.generateSessionId(),
+        newSessionId,
         authContext.userId,
         token,
         authContext,
@@ -429,8 +433,22 @@ export class AuthMiddleware {
     authContext.userAgent = req.headers['user-agent'] as string || undefined;
 
     // 5. Create session via existing SessionStore
+    const requestedSessionId =
+      typeof req.headers['Mcp-Session-Id'] === 'string'
+        ? req.headers['Mcp-Session-Id']
+        : typeof req.headers['mcp-session-id'] === 'string'
+          ? req.headers['mcp-session-id']
+          : undefined;
+    const newSessionId = SessionStore.instance.consumeTerminatedSession(
+      requestedSessionId,
+      authContext,
+      authContext.token,
+    )
+      ? requestedSessionId!
+      : AuthUtils.generateSessionId();
+
     const clientSession = await SessionStore.instance.createSession(
-      AuthUtils.generateSessionId(),
+      newSessionId,
       authContext.userId,
       authContext.token,
       authContext,

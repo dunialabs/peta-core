@@ -25,11 +25,11 @@ class FakeServer {
   }
 
   getClientCapabilities() {
-    return undefined;
+    return { roots: { listChanged: true } };
   }
 
   getClientVersion() {
-    return undefined;
+    return { name: 'test-client', version: '1.0.0' };
   }
 
   async close() {}
@@ -178,5 +178,55 @@ describe('ProxySession transport resumability wiring', () => {
       {},
       initializeRequest,
     );
+  });
+
+  test('populates client metadata from Server.oninitialized instead of transport session callback', async () => {
+    const eventStore = {
+      storeEvent: jest.fn(async () => 'event-1'),
+      getStreamIdForEventId: jest.fn(async () => '_GET_stream'),
+      replayEventsAfter: jest.fn(async () => '_GET_stream'),
+    };
+    const clientSession = {
+      authContext: {},
+      capabilities: undefined,
+      clientInfo: undefined,
+      connectionInitialized: jest.fn(),
+    };
+
+    const proxySession = new ProxySession(
+      'session-1',
+      'user-1',
+      clientSession,
+      {},
+      eventStore,
+      async () => {},
+    );
+
+    const initializeRequest = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-03-26',
+        capabilities: {},
+        clientInfo: { name: 'test-client', version: '1.0.0' },
+      },
+    };
+
+    await proxySession.handleRequest(
+      { method: 'POST', body: initializeRequest },
+      {},
+      initializeRequest,
+    );
+
+    await createdTransportOptions[0].onsessioninitialized('session-1');
+    expect(clientSession.capabilities).toBeUndefined();
+    expect(clientSession.clientInfo).toBeUndefined();
+    expect(clientSession.connectionInitialized).not.toHaveBeenCalled();
+
+    FakeServer.instances[0].oninitialized();
+    expect(clientSession.capabilities).toEqual({ roots: { listChanged: true } });
+    expect(clientSession.clientInfo).toEqual({ name: 'test-client', version: '1.0.0' });
+    expect(clientSession.connectionInitialized).toHaveBeenCalledWith(FakeServer.instances[0]);
   });
 });

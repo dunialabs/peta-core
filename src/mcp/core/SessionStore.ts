@@ -13,6 +13,18 @@ import { McpServerCapabilities } from '../types/mcp.js';
 import { CapabilitiesService } from '../services/CapabilitiesService.js';
 import { discoveryConfigService } from '../services/DiscoveryConfigService.js';
 import { createLogger } from '../../logger/index.js';
+import { createHash } from 'crypto';
+
+export interface SessionCloseOptions {
+  preserveForReconnect?: boolean;
+}
+
+interface TerminatedSessionTombstone {
+  userId: string;
+  authKind: 'anonymous' | 'authenticated';
+  tokenFingerprint: string;
+  expiresAt: number;
+}
 
 /**
  * Manages all active ClientSession and ProxySession
@@ -23,10 +35,12 @@ export class SessionStore {
   private userSessions: Map<string, Set<string>> = new Map(); // userId -> sessionIds
   private eventStores: Map<string, PersistentEventStore> = new Map(); // New: Manage EventStore
   private sessionLoggers: Map<string, SessionLogger> = new Map(); // New: Manage SessionLogger
+  private terminatedSessions: Map<string, TerminatedSessionTombstone> = new Map();
 
   // Logger for SessionStore
   private logger = createLogger('SessionStore');
   private static readonly SESSION_INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000;
+  private static readonly SESSION_RECONNECT_GRACE_MS = 30 * 1000;
 
   static instance: SessionStore = new SessionStore();
 
@@ -47,6 +61,11 @@ export class SessionStore {
     ip: string,
     userAgent: string,
   ): Promise<ClientSession> {
+    if (this.sessions.has(sessionId)) {
+      this.logger.warn({ userId, sessionId }, 'Refusing to create duplicate active session');
+      throw new Error(`Session already exists: ${sessionId}`);
+    }
+
     // 1. Create ClientSession
     const clientSession = new ClientSession(sessionId, userId, token, authContext);
 
@@ -89,7 +108,8 @@ export class SessionStore {
       clientSession,
       sessionLogger,
       eventStore,
-      (sessionId: string) => this.removeSingleSession(sessionId),
+      (sessionId: string, options?: SessionCloseOptions) =>
+        this.removeSingleSession(sessionId, DisconnectReason.CLIENT_DISCONNECT, options),
       instructions,
     );
 
@@ -136,6 +156,43 @@ export class SessionStore {
    */
   getSessionLogger(sessionId: string): SessionLogger | undefined {
     return this.sessionLoggers.get(sessionId);
+  }
+
+  consumeTerminatedSession(
+    sessionId: string | undefined,
+    authContext: AuthContext,
+    token: string,
+  ): boolean {
+    if (!sessionId) {
+      return false;
+    }
+
+    this.pruneTerminatedSessions();
+    const tombstone = this.terminatedSessions.get(sessionId);
+    if (!tombstone) {
+      return false;
+    }
+
+    if (tombstone.expiresAt <= Date.now()) {
+      this.terminatedSessions.delete(sessionId);
+      return false;
+    }
+
+    const authKind = this.getAuthKind(authContext);
+    const tokenFingerprint = this.fingerprintToken(token);
+    const matches =
+      tombstone.userId === authContext.userId &&
+      tombstone.authKind === authKind &&
+      tombstone.tokenFingerprint === tokenFingerprint;
+
+    if (!matches) {
+      this.logger.warn({ sessionId, userId: authContext.userId }, 'Rejected reconnect session reuse');
+      return false;
+    }
+
+    this.terminatedSessions.delete(sessionId);
+    this.logger.info({ sessionId, userId: authContext.userId }, 'Consumed terminated session for reconnect');
+    return true;
   }
 
   /**
@@ -200,12 +257,17 @@ export class SessionStore {
   private async removeSingleSession(
     sessionId: string,
     reason: DisconnectReason = DisconnectReason.CLIENT_DISCONNECT,
+    options: SessionCloseOptions = {},
   ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
     const proxySession = this.proxySessions.get(sessionId);
 
     try {
+      if (options.preserveForReconnect && reason === DisconnectReason.CLIENT_DISCONNECT) {
+        this.recordTerminatedSession(session);
+      }
+
       // 1. Cleanup ProxySession resources
       if (proxySession) {
         try {
@@ -339,6 +401,39 @@ export class SessionStore {
     this.eventStores.clear(); // Remove all EventStore
     this.sessionLoggers.clear(); // Remove all SessionLogger
     GlobalRequestRouter.getInstance().cleanupAllSessionNotifications();
+  }
+
+  private recordTerminatedSession(session: ClientSession): void {
+    this.pruneTerminatedSessions();
+
+    this.terminatedSessions.set(session.sessionId, {
+      userId: session.userId,
+      authKind: this.getAuthKind(session.authContext),
+      tokenFingerprint: this.fingerprintToken(session.token),
+      expiresAt: Date.now() + SessionStore.SESSION_RECONNECT_GRACE_MS,
+    });
+
+    this.logger.debug(
+      { sessionId: session.sessionId, userId: session.userId },
+      'Recorded terminated session reconnect tombstone',
+    );
+  }
+
+  private pruneTerminatedSessions(): void {
+    const now = Date.now();
+    for (const [sessionId, tombstone] of this.terminatedSessions.entries()) {
+      if (tombstone.expiresAt <= now) {
+        this.terminatedSessions.delete(sessionId);
+      }
+    }
+  }
+
+  private getAuthKind(authContext: AuthContext): 'anonymous' | 'authenticated' {
+    return authContext.kind === 'anonymous' ? 'anonymous' : 'authenticated';
+  }
+
+  private fingerprintToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
   }
 
   /**
@@ -523,9 +618,5 @@ export class SessionStore {
       { userId, sessionCount: userSessions.length },
       'Updated user preferences for sessions',
     );
-  }
-
-  private generateSessionId(): string {
-    return Math.random().toString(36).slice(2) + Date.now();
   }
 }

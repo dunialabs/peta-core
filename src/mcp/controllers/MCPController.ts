@@ -6,7 +6,7 @@
 import { Request, Response } from 'express';
 import { SessionStore } from '../core/SessionStore.js';
 import { AuthError, AuthErrorType } from '../../types/auth.types.js';
-import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import { ErrorCode, isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createLogger } from '../../logger/index.js';
 import type { ClientSession } from '../core/ClientSession.js';
 
@@ -62,7 +62,10 @@ export class MCPController {
   handlePost = async (req: Request, res: Response): Promise<void> => {
     try {
       const clientSession = req.clientSession!;
-      const sessionId = req.headers['Mcp-Session-Id'] as string || req.headers['mcp-session-id'] as string || clientSession.sessionId;
+      const headerSessionId = req.headers['Mcp-Session-Id'] as string || req.headers['mcp-session-id'] as string;
+      const sessionId = isInitializeRequest(req.body)
+        ? clientSession.sessionId
+        : headerSessionId || clientSession.sessionId;
 
       // Get ProxySession directly from SessionStore
       let proxySession = SessionStore.instance.getProxySession(sessionId);

@@ -1130,113 +1130,143 @@ export class ServerManager {
       }
 
       // 4. Create transport using dynamic transport factory
-      const { transport: rawTransport, transportType } =
+      let { transport: rawTransport, transportType } =
         await DownstreamTransportFactory.create(resolvedLaunchConfig);
       const runnerExecutionTrace = runnerMetadata
         ? customStdioRunnerService.attachExecutionTrace(rawTransport)
         : undefined;
 
-      // 1.5 Detect and cache transport type if not already set
-      if (!serverEntity.transportType || serverEntity.transportType !== transportType) {
-        await ServerRepository.update(serverEntity.serverId, { transportType });
-        serverEntity.transportType = transportType;
-
-        this.logger.info(
-          { serverId: serverEntity.serverId, transportType },
-          'Transport type detected and cached',
-        );
-      }
-
       // 5. Create MCP client
-      const client = new Client(
+      let client = new Client(
         {
           name: APP_INFO.name,
           version: APP_INFO.version,
         },
         this.clientOptions,
       );
-      const transport = this.wrapTransportWithRequestTracking(rawTransport, serverContext, client);
+      let transport = this.wrapTransportWithRequestTracking(rawTransport, serverContext, client);
       startupDiagnostics = createConnectionStartupDiagnostics(transport, client);
 
-      transport.onclose = () => {
-        this.logger.warn({ serverName: serverEntity.serverName }, 'Transport closed');
+      const attachTransportCloseHandler = (trackedTransport: Transport) => {
+        trackedTransport.onclose = () => {
+          this.logger.warn({ serverName: serverEntity.serverName }, 'Transport closed');
 
-        if (this.plannedTransportCloses.has(transport as object)) {
-          this.plannedTransportCloses.delete(transport as object);
-          this.logger.debug(
-            { serverId: serverEntity.serverId },
-            'Ignoring planned transport close',
-          );
-          return;
-        }
-
-        if (serverContext.transport && serverContext.transport !== transport) {
-          this.logger.debug(
-            { serverId: serverEntity.serverId },
-            'Ignoring stale transport close event',
-          );
-          return;
-        }
-
-        const affectedSessions =
-          SessionStore.instance?.getSessionsUsingServer(serverEntity.serverId) ?? [];
-        let closeErrorMessage = 'Transport closed by server';
-        let preferredCloseMessage: string | undefined;
-        if (runnerMetadata && runnerExecutionTrace) {
-          const runnerFailure = customStdioRunnerService.buildFailureDetails(
-            serverEntity.serverId,
-            runnerMetadata,
-            runnerExecutionTrace,
-          );
-          if (runnerFailure) {
-            closeErrorMessage = runnerFailure.message;
-            preferredCloseMessage = runnerFailure.message;
-            this.logger.error(
-              {
-                serverId: serverEntity.serverId,
-                originalCommand: runnerMetadata.originalCommand,
-                runnerImage: runnerMetadata.runnerImage,
-                category: runnerFailure.category,
-                reason: runnerFailure.reason,
-                exitCode: runnerExecutionTrace.exitCode,
-                signal: runnerExecutionTrace.signal,
-                stderrTail: runnerFailure.stderrSummary,
-              },
-              'CustomStdio runner process exited',
+          if (this.plannedTransportCloses.has(trackedTransport as object)) {
+            this.plannedTransportCloses.delete(trackedTransport as object);
+            this.logger.debug(
+              { serverId: serverEntity.serverId },
+              'Ignoring planned transport close',
             );
+            return;
           }
-        }
 
-        if (startupPhaseActive) {
-          startupDiagnostics?.captureClose(closeErrorMessage);
-        }
-        this.recordServerStartupError(
-          serverContext,
-          closeErrorMessage,
-          preferredCloseMessage ??
-            (startupPhaseActive ? startupDiagnostics?.getPreferredMessage() : undefined),
-        );
+          if (serverContext.transport && serverContext.transport !== trackedTransport) {
+            this.logger.debug(
+              { serverId: serverEntity.serverId },
+              'Ignoring stale transport close event',
+            );
+            return;
+          }
 
-        const shouldPreserveContext =
-          this.isLazyStartApplicable(serverEntity) && serverEntity.enabled;
-        const nextStatus = shouldPreserveContext ? ServerStatus.Sleeping : ServerStatus.Error;
-        serverContext.stopTokenRefresh();
-        serverContext.clearConnectionState(nextStatus);
+          const affectedSessions =
+            SessionStore.instance?.getSessionsUsingServer(serverEntity.serverId) ?? [];
+          let closeErrorMessage = 'Transport closed by server';
+          let preferredCloseMessage: string | undefined;
+          if (runnerMetadata && runnerExecutionTrace) {
+            const runnerFailure = customStdioRunnerService.buildFailureDetails(
+              serverEntity.serverId,
+              runnerMetadata,
+              runnerExecutionTrace,
+            );
+            if (runnerFailure) {
+              closeErrorMessage = runnerFailure.message;
+              preferredCloseMessage = runnerFailure.message;
+              this.logger.error(
+                {
+                  serverId: serverEntity.serverId,
+                  originalCommand: runnerMetadata.originalCommand,
+                  runnerImage: runnerMetadata.runnerImage,
+                  category: runnerFailure.category,
+                  reason: runnerFailure.reason,
+                  exitCode: runnerExecutionTrace.exitCode,
+                  signal: runnerExecutionTrace.signal,
+                  stderrTail: runnerFailure.stderrSummary,
+                },
+                'CustomStdio runner process exited',
+              );
+            }
+          }
 
-        this.notifyUsersOfServerChange(serverEntity.serverId, affectedSessions, 'server_error', {
-          toolsChanged: !shouldPreserveContext && (serverContext.tools?.tools?.length ?? 0) > 0,
-          resourcesChanged:
-            !shouldPreserveContext && (serverContext.resources?.resources?.length ?? 0) > 0,
-          promptsChanged:
-            !shouldPreserveContext && (serverContext.prompts?.prompts?.length ?? 0) > 0,
-        });
+          if (startupPhaseActive) {
+            startupDiagnostics?.captureClose(closeErrorMessage);
+          }
+          this.recordServerStartupError(
+            serverContext,
+            closeErrorMessage,
+            preferredCloseMessage ??
+              (startupPhaseActive ? startupDiagnostics?.getPreferredMessage() : undefined),
+          );
+
+          const shouldPreserveContext =
+            this.isLazyStartApplicable(serverEntity) && serverEntity.enabled;
+          const nextStatus = shouldPreserveContext ? ServerStatus.Sleeping : ServerStatus.Error;
+          serverContext.stopTokenRefresh();
+          serverContext.clearConnectionState(nextStatus);
+
+          this.notifyUsersOfServerChange(serverEntity.serverId, affectedSessions, 'server_error', {
+            toolsChanged: !shouldPreserveContext && (serverContext.tools?.tools?.length ?? 0) > 0,
+            resourcesChanged:
+              !shouldPreserveContext && (serverContext.resources?.resources?.length ?? 0) > 0,
+            promptsChanged:
+              !shouldPreserveContext && (serverContext.prompts?.prompts?.length ?? 0) > 0,
+          });
+        };
       };
+
+      attachTransportCloseHandler(transport);
 
       // 6. Establish connection
       try {
         await client.connect(transport);
       } catch (error) {
-        if (runnerMetadata && runnerExecutionTrace) {
+        if (DownstreamTransportFactory.canFallbackHttpToSse(resolvedLaunchConfig, transportType)) {
+          this.logger.warn(
+            { error, serverId: serverEntity.serverId, url: resolvedLaunchConfig.url },
+            'Streamable HTTP connection failed, trying SSE fallback',
+          );
+
+          this.plannedTransportCloses.add(transport as object);
+          try {
+            await transport.close();
+          } catch (closeError) {
+            this.logger.debug(
+              { error: closeError, serverId: serverEntity.serverId },
+              'Failed to close failed HTTP transport before SSE fallback',
+            );
+          }
+
+          rawTransport = DownstreamTransportFactory.createSSEFallbackTransport(resolvedLaunchConfig);
+          transportType = 'sse';
+          client = new Client(
+            {
+              name: APP_INFO.name,
+              version: APP_INFO.version,
+            },
+            this.clientOptions,
+          );
+          transport = this.wrapTransportWithRequestTracking(rawTransport, serverContext, client);
+          startupDiagnostics = createConnectionStartupDiagnostics(transport, client);
+          attachTransportCloseHandler(transport);
+
+          try {
+            await client.connect(transport);
+          } catch (fallbackError) {
+            throw createErrorWithCause(
+              `Streamable HTTP connection failed and SSE fallback also failed: ${formatConnectionDiagnosticError(fallbackError)}`,
+              fallbackError,
+            );
+          }
+        } else if (runnerMetadata && runnerExecutionTrace) {
           const runnerFailure = customStdioRunnerService.buildFailureDetails(
             serverEntity.serverId,
             runnerMetadata,
@@ -1264,6 +1294,17 @@ export class ServerManager {
         throw error;
       }
       this.logger.info({ serverName: serverEntity.serverName }, 'Connection established');
+      // Cache the transport that actually connected. Auto-detected HTTP may fall back to SSE.
+      if (!serverEntity.transportType || serverEntity.transportType !== transportType) {
+        await ServerRepository.update(serverEntity.serverId, { transportType });
+        serverEntity.transportType = transportType;
+
+        this.logger.info(
+          { serverId: serverEntity.serverId, transportType },
+          'Transport type detected and cached',
+        );
+      }
+
       if (
         serverEntity.category === ServerCategory.CustomRemote ||
         serverEntity.category === ServerCategory.CustomStdio
@@ -1405,7 +1446,7 @@ export class ServerManager {
                   });
                 }
               } catch (error) {
-                serverContext.recordTimeout(error);
+                await serverContext.recordTimeout(error);
                 this.logger.warn(
                   { error, serverName: serverContext.serverEntity.serverName },
                   'Failed to get tools',
@@ -1437,7 +1478,7 @@ export class ServerManager {
                   });
                 }
               } catch (error) {
-                serverContext.recordTimeout(error);
+                await serverContext.recordTimeout(error);
                 this.logger.warn(
                   { error, serverName: serverContext.serverEntity.serverName },
                   'Failed to get resources',
@@ -1480,7 +1521,7 @@ export class ServerManager {
                   });
                 }
               } catch (error) {
-                serverContext.recordTimeout(error);
+                await serverContext.recordTimeout(error);
                 this.logger.warn(
                   { error, serverName: serverContext.serverEntity.serverName },
                   'Failed to get prompts',

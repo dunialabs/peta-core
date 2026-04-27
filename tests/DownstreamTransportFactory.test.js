@@ -11,4 +11,27 @@ describe('DownstreamTransportFactory', () => {
     expect(transportType).toBe('stdio');
     expect(transport.stderr).not.toBeNull();
   });
+
+  test('allows SSE fallback only for auto-detected HTTP remote configs', () => {
+    expect(
+      DownstreamTransportFactory.canFallbackHttpToSse(
+        { url: 'http://localhost:3000/mcp' },
+        'http',
+      ),
+    ).toBe(true);
+
+    expect(
+      DownstreamTransportFactory.canFallbackHttpToSse(
+        { type: 'http', url: 'http://localhost:3000/mcp' },
+        'http',
+      ),
+    ).toBe(false);
+
+    expect(
+      DownstreamTransportFactory.canFallbackHttpToSse(
+        { url: 'http://localhost:3000/sse' },
+        'sse',
+      ),
+    ).toBe(false);
+  });
 });

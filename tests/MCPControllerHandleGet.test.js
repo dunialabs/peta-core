@@ -64,3 +64,49 @@ describe('MCPController GET handling', () => {
     expect(handleRequest).toHaveBeenCalledWith(req, res, undefined);
   });
 });
+
+describe('MCPController POST handling', () => {
+  beforeEach(() => {
+    getProxySession.mockReset();
+  });
+
+  test('routes initialize requests through the middleware-created session id', async () => {
+    const handleRequest = jest.fn(async () => {});
+    getProxySession.mockImplementation((sessionId) =>
+      sessionId === 'fresh-session' ? { handleRequest } : undefined,
+    );
+
+    const controller = new MCPController();
+    const initializeRequest = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-03-26',
+        capabilities: {},
+        clientInfo: { name: 'inspector', version: '1.0.0' },
+      },
+    };
+    const req = {
+      headers: {
+        'mcp-session-id': 'stale-session',
+      },
+      clientSession: {
+        sessionId: 'fresh-session',
+      },
+      body: initializeRequest,
+    };
+    const res = {
+      status: jest.fn(function () {
+        return this;
+      }),
+      json: jest.fn(),
+    };
+
+    await controller.handlePost(req, res);
+
+    expect(getProxySession).toHaveBeenCalledWith('fresh-session');
+    expect(handleRequest).toHaveBeenCalledWith(req, res, initializeRequest);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+});

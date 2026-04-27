@@ -2,6 +2,7 @@ import { Permissions } from '../mcp/types/mcp.js';
 import { DetailedLogEntry } from '../types/auth.types.js';
 import { createLogger } from '../logger/index.js';
 import { ServerAuthType } from '../types/enums.js';
+import { randomUUID } from 'crypto';
 
 // Logger for AuthUtils
 const logger = createLogger('AuthUtils');
@@ -106,7 +107,7 @@ export class AuthUtils {
    * Generate session ID
    */
   static generateSessionId(): string {
-    return `session-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+    return `session-${randomUUID()}`;
   }
 
   /**
@@ -180,7 +181,10 @@ export class AuthUtils {
    * Validate session ID format
    */
   static isValidSessionId(sessionId: string): boolean {
-    return /^[a-f0-9]{32}$/.test(sessionId);
+    return (
+      /^[a-f0-9]{32}$/.test(sessionId) ||
+      /^session-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sessionId)
+    );
   }
 
   /**

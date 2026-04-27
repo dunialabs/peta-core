@@ -1,8 +1,5 @@
 import { EventStore, StreamId, EventId, ReplayOptions, JSONRPCMessage, CachedEvent } from '../types/mcp.js';
 import { EventRepository } from '../../repositories/EventRepository.js';
-import { LogService } from '../../log/LogService.js';
-import { Event } from '@prisma/client';
-import { MCPEventLogType } from '../../types/enums.js';
 import { createLogger } from '../../logger/index.js';
 
 /**
@@ -43,15 +40,11 @@ export class PersistentEventStore implements EventStore {
         expiresAt: new Date(Date.now() + this.eventRetentionDays * 24 * 60 * 60 * 1000)
     };
 
-      // Store to in-memory cache
-      this.storeEventInCache(streamId, eventId, message);
+      // Persist before returning the event ID so SDK resumption can replay it.
+      await this.persistToDatabase(eventEntity);
 
-      // Persist to database asynchronously
-      this.persistToDatabase(eventEntity).catch(error => {
-        this.logger.error({ error, eventId }, 'Failed to persist event to database');
-        // Log error but don't affect main flow
-        LogService.getInstance().enqueueLog({action: MCPEventLogType.ErrorInternal, error: `Failed to persist event ${eventId} to database: ${error}`});
-      });
+      // Store to in-memory cache after durable persistence succeeds.
+      this.storeEventInCache(streamId, eventId, message);
 
       this.logger.debug({ eventId, streamId }, 'Event stored');
       return eventId;
@@ -65,7 +58,7 @@ export class PersistentEventStore implements EventStore {
    * Resolve the stream that owns the specified event
    */
   async getStreamIdForEventId(eventId: EventId): Promise<StreamId | undefined> {
-    const event = await EventRepository.findByEventId(eventId);
+    const event = await EventRepository.findByEventIdForSession(eventId, this.sessionId);
     return event?.streamId;
   }
 
@@ -77,7 +70,7 @@ export class PersistentEventStore implements EventStore {
    */
   async replayEventsAfter(lastEventId: EventId, options: ReplayOptions): Promise<StreamId> {
     try {
-      const anchorEvent = await EventRepository.findByEventId(lastEventId);
+      const anchorEvent = await EventRepository.findByEventIdForSession(lastEventId, this.sessionId);
       if (!anchorEvent) {
         throw new Error(`Invalid event ID: ${lastEventId}`);
       }
@@ -86,11 +79,12 @@ export class PersistentEventStore implements EventStore {
 
       this.logger.debug({ streamId, lastEventId }, 'Replaying events for stream after event');
 
-      // Get events from database
-      const events = await EventRepository.findByStreamId(streamId, lastEventId);
-      
-      // Sort by timestamp
-      const sortedEvents = events.sort((a: Event, b: Event) => a.createdAt.getTime() - b.createdAt.getTime());
+      // Get events from database in durable insertion order for this session and stream.
+      const sortedEvents = await EventRepository.findByStreamIdForSessionAfterId(
+        this.sessionId,
+        streamId,
+        anchorEvent.id,
+      );
 
       // Replay events
       for (const event of sortedEvents) {

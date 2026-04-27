@@ -252,7 +252,7 @@ export class ServerContext {
 
     if (this.timeoutCount >= this.maxTimeoutCount) {
       try {
-        this.connection?.ping({ timeout: 50000 });
+        await this.connection?.ping({ timeout: 50000 });
         this.clearTimeout();
       } catch (error) {
         if (error instanceof McpError && error.code === ErrorCode.RequestTimeout) {

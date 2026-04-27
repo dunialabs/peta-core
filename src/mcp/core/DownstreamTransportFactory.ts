@@ -2,7 +2,6 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { createLogger } from '../../logger/index.js';
 
 export type DownstreamTransportType = 'stdio' | 'http' | 'sse';
 
@@ -13,17 +12,20 @@ export interface TransportConfig {
   retryDelay?: number;
 }
 
+export interface DownstreamTransportCreateResult {
+  transport: Transport;
+  transportType: DownstreamTransportType;
+}
+
 /**
  * Downstream transport factory
  * Automatically infers and creates corresponding transport instances based on launch_config
  */
 export class DownstreamTransportFactory {
-  // Logger for DownstreamTransportFactory
-  private static logger = createLogger('DownstreamTransportFactory');
   /**
    * Create transport instance based on launch_config
    */
-  static async create(launchConfig: Record<string, any>): Promise<{transport: Transport, transportType: DownstreamTransportType}> {
+  static async create(launchConfig: Record<string, any>): Promise<DownstreamTransportCreateResult> {
     const transportType = this.detectTransportType(launchConfig);
     
     try {
@@ -71,6 +73,15 @@ export class DownstreamTransportFactory {
     throw new Error('Cannot determine transport type from launch_config');
   }
 
+  public static canFallbackHttpToSse(config: Record<string, any>, transportType: DownstreamTransportType): boolean {
+    return transportType === 'http' && !config.type && typeof config.url === 'string' && config.url.length > 0;
+  }
+
+  public static createSSEFallbackTransport(config: Record<string, any>): Transport {
+    this.validateSSEConfig(config);
+    return new SSEClientTransport(new URL(config.url));
+  }
+
   /**
    * Create stdio transport
    */
@@ -88,33 +99,23 @@ export class DownstreamTransportFactory {
   }
 
   /**
-   * Create HTTP transport, supports fallback to SSE
+   * Create HTTP transport. Connection-time SSE fallback is handled by ServerManager
+   * because the SDK transport constructor does not validate remote protocol support.
    */
   private static async createHttpTransport(config: Record<string, any>): Promise<Transport> {
     this.validateHttpConfig(config);
 
     const url = new URL(config.url);
-    
-    // Try Streamable HTTP first
-    try {
-      const transport = new StreamableHTTPClientTransport(url, {
-        requestInit: {
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json, text/event-stream',
-            ...config.headers
-          }
+
+    return new StreamableHTTPClientTransport(url, {
+      requestInit: {
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+          ...config.headers
         }
-      });
-
-      return transport;
-
-    } catch (error) {
-      DownstreamTransportFactory.logger.warn({ error }, 'Streamable HTTP failed, falling back to SSE');
-      
-      // Fallback to SSE
-      return new SSEClientTransport(url);
-    }
+      }
+    });
   }
 
   /**

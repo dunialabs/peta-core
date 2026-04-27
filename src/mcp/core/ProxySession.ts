@@ -87,6 +87,7 @@ import {
 import { discoveryConfigService } from '../services/DiscoveryConfigService.js';
 import { ResultCacheService } from './cache/ResultCacheService.js';
 import type { CacheScopeContext, ResolvedCachePolicy } from './cache/types.js';
+import type { SessionCloseOptions } from './SessionStore.js';
 
 /**
  * MCP Proxy Session
@@ -133,7 +134,7 @@ export class ProxySession {
     private clientSession: ClientSession,
     private sessionLogger: SessionLogger,
     eventStore: PersistentEventStore,
-    private onclose: (sessionId: string) => Promise<void>,
+    private onclose: (sessionId: string, options?: SessionCloseOptions) => Promise<void>,
     instructions?: string,
   ) {
     // Initialize logger (needed in constructor because sessionId is required)
@@ -167,6 +168,9 @@ export class ProxySession {
    */
   private setupRequestHandlers(): void {
     this.upstreamServer.oninitialized = () => {
+      this.clientSession.capabilities = this.upstreamServer.getClientCapabilities();
+      this.clientSession.clientInfo = this.upstreamServer.getClientVersion();
+
       this.logger.info({ userId: this.userId }, 'ProxySession initialized');
 
       this.isInitialized = true;
@@ -325,14 +329,9 @@ export class ProxySession {
           sessionIdGenerator: () => this.sessionId,
           eventStore: this.eventStore,
           onsessioninitialized: async (sessionId) => {
-            this.clientSession.capabilities = this.upstreamServer.getClientCapabilities();
-            this.clientSession.clientInfo = this.upstreamServer.getClientVersion();
-
             this.logger.info(
               {
                 sessionId: sessionId,
-                clientInfo: this.clientSession.clientInfo,
-                capabilities: this.clientSession.capabilities,
               },
               'Session initialized',
             );
@@ -340,7 +339,7 @@ export class ProxySession {
           },
           onsessionclosed: async (sessionId: string) => {
             this.logger.info({ sessionId }, 'Session closed');
-            this.triggerOnClose(sessionId);
+            this.triggerOnClose(sessionId, { preserveForReconnect: true });
           },
         });
 
@@ -2570,12 +2569,12 @@ export class ProxySession {
     this.notificationSubscriptions.clear();
   }
 
-  private triggerOnClose(sessionId: string): void {
+  private triggerOnClose(sessionId: string, options?: SessionCloseOptions): void {
     if (this.closeTriggered) {
       return;
     }
     this.closeTriggered = true;
-    void this.onclose(sessionId).catch((error) => {
+    void this.onclose(sessionId, options).catch((error) => {
       this.logger.error({ error, sessionId }, 'onclose callback failed');
     });
   }
