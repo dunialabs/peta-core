@@ -628,7 +628,6 @@ export class ServerManager {
       case ServerAuthType.GithubAuth:
       case ServerAuthType.CanvaAuth:
       case ServerAuthType.HubSpotAuth:
-      case ServerAuthType.IntercomAuth:
       case ServerAuthType.SlackAuth:
         launchConfig.env = {
           ...launchConfig.env,
@@ -1609,8 +1608,7 @@ export class ServerManager {
     // For testing the temporary block
     if (
       usePetaOauthConfig &&
-      serverContext.serverEntity.authType !== ServerAuthType.ApiKey &&
-      serverContext.serverEntity.authType !== ServerAuthType.IntercomAuth
+      serverContext.serverEntity.authType !== ServerAuthType.ApiKey
     ) {
       const initialToken = await this.initializePetaAuth(serverContext, launchConfig, token);
       this.injectOAuthTokenEnv(authType, launchConfig, initialToken);
@@ -1696,24 +1694,6 @@ export class ServerManager {
     ) {
       throw new Error(
         `[ServerManager] Missing OAuth apiDomain for server ${serverContext.serverID} (PipedriveAuth)`
-      );
-    }
-
-    if (
-      authType === ServerAuthType.IntercomAuth &&
-      (!launchConfig.oauth.accessToken || typeof launchConfig.oauth.accessToken !== 'string')
-    ) {
-      throw new Error(
-        `[ServerManager] Missing OAuth accessToken for server ${serverContext.serverID} (IntercomAuth)`,
-      );
-    }
-
-    if (
-      authType === ServerAuthType.IntercomAuth &&
-      (!launchConfig.oauth.intercomRegion || typeof launchConfig.oauth.intercomRegion !== 'string')
-    ) {
-      throw new Error(
-        `[ServerManager] Missing OAuth intercomRegion for server ${serverContext.serverID} (IntercomAuth)`,
       );
     }
 
