@@ -15,6 +15,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createLogger } from '../../logger/index.js';
 import { ProxyRepository } from '../../repositories/ProxyRepository.js';
+import { getAuthorizationServerUrl, getPublicUrl } from '../../utils/urlUtils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -59,7 +60,7 @@ export class OAuthController {
   /**
    * Handle OPTIONS request (CORS)
    */
-  handleOptions = (req: Request, res: Response): void => {
+  handleOptions = (_req: Request, res: Response): void => {
     this.addCorsHeaders(res);
     res.status(200).end();
   };
@@ -79,19 +80,19 @@ export class OAuthController {
       // Validate required fields
       // For URL-based client ID, skip validation (metadata will be fetched from URL)
       if (!isUrlBasedClientId) {
-        if (!metadata.client_name || typeof metadata.client_name !== 'string' ||
-            !metadata.redirect_uris || !Array.isArray(metadata.redirect_uris)) {
+        if (!metadata.redirect_uris || !Array.isArray(metadata.redirect_uris)) {
           this.addCorsHeaders(res);
           res.status(400).json({
             error: 'invalid_client_metadata',
-            error_description: 'client_name is required and must be a string, and redirect_uris is required and must be an array'
+            error_description: 'redirect_uris is required and must be an array'
           });
           return;
         }
       }
 
       // Register client
-      const clientInfo = await this.clientService.registerClient(metadata);
+      const issuer = getAuthorizationServerUrl(req);
+      const clientInfo = await this.clientService.registerClient(metadata, undefined, issuer);
 
       this.addCorsHeaders(res);
       res.json(clientInfo);
@@ -99,12 +100,11 @@ export class OAuthController {
       this.logger.error({ error }, 'Client registration error');
       this.addCorsHeaders(res);
 
-      // If it's a known error from ClientMetadataFetcher, return specific error information
-      if (error instanceof Error && error.message.includes('invalid_client_metadata')) {
-        const parts = error.message.split(': ');
+      if (error instanceof Error && (error.message.startsWith('invalid_client_metadata:') || error.message.startsWith('invalid_redirect_uri:'))) {
+        const separator = error.message.indexOf(': ');
         res.status(400).json({
-          error: parts[0],
-          error_description: parts[1] || error.message
+          error: separator === -1 ? error.message : error.message.slice(0, separator),
+          error_description: separator === -1 ? error.message : error.message.slice(separator + 2)
         });
         return;
       }
@@ -123,7 +123,8 @@ export class OAuthController {
     try {
       const { clientId } = req.params;
 
-      const client = await this.clientService.getClient(clientId);
+      const issuer = getAuthorizationServerUrl(req);
+      const client = await this.clientService.getClientForIssuer(clientId, issuer);
 
       if (!client) {
         this.addCorsHeaders(res);
@@ -138,7 +139,9 @@ export class OAuthController {
       this.addCorsHeaders(res);
       res.json({
         client_id: client.client_id,
+        issuer: client.issuer,
         client_name: client.client_name,
+        application_type: client.application_type,
         redirect_uris: client.redirect_uris,
         scopes: client.scopes,
       });
@@ -181,9 +184,18 @@ export class OAuthController {
       }
 
       // Query client information
-      const client = await this.clientService.getClient(client_id as string);
+      const issuer = getAuthorizationServerUrl(req);
+      let client = await this.clientService.getClientForIssuer(client_id as string, issuer);
+      if (!client && typeof client_id === 'string' && client_id.startsWith('https://')) {
+        client = await this.clientService.registerClient({ client_id, redirect_uris: [] }, undefined, issuer);
+      }
       if (!client) {
         res.status(400).send('Invalid client_id');
+        return;
+      }
+
+      if (!client.response_types.includes(response_type as string)) {
+        res.status(400).send('Unsupported response_type for client');
         return;
       }
 
@@ -203,6 +215,10 @@ export class OAuthController {
 
       // Replace template variables
       const requestedScopes = this.oauthService.parseScope(scope as string);
+      if (!this.oauthService.isScopeSubset(requestedScopes, client.scopes)) {
+        res.status(400).send('Requested scope exceeds registered client scopes');
+        return;
+      }
       const scopeDescriptions: Record<string, string> = {
         'mcp:tools': 'Execute MCP tools and functions',
         'mcp:resources': 'Access MCP resources and data',
@@ -257,12 +273,25 @@ export class OAuthController {
       } = req.body;
 
       // Validate client
-      const client = await this.clientService.getClient(client_id);
+      const issuer = getAuthorizationServerUrl(req);
+      let client = await this.clientService.getClientForIssuer(client_id, issuer);
+      if (!client && typeof client_id === 'string' && client_id.startsWith('https://')) {
+        client = await this.clientService.registerClient({ client_id, redirect_uris: [] }, undefined, issuer);
+      }
       if (!client) {
         this.addCorsHeaders(res);
         res.status(400).json({
           error: 'invalid_client',
           error_description: 'Client not found'
+        });
+        return;
+      }
+
+      if (!client.response_types.includes('code')) {
+        this.addCorsHeaders(res);
+        res.status(400).json({
+          error: 'unsupported_response_type',
+          error_description: 'Client is not registered for authorization code response'
         });
         return;
       }
@@ -323,6 +352,29 @@ export class OAuthController {
       // Generate authorization code
       const code = this.oauthService.generateAuthorizationCode();
       const scopes = this.oauthService.parseScope(scope);
+      if (!this.oauthService.isScopeSubset(scopes, client.scopes)) {
+        const errorUrl = this.oauthService.buildErrorRedirectUrl(
+          redirect_uri,
+          'invalid_scope',
+          'Requested scope exceeds registered client scopes',
+          state
+        );
+        this.addCorsHeaders(res);
+        res.json({ redirect: errorUrl });
+        return;
+      }
+      const canonicalResource = getPublicUrl(req);
+      if (typeof resource === 'string' && resource.length > 0 && resource !== canonicalResource) {
+        const errorUrl = this.oauthService.buildErrorRedirectUrl(
+          redirect_uri,
+          'invalid_target',
+          'Unsupported resource',
+          state
+        );
+        this.addCorsHeaders(res);
+        res.json({ redirect: errorUrl });
+        return;
+      }
       const expiresAt = new Date(Date.now() + OAUTH_CONFIG.AUTHORIZATION_CODE_LIFETIME * 1000);
 
       // Save authorization code
@@ -335,7 +387,7 @@ export class OAuthController {
           scopes,
           codeChallenge: code_challenge || null,
           challengeMethod: code_challenge_method || null,
-          resource: resource || null,
+          resource: canonicalResource,
           expiresAt,
           used: false,
         },
@@ -345,7 +397,8 @@ export class OAuthController {
       const successUrl = this.oauthService.buildSuccessRedirectUrl(
         redirect_uri,
         code,
-        state
+        state,
+          issuer
       );
 
       this.addCorsHeaders(res);
@@ -451,7 +504,8 @@ export class OAuthController {
       }
 
       if (clientId) {
-        const client = await this.clientService.getClient(clientId);
+        const issuer = getAuthorizationServerUrl(req);
+        const client = await this.clientService.getClientForIssuer(clientId, issuer);
         if (!client) {
           this.addCorsHeaders(res);
           res.status(401).json({
@@ -471,7 +525,7 @@ export class OAuthController {
             return;
           }
 
-          const validClient = await this.clientService.verifyClientCredentials(clientId, clientSecret);
+          const validClient = await this.clientService.verifyClientCredentials(clientId, clientSecret, issuer);
           if (!validClient) {
             this.addCorsHeaders(res);
             res.status(401).json({
@@ -584,12 +638,22 @@ export class OAuthController {
     }
 
     // Query client
-    const client = await this.clientService.getClient(clientId);
+    const issuer = getAuthorizationServerUrl(req);
+    const client = await this.clientService.getClientForIssuer(clientId, issuer);
     if (!client) {
       this.addCorsHeaders(res);
       res.status(401).json({
         error: 'invalid_client',
         error_description: 'Client not found'
+      });
+      return;
+    }
+
+    if (!client.grant_types.includes('authorization_code')) {
+      this.addCorsHeaders(res);
+      res.status(400).json({
+        error: 'unauthorized_client',
+        error_description: 'Client is not registered for authorization_code grant'
       });
       return;
     }
@@ -605,7 +669,7 @@ export class OAuthController {
         return;
       }
 
-      const validClient = await this.clientService.verifyClientCredentials(clientId, clientSecret);
+      const validClient = await this.clientService.verifyClientCredentials(clientId, clientSecret, issuer);
       if (!validClient) {
         this.addCorsHeaders(res);
         res.status(401).json({
@@ -694,11 +758,18 @@ export class OAuthController {
       }
     }
 
-    // Mark authorization code as used
-    await prisma.oAuthAuthorizationCode.update({
-      where: { code },
+    const claim = await prisma.oAuthAuthorizationCode.updateMany({
+      where: { code, used: false, expiresAt: { gte: new Date() } },
       data: { used: true },
     });
+    if (claim.count !== 1) {
+      this.addCorsHeaders(res);
+      res.status(400).json({
+        error: 'invalid_grant',
+        error_description: 'Authorization code has already been used or expired'
+      });
+      return;
+    }
 
     // Generate tokens
     const accessToken = this.oauthService.generateAccessToken(
@@ -707,7 +778,8 @@ export class OAuthController {
       authCode.scopes as string[],
       authCode.resource || undefined
     );
-    const refreshToken = this.oauthService.generateRefreshToken();
+    const issueRefreshToken = client.grant_types.includes('refresh_token');
+    const refreshToken = issueRefreshToken ? this.oauthService.generateRefreshToken() : null;
 
     const accessTokenExpiresAt = new Date(
       Date.now() + OAUTH_CONFIG.ACCESS_TOKEN_LIFETIME * 1000
@@ -726,7 +798,7 @@ export class OAuthController {
         scopes: authCode.scopes as any, // Prisma Json type
         resource: authCode.resource ?? undefined,
         accessTokenExpiresAt,
-        refreshTokenExpiresAt,
+        refreshTokenExpiresAt: issueRefreshToken ? refreshTokenExpiresAt : null,
       },
     });
 
@@ -735,7 +807,7 @@ export class OAuthController {
       access_token: accessToken,
       token_type: 'Bearer',
       expires_in: OAUTH_CONFIG.ACCESS_TOKEN_LIFETIME,
-      refresh_token: refreshToken,
+      ...(refreshToken ? { refresh_token: refreshToken } : {}),
       scope: (authCode.scopes as string[]).join(' '),
     };
 
@@ -746,6 +818,7 @@ export class OAuthController {
     this.addCorsHeaders(res);
     res.json(tokenResponse);
   }
+
 
   /**
    * Handle refresh_token grant
@@ -787,12 +860,22 @@ export class OAuthController {
     }
 
     // Query client
-    const client = await this.clientService.getClient(clientId);
+    const issuer = getAuthorizationServerUrl(req);
+    const client = await this.clientService.getClientForIssuer(clientId, issuer);
     if (!client) {
       this.addCorsHeaders(res);
       res.status(401).json({
         error: 'invalid_client',
         error_description: 'Client not found'
+      });
+      return;
+    }
+
+    if (!client.grant_types.includes('refresh_token')) {
+      this.addCorsHeaders(res);
+      res.status(400).json({
+        error: 'unauthorized_client',
+        error_description: 'Client is not registered for refresh_token grant'
       });
       return;
     }
@@ -808,7 +891,7 @@ export class OAuthController {
         return;
       }
 
-      const validClient = await this.clientService.verifyClientCredentials(clientId, clientSecret);
+      const validClient = await this.clientService.verifyClientCredentials(clientId, clientSecret, issuer);
       if (!validClient) {
         this.addCorsHeaders(res);
         res.status(401).json({
@@ -944,7 +1027,8 @@ export class OAuthController {
 
       // Client authentication is optional, but if provided needs to be verified
       if (clientId) {
-        const client = await this.clientService.getClient(clientId);
+        const issuer = getAuthorizationServerUrl(req);
+        const client = await this.clientService.getClientForIssuer(clientId, issuer);
         if (!client) {
           this.addCorsHeaders(res);
           res.status(401).json({
@@ -964,7 +1048,7 @@ export class OAuthController {
             return;
           }
 
-          const validClient = await this.clientService.verifyClientCredentials(clientId, clientSecret);
+          const validClient = await this.clientService.verifyClientCredentials(clientId, clientSecret, issuer);
           if (!validClient) {
             this.addCorsHeaders(res);
             res.status(401).json({

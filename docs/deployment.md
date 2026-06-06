@@ -176,6 +176,12 @@ If you are certain you will not use Peta-managed credentials, set `PETA_AUTH_AUT
 | Name                  | Required | Default | Description                                                                                      |
 | --------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
 | `LAZY_START_ENABLED`  |          | `true`  | Enable lazy loading for MCP servers. When true, servers stay managed in memory, delay startup until first use, and idle/unexpected closes can return them to `Sleeping` for later wake-up. |
+| `MCP_2026_ENABLED` | | `false` | Enable stateless MCP `2026-07-28` handling on `/mcp` and `/mcp/public`. Leave disabled until clients and operators are ready. |
+| `MCP_2026_SUPPORTED_VERSIONS` | | `2026-07-28` | Comma-separated allowlist of modern MCP protocol versions accepted by the modern adapter. |
+| `MCP_2026_ALLOWED_CLIENT_IDS` | | | Optional comma-separated OAuth client allowlist for canary rollout. Empty allows all modern OAuth clients. |
+| `MCP_2026_ALLOWED_TENANT_IDS` | | | Optional comma-separated tenant allowlist for canary rollout. Empty allows all tenants. |
+
+Modern MCP support is a runtime flag. Disabling `MCP_2026_ENABLED` rejects modern-looking requests fail-closed before they can fall through to the legacy sessionful MCP surface, without rolling back the additive OAuth metadata migration.
 
 #### Cloudflared DDNS (optional)
 

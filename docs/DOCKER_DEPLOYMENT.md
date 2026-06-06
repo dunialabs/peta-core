@@ -395,6 +395,8 @@ curl -X POST http://localhost:3002/token \
 
 #### Using EventSource Connection
 
+This query-token EventSource example is for the legacy sessionful MCP SSE path only. Modern MCP `2026-07-28` uses POST-based `subscriptions/listen` and rejects query bearer tokens.
+
 ```typescript
 const token = "YOUR_ACCESS_TOKEN";
 const eventSource = new EventSource(

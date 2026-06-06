@@ -81,6 +81,14 @@ export class OAuthClientController {
       res.json(client);
     } catch (error) {
       this.logger.error({ error, clientId: req.params.clientId }, 'Error updating OAuth client');
+      if (error instanceof Error && (error.message.startsWith('invalid_client_metadata:') || error.message.startsWith('invalid_redirect_uri:'))) {
+        const separator = error.message.indexOf(': ');
+        res.status(400).json({
+          error: separator === -1 ? error.message : error.message.slice(0, separator),
+          error_description: separator === -1 ? error.message : error.message.slice(separator + 2),
+        });
+        return;
+      }
       res.status(500).json({
         error: 'Internal server error'
       });

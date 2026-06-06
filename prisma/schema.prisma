@@ -158,7 +158,9 @@ model License {
 
 model OAuthClient {
   clientId                String   @id @map("client_id") @db.VarChar(255)
+  issuer                  String   @default("default") @map("issuer") @db.VarChar(255)
   clientSecret            String?  @map("client_secret") @db.VarChar(255) // Nullable for public clients
+  applicationType         String   @default("web") @map("application_type") @db.VarChar(32)
   tokenEndpointAuthMethod String   @default("client_secret_basic") @map("token_endpoint_auth_method") @db.VarChar(50) // 'none' | 'client_secret_basic' | 'client_secret_post'
   name                    String   @map("name") @db.VarChar(255)
   redirectUris            Json     @map("redirect_uris") // JSON array of redirect URIs
@@ -175,6 +177,7 @@ model OAuthClient {
   tokens            OAuthToken[]
 
   // Indexes for duplicate detection performance
+  @@index([issuer, clientId], map: "idx_oauth_client_issuer_client_id")
   @@index([name, tokenEndpointAuthMethod], map: "idx_oauth_client_duplicate_check")
   @@map("oauth_clients")
 }

@@ -4,6 +4,7 @@ import { ServerManager } from './ServerManager.js';
 import { createLogger } from '../../logger/index.js';
 import { ResultCacheService } from './cache/ResultCacheService.js';
 import { SessionStore } from './SessionStore.js';
+import { modernSubscriptionBus } from '../modern/ModernSubscriptionBus.js';
 
 /**
  * Broadcasts downstream notifications to eligible client sessions and deduplicates delivery.
@@ -37,6 +38,11 @@ export class GlobalRequestRouter {
    */
   async handleToolsListChanged(serverId: string): Promise<void> {
     this.logger.info({ serverId }, 'Broadcasting tools list changed for server');
+    modernSubscriptionBus.publish({
+      method: 'notifications/tools/list_changed',
+      serverId,
+      params: { serverId },
+    });
 
     const sessions = SessionStore.instance.getAllSessions();
     const notificationKey = `tools_changed_${serverId}_${Date.now()}`;
@@ -75,6 +81,11 @@ export class GlobalRequestRouter {
    */
   async handleResourcesListChanged(serverId: string): Promise<void> {
     this.logger.info({ serverId }, 'Broadcasting resources list changed for server');
+    modernSubscriptionBus.publish({
+      method: 'notifications/resources/list_changed',
+      serverId,
+      params: { serverId },
+    });
 
     const sessions = SessionStore.instance.getAllSessions();
     const notificationKey = `resources_changed_${serverId}_${Date.now()}`;
@@ -117,6 +128,12 @@ export class GlobalRequestRouter {
     scopeId?: string,
   ): Promise<void> {
     const resourceUri = notification.params.uri;
+    modernSubscriptionBus.publish({
+      method: 'notifications/resources/updated',
+      serverId,
+      resourceUri,
+      params: { serverId, uri: resourceUri },
+    });
     const subscriptionKey = scopeId ? `${scopeId}::${resourceUri}` : `${serverId}::${resourceUri}`;
     const subscribers = scopeId
       ? ServerManager.instance.getResourceSubscribersForScope(scopeId, resourceUri)
@@ -188,6 +205,11 @@ export class GlobalRequestRouter {
    */
   async handlePromptsListChanged(serverId: string): Promise<void> {
     this.logger.info({ serverId }, 'Broadcasting prompts list changed for server');
+    modernSubscriptionBus.publish({
+      method: 'notifications/prompts/list_changed',
+      serverId,
+      params: { serverId },
+    });
 
     const sessions = SessionStore.instance.getAllSessions();
     const notificationKey = `prompts_changed_${serverId}_${Date.now()}`;

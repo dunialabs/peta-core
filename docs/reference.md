@@ -74,7 +74,7 @@ curl -X POST http://localhost:3002/register \
   }'
 ```
 
-If you provide `grant_types` in client metadata, Peta Core accepts `authorization_code`, `refresh_token`, and `client_credentials` (for compatibility). The `/token` endpoint currently supports `authorization_code` and `refresh_token` grants only.
+If you provide `grant_types` in client metadata, Peta Core accepts `authorization_code` and `refresh_token`. `client_credentials` is rejected because the `/token` endpoint does not implement that grant.
 
 **Authorization Code + PKCE (user-interactive)**
 

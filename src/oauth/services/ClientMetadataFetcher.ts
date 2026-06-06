@@ -11,6 +11,10 @@
 
 import { createLogger } from '../../logger/index.js';
 import { OAuthClientMetadata } from '../types/oauth.types.js';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
+import { request } from 'node:https';
+import type { IncomingHttpHeaders } from 'node:http';
 
 export interface ClientMetadataValidationResult {
   valid: boolean;
@@ -31,6 +35,7 @@ export class ClientMetadataFetcher {
 
   private readonly CACHE_TTL = 60 * 60 * 1000; // 1 hour
   private readonly FETCH_TIMEOUT = 5000; // 5 second timeout
+  private readonly MAX_METADATA_BYTES = 64 * 1024;
 
   /**
    * Validate URL format (SEP-991 requirements)
@@ -108,20 +113,16 @@ export class ClientMetadataFetcher {
     this.logger.info({ url: clientMetadataUrl }, 'Fetching client metadata from URL');
 
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.FETCH_TIMEOUT);
+      const networkValidation = await this.validatePublicNetworkTarget(clientMetadataUrl);
+      if (!networkValidation.valid) {
+        return {
+          valid: false,
+          error: 'invalid_client_metadata',
+          errorDescription: networkValidation.error,
+        };
+      }
 
-      const response = await fetch(clientMetadataUrl, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'peta-core/1.0'
-        },
-        signal: controller.signal,
-        redirect: 'manual'
-      });
-
-      clearTimeout(timeoutId);
+      const response = await this.fetchPinnedMetadataDocument(clientMetadataUrl, networkValidation.addresses ?? []);
 
       if (response.status >= 300 && response.status < 400) {
         return {
@@ -145,7 +146,7 @@ export class ClientMetadataFetcher {
         };
       }
 
-      const contentType = response.headers.get('content-type');
+      const contentType = this.headerValue(response.headers, 'content-type');
       if (!contentType || !contentType.includes('application/json')) {
         return {
           valid: false,
@@ -154,12 +155,28 @@ export class ClientMetadataFetcher {
         };
       }
 
-      const metadata = await response.json();
+      const declaredLength = this.headerValue(response.headers, 'content-length');
+      if (declaredLength && Number(declaredLength) > this.MAX_METADATA_BYTES) {
+        return {
+          valid: false,
+          error: 'invalid_client_metadata',
+          errorDescription: 'Client metadata document is too large'
+        };
+      }
+
+      const metadata = JSON.parse(response.body) as unknown;
 
       // 4. Validate metadata
       const validationResult = this.validateMetadata(metadata);
       if (!validationResult.valid) {
         return validationResult;
+      }
+      if (validationResult.metadata?.client_id !== clientMetadataUrl) {
+        return {
+          valid: false,
+          error: 'invalid_client_metadata',
+          errorDescription: 'client_id in metadata must exactly match the client metadata document URL'
+        };
       }
 
       // 5. Cache metadata
@@ -204,6 +221,22 @@ export class ClientMetadataFetcher {
    * - token_endpoint_auth_method
    */
   private validateMetadata(metadata: any): ClientMetadataValidationResult {
+    if (typeof metadata.client_id !== 'string' || metadata.client_id.length === 0) {
+      return {
+        valid: false,
+        error: 'invalid_client_metadata',
+        errorDescription: 'client_id is required and must be a non-empty string'
+      };
+    }
+
+    if (typeof metadata.client_name !== 'string' || metadata.client_name.length === 0) {
+      return {
+        valid: false,
+        error: 'invalid_client_metadata',
+        errorDescription: 'client_name is required and must be a non-empty string'
+      };
+    }
+
     // 1. Check required field: redirect_uris
     if (!metadata.redirect_uris || !Array.isArray(metadata.redirect_uris) || metadata.redirect_uris.length === 0) {
       return {
@@ -224,7 +257,10 @@ export class ClientMetadataFetcher {
       }
 
       try {
-        new URL(uri);
+        const parsed = new URL(uri);
+        if (parsed.protocol !== 'https:' && parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') {
+          throw new Error('non-https redirect URI');
+        }
       } catch (error) {
         return {
           valid: false,
@@ -244,7 +280,7 @@ export class ClientMetadataFetcher {
         };
       }
 
-      const supportedGrantTypes = ['authorization_code', 'refresh_token', 'client_credentials'];
+      const supportedGrantTypes = ['authorization_code', 'refresh_token'];
       const invalidGrants = metadata.grant_types.filter(
         (g: string) => !supportedGrantTypes.includes(g)
       );
@@ -284,7 +320,7 @@ export class ClientMetadataFetcher {
 
     // 5. Validate token_endpoint_auth_method (if provided)
     if (metadata.token_endpoint_auth_method) {
-      const supportedMethods = ['client_secret_basic', 'client_secret_post', 'none'];
+      const supportedMethods = ['none'];
       if (!supportedMethods.includes(metadata.token_endpoint_auth_method)) {
         return {
           valid: false,
@@ -294,11 +330,144 @@ export class ClientMetadataFetcher {
       }
     }
 
+    if (metadata.application_type) {
+      const supportedApplicationTypes = ['web', 'native'];
+      if (!supportedApplicationTypes.includes(metadata.application_type)) {
+        return {
+          valid: false,
+          error: 'invalid_client_metadata',
+          errorDescription: `Unsupported application_type: ${metadata.application_type}`
+        };
+      }
+    }
+
     // Validation passed, return metadata
     return {
       valid: true,
       metadata: metadata as OAuthClientMetadata
     };
+  }
+
+  private async validatePublicNetworkTarget(url: string): Promise<{ valid: boolean; error?: string; addresses?: string[] }> {
+    const parsedUrl = new URL(url);
+    const hostname = parsedUrl.hostname.toLowerCase();
+
+    if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+      return { valid: false, error: 'Client metadata URL must not target localhost' };
+    }
+
+    const directIpVersion = isIP(hostname);
+    const addresses = directIpVersion > 0
+      ? [{ address: hostname }]
+      : await lookup(hostname, { all: true, verbatim: true });
+
+    if (addresses.length === 0) {
+      return { valid: false, error: 'Client metadata URL host did not resolve' };
+    }
+
+    for (const { address } of addresses) {
+      if (!this.isPublicIpAddress(address)) {
+        return { valid: false, error: 'Client metadata URL must resolve only to public IP addresses' };
+      }
+    }
+
+    return { valid: true, addresses: addresses.map(({ address }) => address) };
+  }
+
+  private isPublicIpAddress(address: string): boolean {
+    if (address.startsWith('::ffff:')) {
+      return this.isPublicIpAddress(address.slice('::ffff:'.length));
+    }
+
+    const version = isIP(address);
+    if (version === 4) {
+      const octets = address.split('.').map((part) => Number(part));
+      if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+        return false;
+      }
+      const [a, b] = octets;
+      return !(
+        a === 0 ||
+        a === 10 ||
+        a === 127 ||
+        (a === 100 && b >= 64 && b <= 127) ||
+        (a === 169 && b === 254) ||
+        (a === 172 && b >= 16 && b <= 31) ||
+        (a === 192 && b === 168) ||
+        (a === 192 && b === 0) ||
+        (a === 198 && (b === 18 || b === 19)) ||
+        a >= 224
+      );
+    }
+
+    if (version === 6) {
+      const normalized = address.toLowerCase();
+      return !(
+        normalized === '::1' ||
+        normalized === '::' ||
+        normalized.startsWith('fc') ||
+        normalized.startsWith('fd') ||
+        normalized.startsWith('fe8') ||
+        normalized.startsWith('fe9') ||
+        normalized.startsWith('fea') ||
+        normalized.startsWith('feb')
+      );
+    }
+
+    return false;
+  }
+
+  private fetchPinnedMetadataDocument(url: string, addresses: string[]): Promise<{ ok: boolean; status: number; statusText: string; headers: IncomingHttpHeaders; body: string }> {
+    const parsedUrl = new URL(url);
+    const address = addresses[0];
+    if (!address) {
+      throw new Error('Client metadata URL host did not resolve');
+    }
+
+    return new Promise((resolve, reject) => {
+      const req = request({
+        method: 'GET',
+        hostname: address,
+        servername: parsedUrl.hostname,
+        port: parsedUrl.port ? Number(parsedUrl.port) : 443,
+        path: `${parsedUrl.pathname}${parsedUrl.search}`,
+        headers: {
+          Accept: 'application/json',
+          Host: parsedUrl.host,
+          'User-Agent': 'peta-core/1.0',
+        },
+        timeout: this.FETCH_TIMEOUT,
+      }, (res) => {
+        const chunks: Buffer[] = [];
+        let totalBytes = 0;
+        res.on('data', (chunk: Buffer) => {
+          totalBytes += chunk.byteLength;
+          if (totalBytes > this.MAX_METADATA_BYTES) {
+            req.destroy(new Error('Client metadata document is too large'));
+            return;
+          }
+          chunks.push(chunk);
+        });
+        res.on('end', () => {
+          const status = res.statusCode ?? 0;
+          resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            statusText: res.statusMessage ?? '',
+            headers: res.headers,
+            body: Buffer.concat(chunks, totalBytes).toString('utf8'),
+          });
+        });
+      });
+      req.on('timeout', () => req.destroy(new Error('Client metadata fetch timeout (exceeded 5 seconds)')));
+      req.on('error', reject);
+      req.end();
+    });
+  }
+
+  private headerValue(headers: IncomingHttpHeaders, name: string): string | undefined {
+    const value = headers[name];
+    return Array.isArray(value) ? value[0] : value;
   }
 
   /**

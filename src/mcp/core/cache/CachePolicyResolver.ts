@@ -56,6 +56,7 @@ export class CachePolicyResolver {
   resolveResourcePolicy(
     capabilitiesConfig: ServerConfigCapabilities,
     uri: string,
+    resourceName: string | undefined,
     globalConfig: ResultCacheConfig,
   ): ResolvedCachePolicy | null {
     if (!globalConfig.enabled) {
@@ -89,7 +90,7 @@ export class CachePolicyResolver {
       return this.resolvePolicy(globalConfig, policy);
     }
 
-    const resourceConfig = capabilitiesConfig.resources[uri];
+    const resourceConfig = capabilitiesConfig.resources[uri] ?? (resourceName ? capabilitiesConfig.resources[resourceName] : undefined);
     if (!resourceConfig) {
       return null;
     }

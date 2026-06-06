@@ -194,7 +194,7 @@ export async function startApplication() {
       ],
       // Allowed request headers (for OPTIONS preflight)
       ALLOW_HEADERS_DEFAULT:
-        'Content-Type, Authorization, Mcp-Session-Id, mcp-session-id, mcp-protocol-version,Accept,last-event-id',
+        'Content-Type, Authorization, Mcp-Session-Id, mcp-session-id, MCP-Protocol-Version, mcp-protocol-version, Mcp-Method, mcp-method, Mcp-Name, mcp-name, Mcp-Param, mcp-param, Accept, last-event-id',
       MAX_AGE: '86400', // Preflight cache time: 24 hours
     };
     // ==================== Special request handlers - must be before all middleware ====================

@@ -80,8 +80,9 @@ export class ResultCacheService {
   resolveResourcePolicy(
     capabilitiesConfig: ServerConfigCapabilities,
     uri: string,
+    resourceName?: string,
   ): ResolvedCachePolicy | null {
-    return this.policyResolver.resolveResourcePolicy(capabilitiesConfig, uri, this.config);
+    return this.policyResolver.resolveResourcePolicy(capabilitiesConfig, uri, resourceName, this.config);
   }
 
   resolvePromptPolicy(

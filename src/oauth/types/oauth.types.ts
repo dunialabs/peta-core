@@ -20,9 +20,11 @@ export const OAUTH_CONFIG = {
  */
 export interface OAuthClientMetadata {
   client_id?: string; // New: Optional, for URL-based client ID (SEP-991)
+  issuer?: string;
   client_name?: string;
   client_uri?: string;
   logo_uri?: string;
+  application_type?: 'web' | 'native';
   scope?: string;
   redirect_uris: string[];
   token_endpoint_auth_method?: 'none' | 'client_secret_post' | 'client_secret_basic';
@@ -36,10 +38,13 @@ export interface OAuthClientMetadata {
  */
 export interface OAuthClientInformation {
   client_id: string;
+  issuer?: string;
   client_secret?: string;
   client_name?: string;
+  application_type?: string;
   redirect_uris: string[];
   grant_types: string[];
+  response_types: string[];
   scopes: string[];
   token_endpoint_auth_method: string;
   trusted?: boolean;

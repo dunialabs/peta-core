@@ -11,8 +11,13 @@ interface OAuthTokenPayload {
   client_id: string;
   user_id: string;
   scopes: string[];
+  aud?: string | string[];
   iat: number;
   exp: number;
+}
+
+export interface OAuthTokenValidationOptions {
+  expectedAudience?: string;
 }
 
 export class OAuthTokenValidator {
@@ -24,7 +29,7 @@ export class OAuthTokenValidator {
   /**
    * Validate OAuth access token
    */
-  async validateToken(token: string): Promise<{
+  async validateToken(token: string, options: OAuthTokenValidationOptions = {}): Promise<{
     valid: boolean;
     authContext?: AuthContext;
     error?: string;
@@ -47,14 +52,21 @@ export class OAuthTokenValidator {
         return { valid: false, error: 'Invalid token type' };
       }
 
+      if (options.expectedAudience) {
+        const audiences = Array.isArray(decoded.aud) ? decoded.aud : decoded.aud ? [decoded.aud] : [];
+        if (!audiences.includes(options.expectedAudience)) {
+          return { valid: false, error: 'Token audience does not match MCP resource' };
+        }
+      }
+
       // Check expiration time
       if (decoded.exp && Date.now() / 1000 > decoded.exp) {
         return { valid: false, error: 'Token has expired' };
       }
 
-      const validationResult = await this.validate(token);
+      const validationResult = await this.validate(token, options.expectedAudience);
       if (!validationResult) {
-        return { valid: false, error: 'Token has been revoked' };
+        return { valid: false, error: options.expectedAudience ? 'Token is revoked or has the wrong resource audience' : 'Token has been revoked' };
       }
 
       // Query user information
@@ -91,6 +103,7 @@ export class OAuthTokenValidator {
         // OAuth-specific fields
         oauthClientId: decoded.client_id,
         oauthScopes: decoded.scopes,
+        oauthAccessTokenExpiresAt: decoded.exp,
         tenantId: user.proxyId > 0 ? String(user.proxyId) : undefined,
       };
 
@@ -113,7 +126,7 @@ export class OAuthTokenValidator {
   /**
    * Validate if token is valid (check if token is revoked in database)
    */
-  private async validate(token: string): Promise<boolean> {
+  private async validate(token: string, expectedAudience?: string): Promise<boolean> {
     try {
       // Find access token
       const tokenRecord = await prisma.oAuthToken.findUnique({
@@ -132,6 +145,10 @@ export class OAuthTokenValidator {
 
       // Check if access token has expired
       if (tokenRecord.accessTokenExpiresAt < new Date()) {
+        return false;
+      }
+
+      if (expectedAudience && tokenRecord.resource !== expectedAudience) {
         return false;
       }
 

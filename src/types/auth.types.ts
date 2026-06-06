@@ -19,6 +19,7 @@ export interface AuthContext {
   // OAuth-related fields (optional)
   oauthClientId?: string; // OAuth client ID
   oauthScopes?: string[]; // OAuth authorization scopes
+  oauthAccessTokenExpiresAt?: number;
   userAgent?: string; // User agent
   // Tenant scoping (optional - for multi-tenant cache isolation)
   tenantId?: string; // Tenant ID for tenant-scoped caching

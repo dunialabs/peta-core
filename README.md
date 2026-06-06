@@ -43,6 +43,7 @@ Peta Core is one component of the Peta MCP stack:
 ### MCP Gateway
 
 - Transparent MCP proxying. Acts as an MCP server upstream and an MCP client downstream. Routes tool calls via namespaced identifiers (`serverId::toolName`).
+- MCP `2026-07-28` support. Modern clients can use stateless `server/discover`, POST-only Streamable HTTP, `subscriptions/listen`, OAuth resource metadata, and per-request protocol metadata behind a rollout flag while legacy sessionful clients remain supported.
 - Built-in OAuth 2.0 authorization server. Authorization Code with PKCE, refresh tokens, dynamic client registration, token introspection, and revocation.
 - Anonymous public access mode. Optionally allow token-less access for selected public servers through `/mcp/public`, while authenticated traffic continues on the standard `/mcp` endpoint, with configurable anonymous rate limits.
 

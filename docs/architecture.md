@@ -71,7 +71,7 @@ See the `docs/` directory for API references and deployment guides. Architecture
 
 ### Data Flow Description
 
-#### 1. Forward Request Flow (Client → Downstream)
+#### 1. Legacy Forward Request Flow (Client → Downstream)
 
 ```text
 Client Initiates Request
@@ -103,6 +103,32 @@ rewrites the downstream payload to use `proxyRequestId` for routing, and restore
 original token before sending progress notifications back upstream. Upstream
 `notifications/cancelled` are translated to the captured `downstreamRequestId` so the
 downstream SDK cancels the real in-flight request instead of a proxy-only ID.
+
+#### 1a. Modern MCP 2026-07-28 Request Flow
+
+```text
+Modern Client POSTs to /mcp
+  ↓
+Protocol-era classifier rejects mixed modern/legacy signals
+  ↓
+Modern auth validates Authorization bearer without creating SessionStore entries
+  ↓
+Modern HTTP validator checks _meta and MCP headers
+  ↓
+Modern request context carries user, tenant, scopes, client info, and request id
+  ↓
+Gateway lists or resolves namespaced tools/resources/prompts
+  ↓
+Policy, approval, cache, and audit services run with request-scoped context
+  ↓
+ServerManager forwards to downstream MCP clients internally
+  ↓
+Response returns without Mcp-Session-Id
+```
+
+The modern adapter is side-by-side with `ProxySession`. It preserves legacy behavior while adding stateless modern requests, `server/discover`, POST-based `subscriptions/listen`, and modern OAuth enforcement. Downstream connections remain managed by `ServerManager`; downstream session details are not exposed upstream.
+
+The installed `@modelcontextprotocol/sdk` currently reports `LATEST_PROTOCOL_VERSION: 2025-11-25` and supported versions through `2025-11-25`, so Peta Core does not depend on SDK latest-version constants for MCP `2026-07-28` ingress. The compatibility spike is recorded in `.omo/spikes/mcp-2026-sdk-compatibility.md`; local modern validation/error/request types live under `src/mcp/modern/`, while downstream and legacy connections continue using the SDK-backed flow.
 
 #### 2. Reverse Request Flow (Downstream → Client)
 
@@ -176,6 +202,7 @@ Explicit `DELETE /mcp` termination records a short-lived in-memory reconnect tom
 4. **Reverse Request Boundary**
    - Shared managed downstream connections intentionally do not expose standard reverse-request capabilities
    - Reverse requests only become viable with dedicated downstream session ownership
+   - Modern upstream responses do not advertise MRTR or reverse-request support until a real continuation flow is proven
 
 5. **Dual Logging Architecture**
    - Pino: Structured operational logs (real-time monitoring)

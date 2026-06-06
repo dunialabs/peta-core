@@ -102,7 +102,7 @@ export class OAuthService {
    * Verify client credentials
    */
   async verifyClientCredentials(
-    clientId: string,
+    _clientId: string,
     clientSecret: string,
     storedSecret: string | null
   ): Promise<boolean> {
@@ -155,12 +155,16 @@ export class OAuthService {
   buildSuccessRedirectUrl(
     redirectUri: string,
     code: string,
-    state?: string
+    state?: string,
+    issuer?: string
   ): string {
     const url = new URL(redirectUri);
     url.searchParams.set('code', code);
     if (state) {
       url.searchParams.set('state', state);
+    }
+    if (issuer) {
+      url.searchParams.set('iss', issuer);
     }
     return url.toString();
   }
@@ -251,6 +255,7 @@ export class OAuthService {
       // New: Token endpoint signature algorithm
       token_endpoint_auth_signing_alg_values_supported: ['HS256'],
       code_challenge_methods_supported: ['S256', 'plain'],
+      authorization_response_iss_parameter_supported: true,
       // New: SEP-991 - URL-based Client ID support
       client_id_metadata_document_supported: true,
       service_documentation: `${issuerUrl}/docs/oauth`
@@ -267,7 +272,7 @@ export class OAuthService {
     return {
       resource: resourceUrl,
       authorization_servers: [authorizationServerUrl],
-      bearer_methods_supported: ['header', 'query'],
+      bearer_methods_supported: ['header'],
       resource_documentation: `${authorizationServerUrl}/docs/mcp-gateway`,
       resource_signing_alg_values_supported: ['HS256'],
       scopes_supported: ['mcp:tools', 'mcp:resources', 'mcp:prompts']

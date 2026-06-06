@@ -44,6 +44,11 @@ The Admin API (`/admin`) and Socket.IO (`/socket.io`) currently authenticate usi
 
 - Refresh tokens and client secrets for downstream providers are never forwarded to upstream MCP clients.
 - Long-lived credentials remain inside Peta Core; downstream runtimes receive only short-lived access tokens.
+- Modern MCP `2026-07-28` accepts bearer tokens only from the `Authorization` header. Query `token` and `api_key` authentication are legacy-only and rejected before modern request handling.
+- OAuth access tokens used for modern MCP must carry an audience matching the canonical `/mcp` protected resource. Tokens with the wrong `aud` or persisted resource are rejected.
+- OAuth scopes are enforced by modern MCP method family: tools, resources, and prompts require their corresponding `mcp:*` scope.
+- OAuth authorization responses include `iss`, and dynamic client registrations persist `issuer` and `application_type` metadata for auditability and client compatibility.
+- URL-based OAuth Client ID metadata fetches reject localhost, private, link-local, and oversized responses before client metadata is persisted.
 
 ---
 
