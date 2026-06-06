@@ -86,6 +86,8 @@ jest.unstable_mockModule('../dist/repositories/UserRepository.js', () => ({
 jest.unstable_mockModule('../dist/mcp/core/DownstreamTransportFactory.js', () => ({
   DownstreamTransportFactory: {
     create: transportFactoryCreate,
+    canFallbackHttpToSse: jest.fn(() => false),
+    createSSEFallbackTransport: jest.fn(),
   },
 }));
 
