@@ -33,6 +33,13 @@ describe('ModernServerDiscover', () => {
     expect(result._meta.peta.anonymousPublicEndpoint).toBe(false);
   });
 
+  test('rejects server/discover params beyond _meta', () => {
+    const controller = new ModernMcpController();
+
+    expect(() => controller.validateServerDiscoverParams({ jsonrpc: '2.0', id: 1, method: 'server/discover', params: { _meta: {}, unexpected: true } })).toThrow('server/discover params may only include _meta');
+    expect(() => controller.validateServerDiscoverParams({ jsonrpc: '2.0', id: 1, method: 'server/discover', params: { _meta: {} } })).not.toThrow();
+  });
+
   test('advertises resource subscribe support when resources are available', () => {
     availableServers = [{ serverID: 'server-1', status: 0, capabilities: { resources: {} }, serverEntity: { enabled: true, allowUserInput: false, publicAccess: true } }];
     const controller = new ModernMcpController();

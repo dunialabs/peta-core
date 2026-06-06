@@ -128,12 +128,6 @@ export class GlobalRequestRouter {
     scopeId?: string,
   ): Promise<void> {
     const resourceUri = notification.params.uri;
-    modernSubscriptionBus.publish({
-      method: 'notifications/resources/updated',
-      serverId,
-      resourceUri,
-      params: { serverId, uri: resourceUri },
-    });
     const subscriptionKey = scopeId ? `${scopeId}::${resourceUri}` : `${serverId}::${resourceUri}`;
     const subscribers = scopeId
       ? ServerManager.instance.getResourceSubscribersForScope(scopeId, resourceUri)
@@ -154,6 +148,14 @@ export class GlobalRequestRouter {
         'Failed to invalidate result cache for resource update',
       );
     }
+
+    modernSubscriptionBus.publish({
+      method: 'notifications/resources/updated',
+      serverId,
+      scopeId,
+      resourceUri,
+      params: { serverId, uri: resourceUri },
+    });
 
     if (subscribers.size === 0) {
       this.logger.debug({ subscriptionKey }, 'No subscribers for resource, skipping notification');

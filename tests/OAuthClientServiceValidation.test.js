@@ -7,6 +7,7 @@ const createMock = jest.fn(async ({ data }) => ({
   updatedAt: new Date('2026-01-01T00:00:00Z'),
 }));
 const findFirstMock = jest.fn(async () => null);
+const findUniqueMock = jest.fn(async () => null);
 
 jest.unstable_mockModule('../dist/logger/index.js', () => ({
   createLogger: () => ({ trace: jest.fn(), debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn(), fatal: jest.fn() }),
@@ -16,7 +17,7 @@ jest.unstable_mockModule('../dist/config/prisma.js', () => ({
   prisma: {
     oAuthClient: {
       findFirst: findFirstMock,
-      findUnique: jest.fn(async () => null),
+      findUnique: findUniqueMock,
       findMany: jest.fn(async () => []),
       create: createMock,
       update: jest.fn(),
@@ -53,6 +54,8 @@ describe('OAuthClientServiceValidation', () => {
     createMock.mockClear();
     findFirstMock.mockReset();
     findFirstMock.mockResolvedValue(null);
+    findUniqueMock.mockReset();
+    findUniqueMock.mockResolvedValue(null);
   });
 
   test('URL-based registration fetches metadata instead of requiring body redirect_uris', async () => {
@@ -62,6 +65,15 @@ describe('OAuthClientServiceValidation', () => {
     expect(client.client_id).toBe('https://client.example/metadata.json');
     expect(client.redirect_uris).toEqual(['https://client.example/callback']);
     expect(createMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('URL-based registration rejects global client_id reuse under another issuer', async () => {
+    findFirstMock.mockResolvedValueOnce(null);
+    findUniqueMock.mockResolvedValueOnce({ clientId: 'https://client.example/metadata.json', issuer: 'https://issuer-a.example' });
+    const service = new OAuthClientService();
+
+    await expect(service.registerClient({ client_id: 'https://client.example/metadata.json' }, undefined, 'https://issuer-b.example')).rejects.toThrow('invalid_client_metadata: client_id is already registered for a different issuer');
+    expect(createMock).not.toHaveBeenCalled();
   });
 
   test('traditional registration rejects non-array grant_types with metadata error', async () => {

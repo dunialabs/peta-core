@@ -67,6 +67,17 @@ describe('ModernAppsRewrite', () => {
     expect(result.tools[0]._meta['ui/resourceUri']).toBe('ui://app_-_ctx-1');
   });
 
+  test('filters tools with invalid x-mcp-header annotations from list results', () => {
+    const serverContext = serverManagerInstance.availableServers[0];
+    serverContext.tools.tools.push({ name: 'badHeader', inputSchema: { type: 'object', properties: { nested: { type: 'object', 'x-mcp-header': 'bad' } } } });
+    serverContext.tools.tools.push({ name: 'badHeaderName', inputSchema: { type: 'object', properties: { tenant: { type: 'string', 'x-mcp-header': 'bad header' } } } });
+    serverContext.tools.tools.push({ name: 'duplicateHeader', inputSchema: { type: 'object', properties: { left: { type: 'string', 'x-mcp-header': 'tenant' }, right: { type: 'string', 'x-mcp-header': 'Tenant' } } } });
+    const controller = new ModernMcpController();
+    const result = controller.listTools({ authContext: { userId: 'user-1', permissions: {}, userPreferences: {} } });
+
+    expect(result.tools.map((tool) => tool.name)).toEqual(['openApp_-_ctx-1']);
+  });
+
   test('rewrites app resource content URIs and embedded HTML references', () => {
     const controller = new ModernMcpController();
     const result = controller.rewriteResourceResult({
@@ -90,6 +101,55 @@ describe('ModernAppsRewrite', () => {
     expect(serverManagerInstance.unsubscribed).toEqual([{ serverId: 'server-1', resourceUri: 'ui://app', sessionId: 'sub-1', userId: 'user-1' }]);
   });
 
+  test('uses unique downstream subscriber ids for identical JSON-RPC subscription ids', async () => {
+    const controller = new ModernMcpController();
+    const passedSubscriberIds = [];
+    controller.subscribeModernResources = jest.fn(async (_context, _filter, subscriberId) => {
+      passedSubscriberIds.push(subscriberId);
+      return [];
+    });
+    const makeContext = (uniformRequestId) => {
+      let closeHandler;
+      return {
+        context: {
+          uniformRequestId,
+          protocolVersion: '2026-07-28',
+          authContext: { userId: 'user-1', oauthScopes: ['mcp:resources'], permissions: {}, userPreferences: {} },
+          req: { headers: {}, on: (_event, handler) => { closeHandler = handler; } },
+          res: { status: jest.fn(), setHeader: jest.fn(), write: jest.fn(() => true), end: jest.fn() },
+        },
+        close: () => closeHandler?.(),
+      };
+    };
+    const first = makeContext('stream-a');
+    const second = makeContext('stream-b');
+
+    await controller.handleSubscriptionListen(first.context, { jsonrpc: '2.0', id: 1, method: 'subscriptions/listen', params: { notifications: { resourceSubscriptions: ['ui://app_-_ctx-1'] } } });
+    await controller.handleSubscriptionListen(second.context, { jsonrpc: '2.0', id: 1, method: 'subscriptions/listen', params: { notifications: { resourceSubscriptions: ['ui://app_-_ctx-1'] } } });
+    first.close();
+    second.close();
+
+    expect(passedSubscriberIds).toEqual(['stream-a:1', 'stream-b:1']);
+  });
+
+  test('uses serverIds to disambiguate unqualified resource subscriptions', async () => {
+    const secondContext = {
+      ...createServerContext(),
+      id: 'ctx-2',
+      serverID: 'server-2',
+    };
+    serverManagerInstance.availableServers.push(secondContext);
+    serverManagerInstance.contexts.set('server-2', secondContext);
+    const controller = new ModernMcpController();
+    const filter = controller.buildSubscriptionFilter({ serverIds: ['server-2'], notifications: { resourceSubscriptions: ['ui://app'] } });
+    const context = { authContext: { userId: 'user-1', permissions: {}, userPreferences: {} } };
+
+    const subscriptions = await controller.subscribeModernResources(context, filter, 'sub-1');
+
+    expect(subscriptions).toEqual([{ serverId: 'server-2', resourceUri: 'ui://app' }]);
+    expect(serverManagerInstance.subscribed).toEqual([{ serverId: 'server-2', resourceUri: 'ui://app', sessionId: 'sub-1', userId: 'user-1' }]);
+  });
+
   test('rejects forged gateway names for unadvertised capabilities', () => {
     const controller = new ModernMcpController();
     const authContext = { userId: 'user-1', permissions: {}, userPreferences: {} };
@@ -97,6 +157,30 @@ describe('ModernAppsRewrite', () => {
     expect(controller.resolveToolName(authContext, 'missingTool_-_ctx-1')).toBeNull();
     expect(controller.resolveResourceUri(authContext, 'missing://resource_-_ctx-1')).toBeNull();
     expect(controller.resolvePromptName(authContext, 'missingPrompt_-_ctx-1')).toBeNull();
+  });
+
+  test('does not deliver scoped temporary resource updates through managed modern subscriptions', () => {
+    const temporaryContext = {
+      ...createServerContext(),
+      id: 'temp-ctx-1',
+      userId: 'user-1',
+      serverEntity: { enabled: true, allowUserInput: true, publicAccess: false, anonymousAccess: false },
+    };
+    serverManagerInstance.getTemporaryServerContextByID = jest.fn((contextId, userId) => (
+      contextId === temporaryContext.id && userId === temporaryContext.userId ? temporaryContext : undefined
+    ));
+    const controller = new ModernMcpController();
+    const context = { authContext: { userId: 'user-1', permissions: {}, userPreferences: {} } };
+    const scopedEvent = {
+      method: 'notifications/resources/updated',
+      serverId: 'server-1',
+      scopeId: 'temp-ctx-1',
+      resourceUri: 'ui://app',
+      params: { serverId: 'server-1', uri: 'ui://app' },
+    };
+
+    expect(controller.canReceiveSubscriptionEvent(context, scopedEvent)).toBe(false);
+    expect(controller.subscriptionResourceUris(context, scopedEvent)).toEqual(['ui://app', 'ui://app_-_temp-ctx-1']);
   });
 
   test('caches raw downstream resource results before gateway URI rewriting', async () => {

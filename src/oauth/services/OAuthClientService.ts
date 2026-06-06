@@ -156,6 +156,13 @@ export class OAuthClientService {
         };
       }
 
+      const existingClientForAnotherIssuer = await this.clients.findUnique({
+        where: { clientId: providedClientId },
+      });
+      if (existingClientForAnotherIssuer) {
+        throw new Error('invalid_client_metadata: client_id is already registered for a different issuer');
+      }
+
       // 5. Create new URL-based client record
       const authMethod = fetchedMetadata.token_endpoint_auth_method || 'none';
       const applicationType = fetchedMetadata.application_type || 'web';

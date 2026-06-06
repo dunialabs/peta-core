@@ -13,6 +13,7 @@ let client = {
   scopes: ['mcp:tools'],
   token_endpoint_auth_method: 'none',
 };
+let registerClientError = null;
 const codeCreate = jest.fn();
 const codeFindUnique = jest.fn();
 const codeUpdateMany = jest.fn();
@@ -39,6 +40,9 @@ jest.unstable_mockModule('../dist/oauth/services/OAuthClientService.js', () => (
       return client;
     }
     async registerClient(metadata) {
+      if (registerClientError) {
+        throw registerClientError;
+      }
       client = {
         client_id: metadata.client_id,
         issuer: 'https://issuer.example',
@@ -125,6 +129,7 @@ describe('OAuthControllerGrantEnforcement', () => {
     codeFindUnique.mockReset();
     codeUpdateMany.mockReset();
     tokenCreate.mockReset();
+    registerClientError = null;
   });
 
   test('authorization rejects scopes outside registered client scopes', async () => {
@@ -159,6 +164,27 @@ describe('OAuthControllerGrantEnforcement', () => {
 
     expect(codeCreate.mock.calls[0][0].data.clientId).toBe('https://client.example/metadata.json');
     expect(res.body.redirect).toContain('code=');
+  });
+
+  test('authorization maps URL client_id metadata errors to 400', async () => {
+    client = null;
+    registerClientError = new Error('invalid_client_metadata: client_id is already registered for a different issuer');
+    const controller = new OAuthController();
+    const res = createRes();
+
+    await controller.authorize(createReq({
+      client_id: 'https://client.example/metadata.json',
+      redirect_uri: 'https://client.example/callback',
+      scope: 'mcp:tools',
+      approved: true,
+      user_token: 'user-token',
+    }), res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({
+      error: 'invalid_client_metadata',
+      error_description: 'client_id is already registered for a different issuer',
+    });
   });
 
   test('authorization_code grant is denied when client did not register it', async () => {

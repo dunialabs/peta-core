@@ -243,6 +243,15 @@ JWT_SECRET=your-jwt-secret-change-in-production-min-32-chars
 # Auto-start peta-auth for Peta-managed OAuth credentials
 PETA_AUTH_AUTOSTART=true
 
+# -------------------- Modern MCP 2026-07-28 Rollout (Optional) --------------------
+# Leave disabled until modern MCP clients and operators are ready.
+# Disabled modern-looking requests are rejected fail-closed before legacy routing.
+MCP_2026_ENABLED=false
+MCP_2026_SUPPORTED_VERSIONS=2026-07-28
+# Optional canary allowlists; leave empty to allow all modern OAuth clients/tenants.
+# MCP_2026_ALLOWED_CLIENT_IDS=
+# MCP_2026_ALLOWED_TENANT_IDS=
+
 # -------------------- Logging Configuration (Pino Logger) --------------------
 LOG_LEVEL=info
 LOG_PRETTY=false

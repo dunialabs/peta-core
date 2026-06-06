@@ -128,7 +128,9 @@ Response returns without Mcp-Session-Id
 
 The modern adapter is side-by-side with `ProxySession`. It preserves legacy behavior while adding stateless modern requests, `server/discover`, POST-based `subscriptions/listen`, and modern OAuth enforcement. Downstream connections remain managed by `ServerManager`; downstream session details are not exposed upstream.
 
-The installed `@modelcontextprotocol/sdk` currently reports `LATEST_PROTOCOL_VERSION: 2025-11-25` and supported versions through `2025-11-25`, so Peta Core does not depend on SDK latest-version constants for MCP `2026-07-28` ingress. The compatibility spike is recorded in `.omo/spikes/mcp-2026-sdk-compatibility.md`; local modern validation/error/request types live under `src/mcp/modern/`, while downstream and legacy connections continue using the SDK-backed flow.
+Modern resource update subscriptions preserve downstream scope isolation. `GlobalRequestRouter` publishes resource update events with the originating server context id, and the modern subscription adapter resolves that scope before rewriting gateway URIs so temporary per-user downstream resource updates cannot be delivered through a managed-server modern subscription.
+
+The installed `@modelcontextprotocol/sdk` currently reports `LATEST_PROTOCOL_VERSION: 2025-11-25` and supported versions through `2025-11-25`, so Peta Core does not depend on SDK latest-version constants for MCP `2026-07-28` ingress. Local modern validation/error/request types live under `src/mcp/modern/`, while downstream and legacy connections continue using the SDK-backed flow.
 
 #### 2. Reverse Request Flow (Downstream → Client)
 

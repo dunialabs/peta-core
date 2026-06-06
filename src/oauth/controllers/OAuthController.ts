@@ -41,6 +41,20 @@ export class OAuthController {
       .replace(/'/g, '&#39;');
   }
 
+  private isClientMetadataError(error: unknown): error is Error {
+    return error instanceof Error && (error.message.startsWith('invalid_client_metadata:') || error.message.startsWith('invalid_redirect_uri:'));
+  }
+
+  private clientMetadataErrorCode(error: Error): string {
+    const separator = error.message.indexOf(': ');
+    return separator === -1 ? error.message : error.message.slice(0, separator);
+  }
+
+  private clientMetadataErrorDescription(error: Error): string {
+    const separator = error.message.indexOf(': ');
+    return separator === -1 ? error.message : error.message.slice(separator + 2);
+  }
+
   constructor() {
     this.oauthService = new OAuthService();
     this.clientService = new OAuthClientService();
@@ -251,6 +265,10 @@ export class OAuthController {
       res.send(html);
     } catch (error) {
       this.logger.error({ error }, 'Show authorize page error');
+      if (this.isClientMetadataError(error)) {
+        res.status(400).send(this.clientMetadataErrorDescription(error));
+        return;
+      }
       res.status(500).send('Internal server error');
     }
   };
@@ -406,6 +424,13 @@ export class OAuthController {
     } catch (error) {
       this.logger.error({ error }, 'Authorization error');
       this.addCorsHeaders(res);
+      if (this.isClientMetadataError(error)) {
+        res.status(400).json({
+          error: this.clientMetadataErrorCode(error),
+          error_description: this.clientMetadataErrorDescription(error),
+        });
+        return;
+      }
       res.status(500).json({
         error: 'server_error',
         error_description: 'Internal server error'

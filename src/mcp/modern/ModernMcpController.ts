@@ -242,6 +242,7 @@ export class ModernMcpController {
 
     switch (request.method) {
       case 'server/discover':
+        this.validateServerDiscoverParams(request);
         return this.cacheable(this.serverDiscover(context));
       case 'tools/list':
         return this.cacheable(this.listTools(context));
@@ -286,12 +287,24 @@ export class ModernMcpController {
     };
   }
 
+  private validateServerDiscoverParams(request: ModernJsonRpcRequest): void {
+    const params = this.requireParams(request);
+    const extraKeys = Object.keys(params).filter((key) => key !== '_meta');
+    if (extraKeys.length > 0) {
+      throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, 'server/discover params may only include _meta');
+    }
+  }
+
   private listTools(context: ModernRequestContext): ListToolsResult {
     const tools: Tool[] = [];
     for (const serverContext of this.getAvailableServers(context.authContext)) {
       const sourceTools = serverContext.tools?.tools ?? serverContext.cachedTools?.tools ?? [];
       for (const tool of sourceTools) {
         if (!this.canUseTool(context.authContext, serverContext, tool.name)) {
+          continue;
+        }
+        if (!this.hasValidHeaderAnnotations(tool)) {
+          this.logger.warn({ serverId: serverContext.serverID, toolName: tool.name }, 'Skipping tool with invalid x-mcp-header annotations');
           continue;
         }
         const userDangerLevel = this.getUserToolDangerLevel(context.authContext, serverContext.serverID, tool.name);
@@ -602,7 +615,8 @@ export class ModernMcpController {
     const filter = this.buildSubscriptionFilter(params);
     this.enforceSubscriptionScopes(context, filter);
     const subscriptionId = String(request.id);
-    const downstreamSubscriptions = await this.subscribeModernResources(context, filter, subscriptionId);
+    const downstreamSubscriptionId = `${context.uniformRequestId}:${subscriptionId}`;
+    const downstreamSubscriptions = await this.subscribeModernResources(context, filter, downstreamSubscriptionId);
     const res = context.res;
     res.status(200);
     res.setHeader('Content-Type', 'text/event-stream');
@@ -625,7 +639,7 @@ export class ModernMcpController {
         return;
       }
       cleanedUp = true;
-      void this.cleanupModernResourceSubscriptions(context, subscriptionId, downstreamSubscriptions);
+      void this.cleanupModernResourceSubscriptions(context, downstreamSubscriptionId, downstreamSubscriptions);
     };
     const authExpiry = this.authExpirationMs(context.authContext);
     const authExpiryTimer = authExpiry === null
@@ -842,6 +856,31 @@ export class ModernMcpController {
       match = { serverID: serverContext.serverID, originalName: resource.uri, resourceName: resource.name };
     }
     return match;
+  }
+
+  private resolveResourceUriForSubscription(authContext: AuthContext, uri: string, serverIds: Set<string>): GatewayRoute | null {
+    const parsed = this.parseGatewayName(uri, authContext.userId);
+    if (parsed) {
+      if (serverIds.size > 0 && !serverIds.has(parsed.serverID)) {
+        return null;
+      }
+      return this.resolveResourceUri(authContext, uri);
+    }
+
+    const matchingRoutes: GatewayRoute[] = [];
+    for (const serverContext of this.getAvailableServers(authContext)) {
+      if (serverIds.size > 0 && !serverIds.has(serverContext.serverID)) {
+        continue;
+      }
+      const resources = serverContext.resources?.resources ?? serverContext.cachedResources?.resources ?? [];
+      const resource = resources.find((candidate) => candidate.uri === uri);
+      if (!resource || !this.canAccessResource(authContext, serverContext, resource.name)) {
+        continue;
+      }
+      matchingRoutes.push({ serverID: serverContext.serverID, originalName: resource.uri, resourceName: resource.name });
+    }
+
+    return matchingRoutes.length === 1 ? matchingRoutes[0] : null;
   }
 
   private resolvePromptName(authContext: AuthContext, name: string): GatewayRoute | null {
@@ -1127,11 +1166,9 @@ export class ModernMcpController {
       return [];
     }
     const uris = [event.resourceUri];
-    if (event.serverId) {
-      const serverContext = ServerManager.instance.getServerContext(event.serverId, context.authContext.userId);
-      if (serverContext) {
-        uris.push(this.generateGatewayName(serverContext.id, event.resourceUri));
-      }
+    const serverContext = this.resolveSubscriptionEventServerContext(context, event);
+    if (serverContext) {
+      uris.push(this.generateGatewayName(serverContext.id, event.resourceUri));
     }
     return uris;
   }
@@ -1140,7 +1177,7 @@ export class ModernMcpController {
     if (!event.serverId) {
       return true;
     }
-    const serverContext = ServerManager.instance.getServerContext(event.serverId, context.authContext.userId);
+    const serverContext = this.resolveSubscriptionEventServerContext(context, event);
     if (!serverContext || !this.canAccessServer(context.authContext, serverContext)) {
       return false;
     }
@@ -1158,12 +1195,20 @@ export class ModernMcpController {
     if (!event.resourceUri || !event.serverId) {
       return event.params;
     }
-    const serverContext = ServerManager.instance.getServerContext(event.serverId, context.authContext.userId);
+    const serverContext = this.resolveSubscriptionEventServerContext(context, event);
     if (!serverContext) {
       return event.params;
     }
     const gatewayUri = this.generateGatewayName(serverContext.id, event.resourceUri);
     return { ...event.params, uri: gatewayUri };
+  }
+
+  private resolveSubscriptionEventServerContext(context: ModernRequestContext, event: ModernSubscriptionEvent): ServerContext | undefined {
+    if (event.scopeId) {
+      return ServerManager.instance.getServerContextByID(event.scopeId)
+        ?? ServerManager.instance.getTemporaryServerContextByID(event.scopeId, context.authContext.userId);
+    }
+    return event.serverId ? ServerManager.instance.getServerContext(event.serverId, context.authContext.userId) : undefined;
   }
 
   private async subscribeModernResources(
@@ -1176,7 +1221,7 @@ export class ModernMcpController {
     }
     const subscriptions: Array<{ serverId: string; resourceUri: string }> = [];
     for (const uri of filter.resourceUris) {
-      const route = this.resolveResourceUri(context.authContext, uri);
+      const route = this.resolveResourceUriForSubscription(context.authContext, uri, filter.serverIds);
       if (!route) {
         throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, `Invalid resource subscription URI: ${uri}`);
       }
@@ -1445,22 +1490,11 @@ export class ModernMcpController {
       return;
     }
 
-    const annotations = this.findHeaderAnnotations(inputSchema);
-    const seenHeaders = new Set<string>();
-    for (const annotation of annotations) {
-      const { path, headerName: rawHeaderName } = annotation;
+    for (const annotation of this.normalizeHeaderAnnotations(tool, this.findHeaderAnnotations(inputSchema))) {
+      const { path, headerName } = annotation;
       const propertyName = path.join('.');
-      const headerName = rawHeaderName.startsWith('Mcp-Param-') ? rawHeaderName : `Mcp-Param-${rawHeaderName}`;
-      if (!/^Mcp-Param-[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(headerName)) {
-        throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, `Invalid x-mcp-header annotation for ${tool.name}.${propertyName}`);
-      }
-      const normalizedHeaderName = headerName.toLowerCase();
-      if (seenHeaders.has(normalizedHeaderName)) {
-        throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, `Duplicate x-mcp-header annotation for ${headerName}`);
-      }
-      seenHeaders.add(normalizedHeaderName);
       const argumentValue = this.getArgumentAtPath(args, path);
-      const mirroredHeaderValue = this.getHeader(req, normalizedHeaderName);
+      const mirroredHeaderValue = this.getHeader(req, headerName.toLowerCase());
       if (argumentValue === undefined || argumentValue === null) {
         if (mirroredHeaderValue !== undefined) {
           throw new ModernMcpError(400, ModernErrorCodes.HeaderMismatch, `${headerName} must be omitted when tool argument ${propertyName} is null or missing`);
@@ -1474,6 +1508,38 @@ export class ModernMcpController {
         throw new ModernMcpError(400, ModernErrorCodes.HeaderMismatch, `${headerName} does not match tool argument ${propertyName}`);
       }
     }
+  }
+
+  private hasValidHeaderAnnotations(tool: Tool): boolean {
+    try {
+      const inputSchema = this.isJsonObject(tool.inputSchema) ? tool.inputSchema : undefined;
+      if (inputSchema) {
+        this.normalizeHeaderAnnotations(tool, this.findHeaderAnnotations(inputSchema));
+      }
+      return true;
+    } catch (error) {
+      if (error instanceof ModernMcpError) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  private normalizeHeaderAnnotations(tool: Tool, annotations: Array<{ path: string[]; headerName: string }>): Array<{ path: string[]; headerName: string }> {
+    const seenHeaders = new Set<string>();
+    return annotations.map((annotation) => {
+      const propertyName = annotation.path.join('.');
+      const headerName = `Mcp-Param-${annotation.headerName}`;
+      if (!/^Mcp-Param-[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(headerName)) {
+        throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, `Invalid x-mcp-header annotation for ${tool.name}.${propertyName}`);
+      }
+      const normalizedHeaderName = headerName.toLowerCase();
+      if (seenHeaders.has(normalizedHeaderName)) {
+        throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, `Duplicate x-mcp-header annotation for ${headerName}`);
+      }
+      seenHeaders.add(normalizedHeaderName);
+      return { path: annotation.path, headerName };
+    });
   }
 
   private findHeaderAnnotations(schema: JsonObject, path: string[] = []): Array<{ path: string[]; headerName: string }> {

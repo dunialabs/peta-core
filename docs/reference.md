@@ -117,8 +117,8 @@ Peta Core exposes different APIs for different roles:
 
 - **MCP protocol interface** (`/mcp`)
   Standard MCP endpoints for MCP-compatible clients such as Claude Desktop, ChatGPT MCP, or Cursor.
-  Authentication: bearer token (OAuth access token (JWT) or Peta access token (opaque)).
-  Transport: HTTP/SSE depending on your MCP host.
+  Legacy sessionful MCP uses `initialize`, `Mcp-Session-Id`, and GET SSE reconnects with a bearer token (OAuth access token (JWT) or Peta access token (opaque)).
+  Modern MCP `2026-07-28` is POST-only Streamable HTTP: clients send per-request `_meta`, authenticate with an OAuth bearer token in the `Authorization` header, use `server/discover`, and open resource/list-change streams with `subscriptions/listen` instead of GET SSE or query tokens.
 
 - **Admin API** (`/admin`)
   Used by Peta Console and automation scripts to manage users, servers, permissions, and quotas.

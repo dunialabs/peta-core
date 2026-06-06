@@ -67,6 +67,8 @@ Thumbs.db
 .env.ports
 
 .claude/
+.omo/
+.openchrome/
 
 # Docker volumes
 postgres_data/

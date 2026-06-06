@@ -4,6 +4,7 @@ import type { JsonObject } from './ModernMcpTypes.js';
 export interface ModernSubscriptionEvent {
   method: string;
   serverId?: string;
+  scopeId?: string;
   resourceUri?: string;
   params: JsonObject;
 }

@@ -168,5 +168,20 @@ describe('ModernHttpValidation', () => {
       tokenHeaderTool,
       { tenant: 'acme' },
     )).not.toThrow();
+
+    const prefixedValueTool = {
+      name: 'tool',
+      inputSchema: { type: 'object', properties: { tenant: { type: 'string', 'x-mcp-header': 'Mcp-Param-tenant' } } },
+    };
+    expect(() => controller.validateToolHeaderAnnotations(
+      { headers: { 'mcp-param-mcp-param-tenant': 'acme' } },
+      prefixedValueTool,
+      { tenant: 'acme' },
+    )).not.toThrow();
+    expect(() => controller.validateToolHeaderAnnotations(
+      { headers: { 'mcp-param-tenant': 'acme' } },
+      prefixedValueTool,
+      { tenant: 'acme' },
+    )).toThrow('Mcp-Param-Mcp-Param-tenant does not match tool argument tenant');
   });
 });
