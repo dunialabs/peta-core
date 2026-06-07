@@ -1,4 +1,0 @@
-interface:
-  display_name: "Peta Core Release"
-  short_description: "One-click peta-core release publishing"
-  default_prompt: "Use $peta-core-release to publish a new peta-core release from origin/main."

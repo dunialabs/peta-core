@@ -67,6 +67,8 @@ Thumbs.db
 .env.ports
 
 .claude/
+.codex/
+.github/
 .omo/
 .openchrome/
 
