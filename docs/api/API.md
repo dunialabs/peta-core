@@ -226,6 +226,16 @@ If you provide `grant_types` in client metadata, Peta Core accepts `authorizatio
 
 Peta Core stores OAuth client registrations with the authorization-server issuer and accepts `application_type` (`web` or `native`). Authorization redirects include the `iss` parameter, and protected-resource metadata advertises header bearer tokens only for the MCP resource. URL-based Client ID metadata documents must use HTTPS, resolve only to public IP addresses, avoid redirects, and stay within the metadata size limit.
 
+#### Canonical Issuer And Public URL
+
+OAuth client registrations, authorization codes, and access-token audiences are bound to the public issuer Peta Core derives from the incoming request. Behind a proxy or tunnel, Peta Core uses `X-Forwarded-Proto` and `X-Forwarded-Host`; otherwise it falls back to the request protocol and `Host` header.
+
+`http://localhost:3002` and `https://your-domain.example` are different issuers. Ordinary dynamic registration only reuses an existing client within the same issuer, even when the client name and callback URL are the same. A ChatGPT test against localhost may create one client, while the same ChatGPT callback against the production domain creates or uses a separate production-domain client.
+
+URL-based Client IDs behave more strictly: the URL itself is the `client_id`, and the current implementation does not allow the same URL-based `client_id` to be registered under another issuer. If you register a URL-based client while testing with localhost, a later registration for the same URL-based `client_id` through the public domain can be rejected.
+
+For production MCP/OAuth clients such as ChatGPT, Claude, or Cursor, configure and test with the final public `/mcp` URL before inviting users. If you need localhost testing, use a separate development database or clear the test OAuth clients, authorization codes, and tokens before reusing the database for the public deployment.
+
 #### Supported Grant Types
 
 ##### 1. Authorization Code Grant with PKCE (Web/Mobile Apps)

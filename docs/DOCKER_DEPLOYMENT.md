@@ -284,6 +284,8 @@ docker compose logs -f
 - **API Service**: http://localhost:3002
 - **Health Check**: http://localhost:3002/health
 
+> **OAuth issuer note:** Docker service names, container ports, host `localhost`, and your public domain are different OAuth issuers from a client perspective. If you expose Peta Core through Cloudflare Tunnel or another reverse proxy, complete ChatGPT, Claude, Cursor, and other MCP/OAuth client setup with the final public `/mcp` URL, not the temporary localhost URL. Ensure the proxy forwards `X-Forwarded-Proto: https` and `X-Forwarded-Host: your-domain.example` so OAuth client registrations, authorization codes, and token audiences are bound to the public domain.
+
 ## ⚙️ Configuration
 
 ### Required Configuration Changes (Production)

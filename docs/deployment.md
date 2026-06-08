@@ -145,6 +145,15 @@ All configuration is set via environment variables (for example in a `.env` file
 | `SSL_CERT_PATH` |          | –       | Path to TLS certificate, required if `ENABLE_HTTPS=true`. |
 | `SSL_KEY_PATH`  |          | –       | Path to TLS private key, required if `ENABLE_HTTPS=true`. |
 
+For OAuth-based MCP clients, the externally visible Peta Core URL must be stable before production use. Peta Core derives its OAuth issuer and MCP resource from `X-Forwarded-Proto` and `X-Forwarded-Host` when they are present, then falls back to the request protocol and `Host` header. Configure reverse proxies, tunnels, and load balancers to send values such as:
+
+```http
+X-Forwarded-Proto: https
+X-Forwarded-Host: your-domain.example
+```
+
+Do not rely on a `localhost:3002` OAuth registration when moving the same database to a public domain. Third-party MCP/OAuth clients such as ChatGPT, Claude, and Cursor should be configured with the final public `/mcp` URL; localhost and the public domain are different OAuth issuers and may use different client registrations.
+
 #### Authentication
 
 | Name         | Required          | Default | Description                                         |
