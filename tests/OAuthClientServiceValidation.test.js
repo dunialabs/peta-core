@@ -108,6 +108,16 @@ describe('OAuthClientServiceValidation', () => {
     expect(createMock).toHaveBeenCalledTimes(1);
   });
 
+  test('traditional registration accepts IPv6 loopback redirect URIs', async () => {
+    const service = new OAuthClientService();
+    const client = await service.registerClient({
+      redirect_uris: ['http://[::1]/callback'],
+    }, undefined, 'https://issuer.example');
+
+    expect(client.redirect_uris).toEqual(['http://[::1]/callback']);
+    expect(createMock).toHaveBeenCalledTimes(1);
+  });
+
   test('issuer lookup falls back to legacy default issuer clients', async () => {
     findFirstMock
       .mockResolvedValueOnce(null)

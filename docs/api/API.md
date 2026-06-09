@@ -224,7 +224,7 @@ curl -X POST http://localhost:3002/register \
 
 If you provide `grant_types` in client metadata, Peta Core accepts `authorization_code` and `refresh_token`. `client_credentials` is rejected because the `/token` endpoint does not implement that grant.
 
-Peta Core stores OAuth client registrations with the authorization-server issuer and accepts `application_type` (`web` or `native`). Authorization redirects include the `iss` parameter, and protected-resource metadata advertises header bearer tokens only for the MCP resource. URL-based Client ID metadata documents must use HTTPS, resolve only to public IP addresses, avoid redirects, and stay within the metadata size limit.
+Peta Core stores OAuth client registrations with the authorization-server issuer and accepts `application_type` (`web` or `native`). Authorization redirects include the `iss` parameter, and protected-resource metadata advertises header bearer tokens only for the MCP resource. Native clients may register loopback redirect URIs such as `http://localhost/callback`; authorization accepts the same loopback path with an ephemeral callback port. URL-based Client ID metadata documents must use HTTPS, resolve only to public IP addresses, avoid redirects, and stay within the metadata size limit. If DNS returns multiple validated public addresses, Peta Core tries the next validated address when a pinned connection attempt fails.
 
 #### Canonical Issuer And Public URL
 
