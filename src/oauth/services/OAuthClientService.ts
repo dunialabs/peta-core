@@ -524,7 +524,7 @@ export class OAuthClientService {
         }
         try {
           const parsed = new URL(redirectUri);
-          if (parsed.protocol !== 'https:' && parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') {
+          if (parsed.protocol !== 'https:' && parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1' && parsed.hostname !== '[::1]') {
             throw new Error('non-https redirect URI');
           }
         } catch {

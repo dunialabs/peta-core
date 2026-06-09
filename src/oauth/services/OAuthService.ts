@@ -126,7 +126,53 @@ export class OAuthService {
    * Validate if redirect_uri is in the allowed list
    */
   validateRedirectUri(redirectUri: string, allowedUris: string[]): boolean {
-    return allowedUris.includes(redirectUri);
+    if (allowedUris.includes(redirectUri)) {
+      return true;
+    }
+
+    const requestedLoopback = this.loopbackRedirectPortAgnosticKey(redirectUri);
+    if (!requestedLoopback) {
+      return false;
+    }
+
+    return allowedUris.some((allowedUri) => this.portlessLoopbackRedirectKey(allowedUri) === requestedLoopback);
+  }
+
+  private portlessLoopbackRedirectKey(redirectUri: string): string | null {
+    try {
+      const url = new URL(redirectUri);
+      if (url.port !== '') {
+        return null;
+      }
+      return this.loopbackRedirectPortAgnosticKeyFromUrl(url);
+    } catch {
+      return null;
+    }
+  }
+
+  private loopbackRedirectPortAgnosticKey(redirectUri: string): string | null {
+    try {
+      const url = new URL(redirectUri);
+      return this.loopbackRedirectPortAgnosticKeyFromUrl(url);
+    } catch {
+      return null;
+    }
+  }
+
+  private loopbackRedirectPortAgnosticKeyFromUrl(url: URL): string | null {
+    if (url.protocol !== 'http:') {
+      return null;
+    }
+    if (!this.isLoopbackRedirectHost(url.hostname)) {
+      return null;
+    }
+    url.port = '';
+    return url.toString();
+  }
+
+  private isLoopbackRedirectHost(hostname: string): boolean {
+    const normalized = hostname.toLowerCase();
+    return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '[::1]';
   }
 
   /**
