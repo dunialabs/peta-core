@@ -51,7 +51,7 @@ jest.unstable_mockModule('../dist/oauth/services/OAuthClientService.js', () => (
         redirect_uris: ['https://client.example/callback'],
         grant_types: ['authorization_code'],
         response_types: ['code'],
-        scopes: ['mcp:tools'],
+        scopes: ['mcp:tools', 'mcp:resources', 'mcp:prompts'],
         token_endpoint_auth_method: 'none',
       };
       return client;
@@ -164,6 +164,41 @@ describe('OAuthControllerGrantEnforcement', () => {
 
     expect(codeCreate.mock.calls[0][0].data.clientId).toBe('https://client.example/metadata.json');
     expect(res.body.redirect).toContain('code=');
+  });
+
+  test('authorization allows URL client_id metadata documents to request all MCP scopes', async () => {
+    client = null;
+    codeCreate.mockResolvedValue({});
+    const controller = new OAuthController();
+    const res = createRes();
+
+    await controller.authorize(createReq({
+      client_id: 'https://client.example/metadata.json',
+      redirect_uri: 'https://client.example/callback',
+      scope: 'mcp:tools mcp:resources mcp:prompts',
+      approved: true,
+      user_token: 'user-token',
+    }), res);
+
+    expect(codeCreate.mock.calls[0][0].data.scopes).toEqual(['mcp:tools', 'mcp:resources', 'mcp:prompts']);
+    expect(res.body.redirect).toContain('code=');
+  });
+
+  test('authorization rejects unknown scopes for URL client_id metadata documents', async () => {
+    client = null;
+    const controller = new OAuthController();
+    const res = createRes();
+
+    await controller.authorize(createReq({
+      client_id: 'https://client.example/metadata.json',
+      redirect_uri: 'https://client.example/callback',
+      scope: 'mcp:unknown',
+      approved: true,
+      user_token: 'user-token',
+    }), res);
+
+    expect(res.body.redirect).toContain('error=invalid_scope');
+    expect(codeCreate).not.toHaveBeenCalled();
   });
 
   test('authorization maps URL client_id metadata errors to 400', async () => {

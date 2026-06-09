@@ -6,8 +6,45 @@ const createMock = jest.fn(async ({ data }) => ({
   createdAt: new Date('2026-01-01T00:00:00Z'),
   updatedAt: new Date('2026-01-01T00:00:00Z'),
 }));
+const updateMock = jest.fn(async ({ data }) => ({
+  ...existingUrlClient(),
+  ...data,
+  updatedAt: new Date('2026-01-01T00:00:01Z'),
+}));
 const findFirstMock = jest.fn(async () => null);
 const findUniqueMock = jest.fn(async () => null);
+let fetchedMetadata;
+
+function defaultFetchedMetadata(clientId = 'https://client.example/metadata.json') {
+  return {
+    client_id: clientId,
+    client_name: 'URL Client',
+    redirect_uris: ['https://client.example/callback'],
+    grant_types: ['authorization_code', 'refresh_token'],
+    response_types: ['code'],
+    token_endpoint_auth_method: 'none',
+  };
+}
+
+function existingUrlClient(overrides = {}) {
+  return {
+    clientId: 'https://client.example/metadata.json',
+    issuer: 'https://issuer.example',
+    clientSecret: null,
+    applicationType: 'web',
+    tokenEndpointAuthMethod: 'none',
+    name: 'URL Client',
+    redirectUris: ['https://client.example/callback'],
+    scopes: ['mcp:tools'],
+    grantTypes: ['authorization_code', 'refresh_token'],
+    responseTypes: ['code'],
+    userId: null,
+    trusted: false,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    updatedAt: new Date('2026-01-01T00:00:00Z'),
+    ...overrides,
+  };
+}
 
 jest.unstable_mockModule('../dist/logger/index.js', () => ({
   createLogger: () => ({ trace: jest.fn(), debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn(), fatal: jest.fn() }),
@@ -20,7 +57,7 @@ jest.unstable_mockModule('../dist/config/prisma.js', () => ({
       findUnique: findUniqueMock,
       findMany: jest.fn(async () => []),
       create: createMock,
-      update: jest.fn(),
+      update: updateMock,
       delete: jest.fn(),
     },
     $transaction: jest.fn(),
@@ -34,14 +71,7 @@ jest.unstable_mockModule('../dist/oauth/services/ClientMetadataFetcher.js', () =
     async fetchAndValidateClientMetadata(clientId) {
       return {
         valid: true,
-        metadata: {
-          client_id: clientId,
-          client_name: 'URL Client',
-          redirect_uris: ['https://client.example/callback'],
-          grant_types: ['authorization_code', 'refresh_token'],
-          response_types: ['code'],
-          token_endpoint_auth_method: 'none',
-        },
+        metadata: { ...fetchedMetadata, client_id: clientId },
       };
     }
   },
@@ -51,7 +81,9 @@ const { OAuthClientService } = await import('../dist/oauth/services/OAuthClientS
 
 describe('OAuthClientServiceValidation', () => {
   beforeEach(() => {
+    fetchedMetadata = defaultFetchedMetadata();
     createMock.mockClear();
+    updateMock.mockClear();
     findFirstMock.mockReset();
     findFirstMock.mockResolvedValue(null);
     findUniqueMock.mockReset();
@@ -64,7 +96,40 @@ describe('OAuthClientServiceValidation', () => {
 
     expect(client.client_id).toBe('https://client.example/metadata.json');
     expect(client.redirect_uris).toEqual(['https://client.example/callback']);
+    expect(client.scopes).toEqual(['mcp:tools', 'mcp:resources', 'mcp:prompts']);
     expect(createMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('URL-based registration respects explicit metadata scope', async () => {
+    fetchedMetadata = { ...defaultFetchedMetadata(), scope: 'mcp:tools' };
+    const service = new OAuthClientService();
+    const client = await service.registerClient({ client_id: 'https://client.example/metadata.json' }, undefined, 'https://issuer.example');
+
+    expect(client.scopes).toEqual(['mcp:tools']);
+    expect(createMock.mock.calls[0][0].data.scopes).toEqual(['mcp:tools']);
+  });
+
+  test('URL-based registration upgrades existing legacy default scopes when metadata omits scope', async () => {
+    findFirstMock.mockResolvedValueOnce(existingUrlClient({ scopes: ['mcp:tools'] }));
+    const service = new OAuthClientService();
+    const client = await service.registerClient({ client_id: 'https://client.example/metadata.json' }, undefined, 'https://issuer.example');
+
+    expect(client.scopes).toEqual(['mcp:tools', 'mcp:resources', 'mcp:prompts']);
+    expect(updateMock).toHaveBeenCalledWith({
+      where: { clientId: 'https://client.example/metadata.json' },
+      data: { scopes: ['mcp:tools', 'mcp:resources', 'mcp:prompts'] },
+    });
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  test('URL-based registration does not overwrite existing custom scopes', async () => {
+    findFirstMock.mockResolvedValueOnce(existingUrlClient({ scopes: ['mcp:tools', 'mcp:resources'] }));
+    const service = new OAuthClientService();
+    const client = await service.registerClient({ client_id: 'https://client.example/metadata.json' }, undefined, 'https://issuer.example');
+
+    expect(client.scopes).toEqual(['mcp:tools', 'mcp:resources']);
+    expect(updateMock).not.toHaveBeenCalled();
+    expect(createMock).not.toHaveBeenCalled();
   });
 
   test('URL-based registration rejects global client_id reuse under another issuer', async () => {

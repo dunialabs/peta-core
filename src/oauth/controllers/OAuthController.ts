@@ -199,10 +199,7 @@ export class OAuthController {
 
       // Query client information
       const issuer = getAuthorizationServerUrl(req);
-      let client = await this.clientService.getClientForIssuer(client_id as string, issuer);
-      if (!client && typeof client_id === 'string' && client_id.startsWith('https://')) {
-        client = await this.clientService.registerClient({ client_id, redirect_uris: [] }, undefined, issuer);
-      }
+      const client = await this.getAuthorizationClient(client_id, issuer);
       if (!client) {
         res.status(400).send('Invalid client_id');
         return;
@@ -292,10 +289,7 @@ export class OAuthController {
 
       // Validate client
       const issuer = getAuthorizationServerUrl(req);
-      let client = await this.clientService.getClientForIssuer(client_id, issuer);
-      if (!client && typeof client_id === 'string' && client_id.startsWith('https://')) {
-        client = await this.clientService.registerClient({ client_id, redirect_uris: [] }, undefined, issuer);
-      }
+      const client = await this.getAuthorizationClient(client_id, issuer);
       if (!client) {
         this.addCorsHeaders(res);
         res.status(400).json({
@@ -437,6 +431,18 @@ export class OAuthController {
       });
     }
   };
+
+  private getAuthorizationClient(clientId: unknown, issuer: string) {
+    if (typeof clientId !== 'string') {
+      return Promise.resolve(null);
+    }
+
+    if (clientId.startsWith('https://')) {
+      return this.clientService.registerClient({ client_id: clientId, redirect_uris: [] }, undefined, issuer);
+    }
+
+    return this.clientService.getClientForIssuer(clientId, issuer);
+  }
 
   /**
    * POST /token - Token exchange endpoint

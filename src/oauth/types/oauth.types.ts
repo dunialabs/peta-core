@@ -15,6 +15,8 @@ export const OAUTH_CONFIG = {
   AUTHORIZATION_CODE_LIFETIME: 600, // 10 minutes
 };
 
+export const MCP_OAUTH_SCOPES = ['mcp:tools', 'mcp:resources', 'mcp:prompts'] as const;
+
 /**
  * OAuth client metadata (RFC 7591 + SEP-991)
  */

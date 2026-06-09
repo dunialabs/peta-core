@@ -5,7 +5,7 @@
 
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { OAUTH_CONFIG } from '../types/oauth.types.js';
+import { MCP_OAUTH_SCOPES, OAUTH_CONFIG } from '../types/oauth.types.js';
 
 export class OAuthService {
   private jwtSecret: string;
@@ -284,7 +284,7 @@ export class OAuthService {
       registration_endpoint: `${issuerUrl}/register`,
       revocation_endpoint: `${issuerUrl}/revoke`,
       introspection_endpoint: `${issuerUrl}/introspect`,
-      scopes_supported: ['mcp:tools', 'mcp:resources', 'mcp:prompts'],
+      scopes_supported: [...MCP_OAUTH_SCOPES],
       response_types_supported: ['code'],
       grant_types_supported: ['authorization_code', 'refresh_token'],
       token_endpoint_auth_methods_supported: [
@@ -321,7 +321,7 @@ export class OAuthService {
       bearer_methods_supported: ['header'],
       resource_documentation: `${authorizationServerUrl}/docs/mcp-gateway`,
       resource_signing_alg_values_supported: ['HS256'],
-      scopes_supported: ['mcp:tools', 'mcp:resources', 'mcp:prompts']
+      scopes_supported: [...MCP_OAUTH_SCOPES]
     };
   }
 }

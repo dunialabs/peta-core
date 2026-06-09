@@ -5,7 +5,7 @@
 
 import { prisma } from '../../config/prisma.js';
 import { OAuthService } from './OAuthService.js';
-import { OAuthClientMetadata, OAuthClientInformation } from '../types/oauth.types.js';
+import { MCP_OAUTH_SCOPES, OAuthClientMetadata, OAuthClientInformation } from '../types/oauth.types.js';
 import { createLogger } from '../../logger/index.js';
 import { ClientMetadataFetcher } from './ClientMetadataFetcher.js';
 
@@ -135,24 +135,25 @@ export class OAuthClientService {
       });
 
       if (existingClient) {
+        const reconciledClient = await this.reconcileUrlBasedClientScopes(existingClient, fetchedMetadata);
         this.logger.info({
           clientId: providedClientId
         }, 'URL-based client already registered, returning existing client');
 
         return {
-          client_id: existingClient.clientId,
-          client_secret: existingClient.clientSecret || undefined,
-          issuer: existingClient.issuer,
-          client_name: existingClient.name,
-          application_type: existingClient.applicationType,
-          redirect_uris: existingClient.redirectUris as string[],
-          grant_types: existingClient.grantTypes as string[],
-          response_types: existingClient.responseTypes as string[],
-          scopes: existingClient.scopes as string[],
-          token_endpoint_auth_method: existingClient.tokenEndpointAuthMethod,
-          trusted: existingClient.trusted,
-          created_at: existingClient.createdAt,
-          updated_at: existingClient.updatedAt,
+          client_id: reconciledClient.clientId,
+          client_secret: reconciledClient.clientSecret || undefined,
+          issuer: reconciledClient.issuer,
+          client_name: reconciledClient.name,
+          application_type: reconciledClient.applicationType,
+          redirect_uris: reconciledClient.redirectUris as string[],
+          grant_types: reconciledClient.grantTypes as string[],
+          response_types: reconciledClient.responseTypes as string[],
+          scopes: reconciledClient.scopes as string[],
+          token_endpoint_auth_method: reconciledClient.tokenEndpointAuthMethod,
+          trusted: reconciledClient.trusted,
+          created_at: reconciledClient.createdAt,
+          updated_at: reconciledClient.updatedAt,
         };
       }
 
@@ -166,7 +167,7 @@ export class OAuthClientService {
       // 5. Create new URL-based client record
       const authMethod = fetchedMetadata.token_endpoint_auth_method || 'none';
       const applicationType = fetchedMetadata.application_type || 'web';
-      const scopes = this.oauthService.parseScope(fetchedMetadata.scope);
+      const scopes = this.scopesForUrlBasedClient(fetchedMetadata);
       const grantTypes = fetchedMetadata.grant_types || ['authorization_code', 'refresh_token'];
       const responseTypes = fetchedMetadata.response_types || ['code'];
 
@@ -307,6 +308,43 @@ export class OAuthClientService {
       created_at: client.createdAt,
       updated_at: client.updatedAt,
     };
+  }
+
+  private scopesForUrlBasedClient(metadata: OAuthClientMetadata): string[] {
+    return typeof metadata.scope === 'string'
+      ? this.oauthService.parseScope(metadata.scope)
+      : [...MCP_OAUTH_SCOPES];
+  }
+
+  private async reconcileUrlBasedClientScopes(
+    client: OAuthClientRecord,
+    metadata: OAuthClientMetadata,
+  ): Promise<OAuthClientRecord> {
+    if (typeof metadata.scope === 'string') {
+      return client;
+    }
+
+    const currentScopes = client.scopes as string[];
+    if (!this.isLegacyUrlBasedDefaultScopes(currentScopes)) {
+      return client;
+    }
+
+    const updatedScopes = [...MCP_OAUTH_SCOPES];
+    this.logger.info({
+      clientId: client.clientId,
+      issuer: client.issuer,
+      oldScopes: currentScopes,
+      newScopes: updatedScopes,
+    }, 'Upgrading URL-based OAuth client scopes from legacy default');
+
+    return this.clients.update({
+      where: { clientId: client.clientId },
+      data: { scopes: updatedScopes },
+    });
+  }
+
+  private isLegacyUrlBasedDefaultScopes(scopes: string[]): boolean {
+    return Array.isArray(scopes) && scopes.length === 1 && scopes[0] === 'mcp:tools';
   }
 
   /**
