@@ -49,7 +49,7 @@ The Admin API (`/admin`) and Socket.IO (`/socket.io`) currently authenticate usi
 - OAuth scopes are enforced by modern MCP method family: tools, resources, and prompts require their corresponding `mcp:*` scope.
 - OAuth authorization responses include `iss`, and dynamic client registrations persist `issuer` and `application_type` metadata for auditability and client compatibility.
 - Native OAuth clients may register loopback redirect URIs without a port; during authorization, Peta Core accepts the same loopback callback path with an ephemeral local port.
-- URL-based OAuth Client ID metadata fetches reject localhost, private, link-local, and oversized responses before client metadata is persisted. When DNS returns multiple validated public addresses, Core pins each request to one resolved address and tries the next validated address only if the previous connection fails.
+- URL-based OAuth Client ID metadata fetches reject localhost, private, link-local, other SSRF-sensitive addresses, and oversized responses before client metadata is persisted. Hostname-based metadata URLs may resolve to `198.18.0.0/15` in VPN/TUN fake-IP environments, so Core allows that range by default only for resolved hostnames, never for direct IP metadata URLs. Set `OAUTH_CLIENT_METADATA_ALLOW_FAKE_IP=false` to require strictly public DNS results. When DNS returns multiple validated addresses, Core pins each request to one resolved address and tries the next validated address only if the previous connection fails.
 
 ---
 

@@ -164,6 +164,10 @@ OAuth 2.0 and multi-tenant settings are also configured via environment variable
 
 > For production deployments, treat `JWT_SECRET` as a high-value key: provision it from your secret manager or KMS, never check it into source control, and rotate it according to your organization’s security policies.
 
+| Name                                  | Required | Default | Description |
+| ------------------------------------- | -------- | ------- | ----------- |
+| `OAUTH_CLIENT_METADATA_ALLOW_FAKE_IP` |          | `true`  | Allow hostname-based URL client metadata documents to resolve to VPN/TUN fake-IP addresses in `198.18.0.0/15`. Direct IP metadata URLs and real private/localhost/link-local targets are still rejected. Set to `false` for deployments that require strictly public DNS results. |
+
 #### Peta Auth (optional)
 
 Peta Core supports multiple OAuth-based integrations (for example Google, Notion, GitHub, and Figma). There are two ways to supply OAuth credentials:

@@ -2,6 +2,7 @@ import type { IncomingHttpHeaders } from 'node:http';
 import { lookup } from 'node:dns/promises';
 import { BlockList, isIP } from 'node:net';
 import { request } from 'node:https';
+import { createLogger } from '../../logger/index.js';
 
 const BLOCKED_IPV4_SUBNETS = [
   ['0.0.0.0', 8],
@@ -14,11 +15,14 @@ const BLOCKED_IPV4_SUBNETS = [
   ['192.0.2.0', 24],
   ['192.88.99.0', 24],
   ['192.168.0.0', 16],
-  ['198.18.0.0', 15],
   ['198.51.100.0', 24],
   ['203.0.113.0', 24],
   ['224.0.0.0', 4],
   ['240.0.0.0', 4],
+] as const;
+
+const FAKE_IP_IPV4_SUBNETS = [
+  ['198.18.0.0', 15],
 ] as const;
 
 const BLOCKED_IPV6_SUBNETS = [
@@ -38,18 +42,34 @@ const BLOCKED_IPV6_SUBNETS = [
   ['ff00::', 8],
 ] as const;
 
-function createBlockedIpRanges(): BlockList {
+function createBlockedIpv4Ranges(): BlockList {
   const blockList = new BlockList();
   for (const [address, prefix] of BLOCKED_IPV4_SUBNETS) {
     blockList.addSubnet(address, prefix, 'ipv4');
   }
+  return blockList;
+}
+
+function createBlockedIpv6Ranges(): BlockList {
+  const blockList = new BlockList();
   for (const [address, prefix] of BLOCKED_IPV6_SUBNETS) {
     blockList.addSubnet(address, prefix, 'ipv6');
   }
   return blockList;
 }
 
-const BLOCKED_IP_RANGES = createBlockedIpRanges();
+const BLOCKED_IPV4_RANGES = createBlockedIpv4Ranges();
+const BLOCKED_IPV6_RANGES = createBlockedIpv6Ranges();
+
+function createFakeIpRanges(): BlockList {
+  const blockList = new BlockList();
+  for (const [address, prefix] of FAKE_IP_IPV4_SUBNETS) {
+    blockList.addSubnet(address, prefix, 'ipv4');
+  }
+  return blockList;
+}
+
+const FAKE_IP_RANGES = createFakeIpRanges();
 
 export type ClientMetadataNetworkValidationResult = {
   valid: boolean;
@@ -66,6 +86,8 @@ export type ClientMetadataHttpResponse = {
 };
 
 export class ClientMetadataNetwork {
+  private readonly logger = createLogger('ClientMetadataNetwork');
+
   constructor(
     private readonly fetchTimeoutMs: number,
     private readonly maxMetadataBytes: number,
@@ -89,10 +111,42 @@ export class ClientMetadataNetwork {
       return { valid: false, error: 'Client metadata URL host did not resolve' };
     }
 
+    const allowFakeIp = this.allowFakeIpClientMetadata();
+    const allowedFakeIpAddresses: string[] = [];
+
     for (const { address } of addresses) {
-      if (!this.isPublicIpAddress(address)) {
-        return { valid: false, error: 'Client metadata URL must resolve only to public IP addresses' };
+      if (this.isPublicIpAddress(address)) {
+        continue;
       }
+
+      const fakeIpAddress = this.isFakeIpAddress(address);
+      if (fakeIpAddress && directIpVersion > 0) {
+        return {
+          valid: false,
+          error: 'Client metadata URL must not directly target 198.18.0.0/15 fake-IP addresses',
+        };
+      }
+
+      if (fakeIpAddress && allowFakeIp) {
+        allowedFakeIpAddresses.push(address);
+        continue;
+      }
+
+      if (fakeIpAddress) {
+        return {
+          valid: false,
+          error: 'Client metadata URL resolved to 198.18.0.0/15 fake-IP addresses, but OAUTH_CLIENT_METADATA_ALLOW_FAKE_IP is disabled',
+        };
+      }
+
+      return { valid: false, error: 'Client metadata URL must resolve only to public IP addresses' };
+    }
+
+    if (allowedFakeIpAddresses.length > 0) {
+      this.logger.warn({
+        hostname,
+        addresses: allowedFakeIpAddresses,
+      }, 'Allowing URL-based OAuth client metadata host resolved through VPN fake-IP range');
     }
 
     return { valid: true, addresses: addresses.map(({ address }) => address) };
@@ -121,14 +175,26 @@ export class ClientMetadataNetwork {
       if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
         return false;
       }
-      return !BLOCKED_IP_RANGES.check(normalizedAddress, 'ipv4');
+      if (this.isFakeIpAddress(normalizedAddress)) {
+        return false;
+      }
+      return !BLOCKED_IPV4_RANGES.check(normalizedAddress, 'ipv4');
     }
 
     if (version === 6) {
-      return !BLOCKED_IP_RANGES.check(normalizedAddress, 'ipv6');
+      return !BLOCKED_IPV6_RANGES.check(normalizedAddress, 'ipv6');
     }
 
     return false;
+  }
+
+  private isFakeIpAddress(address: string): boolean {
+    const normalizedAddress = this.unbracketIpv6Hostname(address.toLowerCase());
+    return isIP(normalizedAddress) === 4 && FAKE_IP_RANGES.check(normalizedAddress, 'ipv4');
+  }
+
+  private allowFakeIpClientMetadata(): boolean {
+    return process.env.OAUTH_CLIENT_METADATA_ALLOW_FAKE_IP?.trim().toLowerCase() !== 'false';
   }
 
   private unbracketIpv6Hostname(hostname: string): string {
