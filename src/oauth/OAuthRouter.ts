@@ -44,6 +44,10 @@ export class OAuthRouter {
     app.get('/register/:clientId', this.oauthController.getClientInfo);
     app.get('/authorize', this.oauthController.showAuthorizePage);
     app.post('/authorize', this.oauthController.authorize);
+    app.get('/authorize/desk/status', this.oauthController.deskAuthorizationStatus);
+    app.post('/authorize/desk/callback', this.oauthController.deskAuthorizationCallback);
+    app.options('/authorize/desk/status', this.oauthController.handleOptions);
+    app.options('/authorize/desk/callback', this.oauthController.handleOptions);
     app.post('/token', this.oauthController.token);
     app.post('/introspect', this.oauthController.introspect);
     app.post('/revoke', this.oauthController.revoke);

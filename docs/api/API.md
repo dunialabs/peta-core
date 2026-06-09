@@ -206,6 +206,8 @@ Intercom is handled differently: OAuth code exchange returns a long-lived access
 | `POST /register` | Dynamic client registration |
 | `POST /token` | Get or refresh access token |
 | `GET /authorize` | User authorization page for authorization code flow |
+| `GET /authorize/desk/status` | Poll Peta Desk authorization status from the original browser authorization page |
+| `POST /authorize/desk/callback` | Complete Peta Desk authorization without opening a new browser tab |
 | `POST /introspect` | Check token validity |
 | `POST /revoke` | Revoke token |
 
@@ -259,6 +261,25 @@ http://localhost:3002/authorize?
   code_challenge=$CODE_CHALLENGE&
   code_challenge_method=S256
 ```
+
+Peta Desk uses an internal browser-preserving flow for this authorization page. `GET /authorize` creates a short-lived in-memory `flow_id` and embeds it in the page. The page also persists the same value in the authorize URL as `desk_flow_id`; if the page is refreshed, Core reuses that pending or completed flow only when the issuer and OAuth authorization parameters still match. The original browser page polls:
+
+```
+GET /authorize/desk/status?flow_id=<flow_id>
+```
+
+Peta Desk must complete the flow by calling Peta Core instead of opening a browser tab with a `token` query parameter:
+
+```bash
+curl -X POST http://localhost:3002/authorize/desk/callback \
+  -H "Content-Type: application/json" \
+  -d '{
+    "flow_id": "desk-flow-id",
+    "user_token": "peta-user-token"
+  }'
+```
+
+When the flow completes, the status endpoint returns `{ "status": "completed", "redirect": "..." }`, and the original authorization page redirects to the OAuth client callback. This preserves browser `sessionStorage` for clients such as MCP Inspector that store the MCP server URL and PKCE verifier in the original tab. Pending Desk flows are in-memory only and expire after five minutes. The legacy `/authorize?...&token=...` page callback remains temporarily supported for older Desk clients, but new Desk clients should use `/authorize/desk/callback`.
 
 **Step 3**: Exchange authorization code for token
 

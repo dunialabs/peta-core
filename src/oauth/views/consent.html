@@ -258,6 +258,135 @@
             }
         }
 
+        const deskFlowId = "{{DESK_FLOW_ID}}";
+        const deskCallbackUrl = window.location.origin + '/authorize/desk/callback';
+        let pollTimer = null;
+
+        function stopPolling() {
+            if (pollTimer) {
+                clearTimeout(pollTimer);
+                pollTimer = null;
+            }
+        }
+
+        function showAuthorizationCompleteMessage() {
+            const container = document.querySelector('.container');
+            if (!container) {
+                return;
+            }
+
+            container.innerHTML = [
+                '<div class="header-section">',
+                '<div class="header-title">Authorization completed</div>',
+                '<div class="header-subtitle">You can close this window.</div>',
+                '</div>'
+            ].join('');
+        }
+
+        function redirectOAuthClientCallback(redirectUrl) {
+            try {
+                if (window.opener && !window.opener.closed) {
+                    window.opener.location.href = redirectUrl;
+                    showAuthorizationCompleteMessage();
+                    setTimeout(function() {
+                        window.close();
+                    }, 300);
+                    return;
+                }
+            } catch (error) {
+                console.error('[OAuth] Failed to redirect opener, falling back to current window:', error);
+            }
+
+            window.location.href = redirectUrl;
+        }
+
+        function persistDeskFlowIdInUrl() {
+            if (!deskFlowId || !window.history || !window.history.replaceState) {
+                return;
+            }
+
+            try {
+                const currentUrl = new URL(window.location.href);
+                if (currentUrl.searchParams.get('desk_flow_id') === deskFlowId) {
+                    return;
+                }
+                currentUrl.searchParams.set('desk_flow_id', deskFlowId);
+                window.history.replaceState(window.history.state, '', currentUrl.toString());
+            } catch (error) {
+                console.error('[OAuth] Failed to persist Desk flow ID in URL:', error);
+            }
+        }
+
+        async function fetchDeskAuthorizationStatus() {
+            const response = await fetch('/authorize/desk/status?flow_id=' + encodeURIComponent(deskFlowId), {
+                method: 'GET',
+                cache: 'no-store',
+            });
+            return response.json();
+        }
+
+        function handleDeskAuthorizationStatus(data) {
+            if (data.status === 'completed' && data.redirect) {
+                stopPolling();
+                console.log('[OAuth] Desk authorization completed, redirecting');
+                redirectOAuthClientCallback(data.redirect);
+                return true;
+            }
+
+            if (data.status === 'failed') {
+                stopPolling();
+                const message = data.error_description || 'Authorization failed. Please try again.';
+                console.error('[OAuth] Desk authorization failed:', message);
+                alert(message);
+                return true;
+            }
+
+            return false;
+        }
+
+        async function pollDeskAuthorization() {
+            if (!deskFlowId) {
+                console.error('[OAuth] Missing Desk flow ID');
+                return;
+            }
+
+            try {
+                const data = await fetchDeskAuthorizationStatus();
+                if (handleDeskAuthorizationStatus(data)) {
+                    return;
+                }
+
+                pollTimer = setTimeout(pollDeskAuthorization, 1000);
+            } catch (error) {
+                console.error('[OAuth] Desk authorization polling error:', error);
+                pollTimer = setTimeout(pollDeskAuthorization, 1000);
+            }
+        }
+
+        async function startDeskAuthorization() {
+            if (!deskFlowId) {
+                console.error('[OAuth] Missing Desk flow ID');
+                invokePetaDesk();
+                return;
+            }
+
+            persistDeskFlowIdInUrl();
+
+            try {
+                const data = await fetchDeskAuthorizationStatus();
+                if (handleDeskAuthorizationStatus(data)) {
+                    return;
+                }
+
+                invokePetaDesk();
+                pollTimer = setTimeout(pollDeskAuthorization, 1000);
+            } catch (error) {
+                console.error('[OAuth] Desk authorization initial status error:', error);
+                invokePetaDesk();
+                pollTimer = setTimeout(pollDeskAuthorization, 1000);
+            }
+        }
+
         /**
          * Handle token callback from Peta Desk
          * Directly submit authorization request to backend
@@ -294,7 +423,7 @@
 
                 if (data.redirect) {
                     console.log('[OAuth] Authorization successful, redirecting');
-                    window.location.href = data.redirect;
+                    redirectOAuthClientCallback(data.redirect);
                 } else {
                     console.error('[OAuth] No redirect URL in response');
                 }
@@ -314,6 +443,8 @@
             if (encodedUrl) {
                 const proxyKey = "{{PROXY_KEY}}";
                 const schemeUrl = 'petadesk://peta.ai?type=1&url=' + encodedUrl +
+                                  (deskFlowId ? '&flowId=' + encodeURIComponent(deskFlowId) : '') +
+                                  '&callback=' + encodeURIComponent(deskCallbackUrl) +
                                   (proxyKey ? '&proxyKey=' + proxyKey : '');
                 openCustomScheme(schemeUrl);
             } else {
@@ -354,7 +485,7 @@
             } else {
                 // Scenario 2: No token → auto-invoke Peta Desk app
                 console.log('[OAuth] No token found, auto-invoking Peta Desk app');
-                invokePetaDesk();
+                startDeskAuthorization();
             }
         });
     </script>

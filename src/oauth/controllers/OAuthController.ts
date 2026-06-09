@@ -16,6 +16,10 @@ import { fileURLToPath } from 'url';
 import { createLogger } from '../../logger/index.js';
 import { ProxyRepository } from '../../repositories/ProxyRepository.js';
 import { getAuthorizationServerUrl, getPublicUrl } from '../../utils/urlUtils.js';
+import {
+  DeskAuthorizationParams,
+  deskAuthorizationFlowService,
+} from '../services/DeskAuthorizationFlowService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,6 +32,14 @@ export class OAuthController {
   
   // Logger for OAuthController
   private logger = createLogger('OAuthController');
+
+  private normalizeOptionalString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.length > 0 ? value : undefined;
+  }
+
+  private normalizeRequiredString(value: unknown): string {
+    return typeof value === 'string' ? value : '';
+  }
 
   /**
    * Escape string for safe inclusion in HTML content
@@ -45,14 +57,30 @@ export class OAuthController {
     return error instanceof Error && (error.message.startsWith('invalid_client_metadata:') || error.message.startsWith('invalid_redirect_uri:'));
   }
 
-  private clientMetadataErrorCode(error: Error): string {
+  private isAuthorizationEndpointError(error: unknown): error is Error {
+    return error instanceof Error && (
+      error.message.startsWith('invalid_client:') ||
+      error.message.startsWith('unsupported_response_type:') ||
+      error.message.startsWith('invalid_request:')
+    );
+  }
+
+  private colonErrorCode(error: Error): string {
     const separator = error.message.indexOf(': ');
     return separator === -1 ? error.message : error.message.slice(0, separator);
   }
 
-  private clientMetadataErrorDescription(error: Error): string {
+  private colonErrorDescription(error: Error): string {
     const separator = error.message.indexOf(': ');
     return separator === -1 ? error.message : error.message.slice(separator + 2);
+  }
+
+  private clientMetadataErrorCode(error: Error): string {
+    return this.colonErrorCode(error);
+  }
+
+  private clientMetadataErrorDescription(error: Error): string {
+    return this.colonErrorDescription(error);
   }
 
   constructor() {
@@ -182,7 +210,8 @@ export class OAuthController {
         state,
         code_challenge,
         code_challenge_method,
-        resource
+        resource,
+        desk_flow_id
       } = req.query;
 
       // Validate required parameters
@@ -240,6 +269,21 @@ export class OAuthController {
         .map(s => `<li><span class="scope-icon">✓</span>${this.escapeHtml(scopeDescriptions[s] || s)}</li>`)
         .join('');
 
+      const deskFlowParams: DeskAuthorizationParams = {
+        client_id: client_id as string,
+        redirect_uri: redirect_uri as string,
+        scope: this.normalizeOptionalString(scope),
+        state: this.normalizeOptionalString(state),
+        code_challenge: this.normalizeOptionalString(code_challenge),
+        code_challenge_method: this.normalizeOptionalString(code_challenge_method),
+        resource: this.normalizeOptionalString(resource),
+      };
+      const requestedDeskFlowId = this.normalizeRequiredString(desk_flow_id);
+      const deskFlow = requestedDeskFlowId
+        ? deskAuthorizationFlowService.getReusableFlow(requestedDeskFlowId, deskFlowParams, issuer)
+          ?? deskAuthorizationFlowService.createFlow(deskFlowParams, issuer)
+        : deskAuthorizationFlowService.createFlow(deskFlowParams, issuer);
+
       const jsEscape = (val: string): string => JSON.stringify(val)
         .slice(1, -1)
         .replace(/</g, '\\u003C')
@@ -256,6 +300,7 @@ export class OAuthController {
         .replace('{{CODE_CHALLENGE}}', jsEscape(code_challenge as string || ''))
         .replace('{{CODE_CHALLENGE_METHOD}}', jsEscape(code_challenge_method as string || ''))
         .replace('{{RESOURCE}}', jsEscape(resource as string || ''))
+        .replace('{{DESK_FLOW_ID}}', jsEscape(deskFlow.flowId))
         .replace('{{PROXY_KEY}}', jsEscape(proxyKey));
 
       res.setHeader('Content-Type', 'text/html');
@@ -287,37 +332,6 @@ export class OAuthController {
         user_token
       } = req.body;
 
-      // Validate client
-      const issuer = getAuthorizationServerUrl(req);
-      const client = await this.getAuthorizationClient(client_id, issuer);
-      if (!client) {
-        this.addCorsHeaders(res);
-        res.status(400).json({
-          error: 'invalid_client',
-          error_description: 'Client not found'
-        });
-        return;
-      }
-
-      if (!client.response_types.includes('code')) {
-        this.addCorsHeaders(res);
-        res.status(400).json({
-          error: 'unsupported_response_type',
-          error_description: 'Client is not registered for authorization code response'
-        });
-        return;
-      }
-
-      // Validate redirect_uri
-      if (!this.oauthService.validateRedirectUri(redirect_uri, client.redirect_uris)) {
-        this.addCorsHeaders(res);
-        res.status(400).json({
-          error: 'invalid_request',
-          error_description: 'Invalid redirect_uri'
-        });
-        return;
-      }
-
       // If user denied authorization
       if (!approved) {
         const errorUrl = this.oauthService.buildErrorRedirectUrl(
@@ -344,74 +358,15 @@ export class OAuthController {
         return;
       }
 
-      // Validate user identity
-      let userId: string;
-      try {
-        const authContext = await this.tokenValidator.validateToken(user_token);
-        userId = authContext.userId;
-      } catch (error) {
-        const errorUrl = this.oauthService.buildErrorRedirectUrl(
-          redirect_uri,
-          'invalid_request',
-          'Invalid user token',
-          state
-        );
-        this.addCorsHeaders(res);
-        res.json({ redirect: errorUrl });
-        return;
-      }
-
-      // Generate authorization code
-      const code = this.oauthService.generateAuthorizationCode();
-      const scopes = this.oauthService.parseScope(scope);
-      if (!this.oauthService.isScopeSubset(scopes, client.scopes)) {
-        const errorUrl = this.oauthService.buildErrorRedirectUrl(
-          redirect_uri,
-          'invalid_scope',
-          'Requested scope exceeds registered client scopes',
-          state
-        );
-        this.addCorsHeaders(res);
-        res.json({ redirect: errorUrl });
-        return;
-      }
-      const canonicalResource = getPublicUrl(req);
-      if (typeof resource === 'string' && resource.length > 0 && resource !== canonicalResource) {
-        const errorUrl = this.oauthService.buildErrorRedirectUrl(
-          redirect_uri,
-          'invalid_target',
-          'Unsupported resource',
-          state
-        );
-        this.addCorsHeaders(res);
-        res.json({ redirect: errorUrl });
-        return;
-      }
-      const expiresAt = new Date(Date.now() + OAUTH_CONFIG.AUTHORIZATION_CODE_LIFETIME * 1000);
-
-      // Save authorization code
-      await prisma.oAuthAuthorizationCode.create({
-        data: {
-          code,
-          clientId: client_id,
-          userId,
-          redirectUri: redirect_uri,
-          scopes,
-          codeChallenge: code_challenge || null,
-          challengeMethod: code_challenge_method || null,
-          resource: canonicalResource,
-          expiresAt,
-          used: false,
-        },
-      });
-
-      // Build success redirect URL
-      const successUrl = this.oauthService.buildSuccessRedirectUrl(
+      const successUrl = await this.completeAuthorizationGrant(req, {
+        client_id,
         redirect_uri,
-        code,
+        scope,
         state,
-          issuer
-      );
+        code_challenge,
+        code_challenge_method,
+        resource,
+      }, user_token);
 
       this.addCorsHeaders(res);
       res.json({ redirect: successUrl });
@@ -422,6 +377,13 @@ export class OAuthController {
         res.status(400).json({
           error: this.clientMetadataErrorCode(error),
           error_description: this.clientMetadataErrorDescription(error),
+        });
+        return;
+      }
+      if (this.isAuthorizationEndpointError(error)) {
+        res.status(400).json({
+          error: this.colonErrorCode(error),
+          error_description: this.colonErrorDescription(error),
         });
         return;
       }
@@ -442,6 +404,215 @@ export class OAuthController {
     }
 
     return this.clientService.getClientForIssuer(clientId, issuer);
+  }
+
+  /**
+   * POST /authorize/desk/callback - Complete authorization from Peta Desk without opening a browser tab
+   */
+  deskAuthorizationCallback = async (req: Request, res: Response): Promise<void> => {
+    const flowId = this.normalizeRequiredString(req.body?.flow_id);
+    try {
+      const userToken = this.normalizeRequiredString(req.body?.user_token);
+      const flow = deskAuthorizationFlowService.getFlow(flowId);
+
+      this.addCorsHeaders(res);
+      if (!flow) {
+        res.status(404).json({
+          status: 'failed',
+          error: 'invalid_flow',
+          error_description: 'Authorization flow not found',
+        });
+        return;
+      }
+
+      if (flow.status === 'completed') {
+        res.json({ status: 'completed' });
+        return;
+      }
+
+      if (flow.status !== 'pending') {
+        res.status(400).json({
+          status: 'failed',
+          error: flow.error ?? flow.status,
+          error_description: flow.errorDescription ?? 'Authorization flow is not pending',
+        });
+        return;
+      }
+
+      if (!userToken) {
+        deskAuthorizationFlowService.failFlow(flow.flowId, 'invalid_request', 'User token is required');
+        res.status(400).json({
+          status: 'failed',
+          error: 'invalid_request',
+          error_description: 'User token is required',
+        });
+        return;
+      }
+
+      let userId: string;
+      try {
+        const authContext = await this.tokenValidator.validateToken(userToken);
+        userId = authContext.userId;
+      } catch (error) {
+        deskAuthorizationFlowService.failFlow(flow.flowId, 'invalid_request', 'Invalid user token');
+        res.status(400).json({
+          status: 'failed',
+          error: 'invalid_request',
+          error_description: 'Invalid user token',
+        });
+        return;
+      }
+
+      const redirect = await this.completeAuthorizationGrant(req, flow.params, userToken, userId);
+      deskAuthorizationFlowService.completeFlow(flow.flowId, redirect);
+      res.json({ status: 'completed' });
+    } catch (error) {
+      this.logger.error({ error }, 'Desk authorization callback error');
+      this.addCorsHeaders(res);
+      if (flowId) {
+        deskAuthorizationFlowService.failFlow(
+          flowId,
+          this.isClientMetadataError(error) || this.isAuthorizationEndpointError(error) ? this.colonErrorCode(error) : 'server_error',
+          this.isClientMetadataError(error) || this.isAuthorizationEndpointError(error) ? this.colonErrorDescription(error) : 'Internal server error'
+        );
+      }
+      if (this.isClientMetadataError(error) || this.isAuthorizationEndpointError(error)) {
+        res.status(400).json({
+          status: 'failed',
+          error: this.colonErrorCode(error),
+          error_description: this.colonErrorDescription(error),
+        });
+        return;
+      }
+      res.status(500).json({
+        status: 'failed',
+        error: 'server_error',
+        error_description: 'Internal server error',
+      });
+    }
+  };
+
+  /**
+   * GET /authorize/desk/status - Poll authorization status from the original browser tab
+   */
+  deskAuthorizationStatus = async (req: Request, res: Response): Promise<void> => {
+    const flowId = this.normalizeRequiredString(req.query.flow_id);
+    const flow = deskAuthorizationFlowService.getFlow(flowId);
+
+    this.addCorsHeaders(res);
+    if (!flow) {
+      res.status(404).json({
+        status: 'failed',
+        error: 'invalid_flow',
+        error_description: 'Authorization flow not found',
+      });
+      return;
+    }
+
+    if (flow.status === 'completed') {
+      res.json({ status: 'completed', redirect: flow.redirect });
+      return;
+    }
+
+    if (flow.status === 'pending') {
+      res.json({ status: 'pending' });
+      return;
+    }
+
+    res.status(400).json({
+      status: 'failed',
+      error: flow.error ?? flow.status,
+      error_description: flow.errorDescription ?? 'Authorization flow failed',
+    });
+  };
+
+  private async completeAuthorizationGrant(
+    req: Request,
+    params: DeskAuthorizationParams,
+    userToken: string,
+    validatedUserId?: string
+  ): Promise<string> {
+    const {
+      client_id,
+      redirect_uri,
+      scope,
+      state,
+      code_challenge,
+      code_challenge_method,
+      resource,
+    } = params;
+
+    const issuer = getAuthorizationServerUrl(req);
+    const client = await this.getAuthorizationClient(client_id, issuer);
+    if (!client) {
+      throw new Error('invalid_client: Client not found');
+    }
+
+    if (!client.response_types.includes('code')) {
+      throw new Error('unsupported_response_type: Client is not registered for authorization code response');
+    }
+
+    if (!this.oauthService.validateRedirectUri(redirect_uri, client.redirect_uris)) {
+      throw new Error('invalid_request: Invalid redirect_uri');
+    }
+
+    let userId = validatedUserId;
+    if (!userId) {
+      try {
+        const authContext = await this.tokenValidator.validateToken(userToken);
+        userId = authContext.userId;
+      } catch (error) {
+        return this.oauthService.buildErrorRedirectUrl(
+          redirect_uri,
+          'invalid_request',
+          'Invalid user token',
+          state
+        );
+      }
+    }
+
+    const code = this.oauthService.generateAuthorizationCode();
+    const scopes = this.oauthService.parseScope(scope);
+    if (!this.oauthService.isScopeSubset(scopes, client.scopes)) {
+      return this.oauthService.buildErrorRedirectUrl(
+        redirect_uri,
+        'invalid_scope',
+        'Requested scope exceeds registered client scopes',
+        state
+      );
+    }
+    const canonicalResource = getPublicUrl(req);
+    if (typeof resource === 'string' && resource.length > 0 && resource !== canonicalResource) {
+      return this.oauthService.buildErrorRedirectUrl(
+        redirect_uri,
+        'invalid_target',
+        'Unsupported resource',
+        state
+      );
+    }
+    const expiresAt = new Date(Date.now() + OAUTH_CONFIG.AUTHORIZATION_CODE_LIFETIME * 1000);
+
+    await prisma.oAuthAuthorizationCode.create({
+      data: {
+        code,
+        clientId: client_id,
+        userId,
+        redirectUri: redirect_uri,
+        scopes,
+        codeChallenge: code_challenge || null,
+        challengeMethod: code_challenge_method || null,
+        resource: canonicalResource,
+        expiresAt,
+        used: false,
+      },
+    });
+
+    return this.oauthService.buildSuccessRedirectUrl(
+      redirect_uri,
+      code,
+      state,
+      issuer
+    );
   }
 
   /**
