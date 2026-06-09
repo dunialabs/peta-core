@@ -26,6 +26,7 @@ import { approvalService, ApprovalRateLimitError } from '../services/ApprovalSer
 import { socketNotifier } from '../../socket/SocketNotifier.js';
 import { ResultCacheService } from '../core/cache/ResultCacheService.js';
 import type { CacheScopeContext } from '../core/cache/types.js';
+import { SessionStore } from '../core/SessionStore.js';
 import { getPublicUrl } from '../../utils/urlUtils.js';
 import { ModernErrorCodes, ModernMcpError, modernErrorResponse } from './ModernMcpErrors.js';
 import { modernSubscriptionBus, type ModernSubscriptionEvent } from './ModernSubscriptionBus.js';
@@ -64,6 +65,18 @@ export class ModernMcpController {
       return false;
     }
 
+    if (this.shouldPreferLegacy(req)) {
+      return false;
+    }
+
+    return this.hasModernSignal(req);
+  }
+
+  private hasModernSignal(req: Request): boolean {
+    if (!this.isMcpEndpoint(req)) {
+      return false;
+    }
+
     const protocolHeader = this.getHeader(req, 'mcp-protocol-version');
     const method = this.getBodyMethod(req.body);
     const bodyMeta = this.getRequestMetaFromUnknown(req.body);
@@ -91,7 +104,17 @@ export class ModernMcpController {
     const hasModernMeta = this.hasRequestMetaKeyFromUnknown(req.body);
     const lastEventId = this.getHeader(req, 'last-event-id');
 
-    const hasModernSignal = this.shouldHandle(req);
+    const hasModernSignal = this.hasModernSignal(req);
+
+    if (this.shouldPreferLegacy(req)) {
+      if (hasModernSignal && sessionId) {
+        this.logger.warn(
+          { sessionId, method, protocolVersion: this.getHeader(req, 'mcp-protocol-version') },
+          'Routing mixed-era request through existing legacy session',
+        );
+      }
+      return next();
+    }
 
     if (hasModernSignal && sessionId) {
       return this.sendModernError(res, req.body, new ModernMcpError(400, ModernErrorCodes.InvalidRequest, 'Mixed protocol-era signals: modern requests must not include Mcp-Session-Id'), req);
@@ -104,6 +127,24 @@ export class ModernMcpController {
     }
     return next();
   };
+
+  private shouldPreferLegacy(req: Request): boolean {
+    const method = this.getBodyMethod(req.body);
+    if (method === 'initialize') {
+      return true;
+    }
+
+    const sessionId = this.getHeader(req, 'mcp-session-id');
+    if (!sessionId || this.isModernOnlyMethod(method)) {
+      return false;
+    }
+
+    return Boolean(SessionStore.instance.getSession(sessionId));
+  }
+
+  private isModernOnlyMethod(method: string | undefined): boolean {
+    return method === 'server/discover' || method === 'subscriptions/listen';
+  }
 
   handlePost = async (req: Request, res: Response): Promise<void> => {
     const started = Date.now();

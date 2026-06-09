@@ -46,6 +46,10 @@ import {
   type ConnectionStartupDiagnostics,
 } from './ConnectionStartupDiagnostics.js';
 import { UserRequestHandler } from '../../user/UserRequestHandler.js';
+import type { DownstreamMcpClient } from './DownstreamMcpClient.js';
+import { LegacySdkDownstreamClient } from './LegacySdkDownstreamClient.js';
+import { ModernHttpDownstreamClient } from './ModernHttpDownstreamClient.js';
+import { MODERN_MCP_CONFIG } from '../../config/modernMcp.config.js';
 
 /**
  * Subscription state structure
@@ -58,6 +62,8 @@ interface SubscriptionState {
   subscribedSessions: Set<string>; // Session IDs subscribed to this resource
   downstreamSubscribed: boolean; // Whether already subscribed to downstream
 }
+
+type DownstreamMcpProtocolPreference = 'auto' | 'legacy' | 'modern';
 
 function createErrorWithCause(message: string, cause: unknown): Error {
   const error = new Error(message);
@@ -1129,6 +1135,35 @@ export class ServerManager {
         );
       }
 
+      const initialTransportType = DownstreamTransportFactory.detectTransportType(resolvedLaunchConfig);
+      const protocolPreference = this.resolveDownstreamProtocolPreference(resolvedLaunchConfig);
+      if (protocolPreference === 'modern' && initialTransportType !== 'http') {
+        throw new Error(`launchConfig.mcpProtocol=modern is only supported for HTTP downstream servers`);
+      }
+
+      if (
+        initialTransportType === 'http' &&
+        protocolPreference !== 'legacy' &&
+        MODERN_MCP_CONFIG.downstreamEnabled
+      ) {
+        try {
+          await this.createModernHttpServerConnection(serverContext, resolvedLaunchConfig);
+          startupPhaseActive = false;
+          startupDiagnostics?.deactivate();
+          return;
+        } catch (error) {
+          if (protocolPreference === 'modern') {
+            throw error;
+          }
+          this.logger.warn(
+            { error, serverId: serverEntity.serverId, url: resolvedLaunchConfig.url },
+            'Modern HTTP downstream probe failed, falling back to legacy transport',
+          );
+        }
+      } else if (protocolPreference === 'modern' && !MODERN_MCP_CONFIG.downstreamEnabled) {
+        throw new Error('launchConfig.mcpProtocol=modern requires MCP_2026_DOWNSTREAM_ENABLED=true');
+      }
+
       // 4. Create transport using dynamic transport factory
       let { transport: rawTransport, transportType } =
         await DownstreamTransportFactory.create(resolvedLaunchConfig);
@@ -1323,15 +1358,17 @@ export class ServerManager {
         }
       }
 
+      const downstreamClient = new LegacySdkDownstreamClient(client);
+
       // 7. Register downstream notifications that remain supported in shared session mode.
-      this.registerDownstreamNotificationHandlers(client, serverContext);
+      this.registerDownstreamNotificationHandlers(downstreamClient, serverContext);
 
       await client.ping({ timeout: 5000 });
 
       serverContext.status = ServerStatus.Online;
 
       // 7. Save connection to context
-      serverContext.connection = client;
+      serverContext.connection = downstreamClient;
       serverContext.transport = transport;
 
       // 8. Get server capabilities
@@ -1378,6 +1415,65 @@ export class ServerManager {
 
       throw errorToThrow;
     }
+  }
+
+  private resolveDownstreamProtocolPreference(launchConfig: Record<string, any>): DownstreamMcpProtocolPreference {
+    const value = launchConfig.mcpProtocol ?? 'auto';
+    if (value === 'auto' || value === 'legacy' || value === 'modern') {
+      return value;
+    }
+    throw new Error(`Invalid launchConfig.mcpProtocol: ${String(value)}. Expected auto, legacy, or modern.`);
+  }
+
+  private async createModernHttpServerConnection(
+    serverContext: ServerContext,
+    launchConfig: Record<string, any>,
+  ): Promise<void> {
+    const serverEntity = serverContext.serverEntity;
+    const client = await ModernHttpDownstreamClient.connect({
+      url: new URL(launchConfig.url),
+      headers: launchConfig.headers ?? {},
+      timeoutMs: launchConfig.timeout,
+    });
+
+    if (!serverEntity.transportType || serverEntity.transportType !== 'http') {
+      await ServerRepository.update(serverEntity.serverId, { transportType: 'http' });
+      serverEntity.transportType = 'http';
+    }
+
+    if (
+      serverEntity.category === ServerCategory.CustomRemote ||
+      serverEntity.category === ServerCategory.CustomStdio
+    ) {
+      const serverInfo = client.getServerVersion();
+      if (serverInfo?.name && serverInfo.name !== serverEntity.serverName) {
+        let name = serverInfo.name.trim();
+        if (serverEntity.allowUserInput) {
+          name += ' Personal';
+        }
+
+        await ServerRepository.update(serverEntity.serverId, { serverName: name });
+        serverEntity.serverName = name;
+      }
+    }
+
+    serverContext.connection = client;
+    serverContext.transport = undefined;
+    serverContext.status = ServerStatus.Online;
+    this.registerDownstreamNotificationHandlers(client, serverContext);
+    await this.updateServerCapabilities(serverContext);
+    serverContext.clearError();
+    serverContext.clearTimeout();
+
+    const serverLogger = this.serverLoggers.get(serverEntity.serverId);
+    if (serverLogger) {
+      await serverLogger.logServerLifecycle({ action: MCPEventLogType.ServerInit });
+    }
+
+    this.logger.info(
+      { serverName: serverEntity.serverName, protocolEra: 'modern', transportType: 'http' },
+      'Modern HTTP downstream server connection established',
+    );
   }
 
   private recordServerStartupError(
@@ -2095,7 +2191,7 @@ export class ServerManager {
    * Register downstream notification handlers that remain supported in shared session mode.
    * Standard reverse requests such as sampling/roots/elicitation are intentionally unsupported.
    */
-  private registerDownstreamNotificationHandlers(client: Client, serverContext: ServerContext): void {
+  private registerDownstreamNotificationHandlers(client: DownstreamMcpClient, serverContext: ServerContext): void {
     const router = this.globalRouter;
     const serverId = serverContext.serverEntity.serverId;
     this.logger.info(

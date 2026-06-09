@@ -245,8 +245,10 @@ PETA_AUTH_AUTOSTART=true
 
 # -------------------- Modern MCP 2026-07-28 Rollout (Optional) --------------------
 # Leave disabled until modern MCP clients and operators are ready.
-# Disabled modern-looking requests are rejected fail-closed before legacy routing.
+# Disabled sessionless modern-looking requests are rejected fail-closed before legacy routing.
 MCP_2026_ENABLED=false
+# Defaults to MCP_2026_ENABLED. Enables modern probing for HTTP downstream servers.
+MCP_2026_DOWNSTREAM_ENABLED=false
 MCP_2026_SUPPORTED_VERSIONS=2026-07-28
 # Optional canary allowlists; leave empty to allow all modern OAuth clients/tenants.
 # MCP_2026_ALLOWED_CLIENT_IDS=

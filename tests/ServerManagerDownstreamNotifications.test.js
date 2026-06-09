@@ -92,6 +92,7 @@ jest.unstable_mockModule('../dist/repositories/UserRepository.js', () => ({
 
 jest.unstable_mockModule('../dist/mcp/core/DownstreamTransportFactory.js', () => ({
   DownstreamTransportFactory: {
+    detectTransportType: (config) => config.type ?? (config.url ? 'http' : 'stdio'),
     create: transportFactoryCreate,
   },
 }));

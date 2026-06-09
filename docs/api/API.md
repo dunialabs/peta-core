@@ -71,7 +71,9 @@ Modern methods currently implemented by the gateway:
 - `completion/complete`
 - `subscriptions/listen`
 
-Modern requests are routed before legacy session creation. Mixed-era requests, such as `MCP-Protocol-Version: 2026-07-28` plus `Mcp-Session-Id`, return JSON-RPC `-32600`. Header/body mismatches return `-32001`. Unsupported modern versions return `-32004`. Modern-looking signals such as `_meta`, `Mcp-Method`, `Mcp-Name`, or `Mcp-Param-*` are fail-closed through modern validation rather than falling back to the legacy session controller.
+Modern requests are routed before legacy session creation, but an established legacy session remains authoritative: when `Mcp-Session-Id` maps to an active legacy session and the request method is legacy-compatible, Peta Core keeps the request on the legacy session path even if non-authoritative modern-looking headers are present. Mixed-era requests with no active legacy session still fail closed through modern validation. Header/body mismatches return `-32001`. Unsupported modern versions return `-32004`.
+
+For downstream gatewaying, Peta Core supports `launchConfig.mcpProtocol` values `auto`, `legacy`, and `modern`. HTTP downstream servers in `auto` mode are probed for modern MCP `2026-07-28` when downstream modern support is enabled, then fall back to the existing legacy SDK HTTP/SSE path if the probe fails. Stdio and SSE downstream transports remain legacy-compatible and are not forced into stateless modern mode.
 
 OAuth clients are scope-gated on the modern surface: tool methods require `mcp:tools`, resource methods and resource subscriptions require `mcp:resources`, and prompt methods and prompt subscriptions require `mcp:prompts`.
 

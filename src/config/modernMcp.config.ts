@@ -2,6 +2,7 @@ export const MODERN_MCP_PROTOCOL_VERSION = '2026-07-28';
 
 export const MODERN_MCP_CONFIG = {
   enabled: process.env.MCP_2026_ENABLED === 'true',
+  downstreamEnabled: (process.env.MCP_2026_DOWNSTREAM_ENABLED ?? process.env.MCP_2026_ENABLED) === 'true',
   supportedVersions: (process.env.MCP_2026_SUPPORTED_VERSIONS ?? MODERN_MCP_PROTOCOL_VERSION)
     .split(',')
     .map((version) => version.trim())

@@ -109,7 +109,7 @@ downstream SDK cancels the real in-flight request instead of a proxy-only ID.
 ```text
 Modern Client POSTs to /mcp
   ↓
-Protocol-era classifier rejects mixed modern/legacy signals
+Protocol-era classifier selects modern unless an active legacy session owns the request
   ↓
 Modern auth validates Authorization bearer without creating SessionStore entries
   ↓
@@ -126,11 +126,13 @@ ServerManager forwards to downstream MCP clients internally
 Response returns without Mcp-Session-Id
 ```
 
-The modern adapter is side-by-side with `ProxySession`. It preserves legacy behavior while adding stateless modern requests, `server/discover`, POST-based `subscriptions/listen`, and modern OAuth enforcement. Downstream connections remain managed by `ServerManager`; downstream session details are not exposed upstream.
+The modern adapter is side-by-side with `ProxySession`. It preserves legacy behavior while adding stateless modern requests, `server/discover`, POST-based `subscriptions/listen`, and modern OAuth enforcement. Active legacy sessions remain on the sessionful path even if a client sends extra modern-looking headers.
+
+Downstream connections remain managed by `ServerManager`; downstream session details are not exposed upstream. `ServerManager` talks to downstream servers through a `DownstreamMcpClient` abstraction. The existing SDK-backed client handles legacy stdio, SSE, and Streamable HTTP. A modern HTTP client handles stateless downstream MCP `2026-07-28` when enabled and selected by `launchConfig.mcpProtocol`. Stdio and SSE downstream transports remain legacy-compatible in this phase.
 
 Modern resource update subscriptions preserve downstream scope isolation. `GlobalRequestRouter` publishes resource update events with the originating server context id, and the modern subscription adapter resolves that scope before rewriting gateway URIs so temporary per-user downstream resource updates cannot be delivered through a managed-server modern subscription.
 
-The installed `@modelcontextprotocol/sdk` currently reports `LATEST_PROTOCOL_VERSION: 2025-11-25` and supported versions through `2025-11-25`, so Peta Core does not depend on SDK latest-version constants for MCP `2026-07-28` ingress. Local modern validation/error/request types live under `src/mcp/modern/`, while downstream and legacy connections continue using the SDK-backed flow.
+The installed `@modelcontextprotocol/sdk` currently reports `LATEST_PROTOCOL_VERSION: 2025-11-25` and supported versions through `2025-11-25`, so Peta Core does not depend on SDK latest-version constants for MCP `2026-07-28` ingress or modern HTTP downstream calls. Local modern validation/error/request types live under `src/mcp/modern/`; SDK-backed downstream connections remain available for legacy servers.
 
 #### 2. Reverse Request Flow (Downstream → Client)
 

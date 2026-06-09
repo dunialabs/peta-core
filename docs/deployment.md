@@ -190,11 +190,14 @@ If you are certain you will not use Peta-managed credentials, set `PETA_AUTH_AUT
 | --------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
 | `LAZY_START_ENABLED`  |          | `true`  | Enable lazy loading for MCP servers. When true, servers stay managed in memory, delay startup until first use, and idle/unexpected closes can return them to `Sleeping` for later wake-up. |
 | `MCP_2026_ENABLED` | | `false` | Enable stateless MCP `2026-07-28` handling on `/mcp` and `/mcp/public`. Leave disabled until clients and operators are ready. |
+| `MCP_2026_DOWNSTREAM_ENABLED` | | same as `MCP_2026_ENABLED` | Enable probing and use of stateless MCP `2026-07-28` for HTTP downstream servers when `launchConfig.mcpProtocol` is `auto` or `modern`. |
 | `MCP_2026_SUPPORTED_VERSIONS` | | `2026-07-28` | Comma-separated allowlist of modern MCP protocol versions accepted by the modern adapter. |
 | `MCP_2026_ALLOWED_CLIENT_IDS` | | | Optional comma-separated OAuth client allowlist for canary rollout. Empty allows all modern OAuth clients. |
 | `MCP_2026_ALLOWED_TENANT_IDS` | | | Optional comma-separated tenant allowlist for canary rollout. Empty allows all tenants. |
 
-Modern MCP support is a runtime flag. Disabling `MCP_2026_ENABLED` rejects modern-looking requests fail-closed before they can fall through to the legacy sessionful MCP surface, without rolling back the additive OAuth metadata migration.
+Modern MCP support is a runtime flag. Disabling `MCP_2026_ENABLED` rejects sessionless modern-looking upstream requests fail-closed before they can fall through to the legacy sessionful MCP surface, without rolling back the additive OAuth metadata migration. Active legacy sessions continue using the legacy path.
+
+Downstream server launch configs may set `mcpProtocol` to `auto`, `legacy`, or `modern`. The default `auto` probes HTTP downstream servers for modern MCP when `MCP_2026_DOWNSTREAM_ENABLED=true`, then falls back to the legacy SDK HTTP/SSE path if the probe fails. Set `legacy` to skip probing. Set `modern` only for HTTP downstream servers that must use stateless MCP `2026-07-28`; non-HTTP modern configs are rejected.
 
 #### Cloudflared DDNS (optional)
 

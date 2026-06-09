@@ -1,6 +1,5 @@
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { DangerLevel, ServerStatus } from '../../types/enums.js';
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { ListPromptsResult, ListResourcesResult, ListToolsResult, ServerCapabilities, Tool, Resource, Prompt, ListResourceTemplatesResult, ResourceTemplate, McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { Server } from '@prisma/client';
 import { ServerConfigCapabilities, ToolCapabilityConfig, ResourceCapabilityConfig, PromptCapabilityConfig, ServerConfigWithEnabled } from '../types/mcp.js';
@@ -10,6 +9,7 @@ import { createLogger } from '../../logger/index.js';
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ServerManager } from "./ServerManager.js";
 import { IntercomInvalidTokenError } from '../auth/IntercomTokenHelper.js';
+import type { DownstreamMcpClient } from './DownstreamMcpClient.js';
 
 /**
  * Downstream Server context object
@@ -31,7 +31,7 @@ export class ServerContext {
   resourceTemplates?: ListResourceTemplatesResult;
   prompts?: ListPromptsResult;
   lastSync: Date;
-  connection: Client | undefined; // MCP SDK Server/Client object
+  connection: DownstreamMcpClient | undefined;
   transport: Transport |  undefined;
   readonly maxTimeoutCount: number = 3;
   timeoutCount: number = 0;

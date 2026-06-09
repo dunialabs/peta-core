@@ -12,14 +12,23 @@ jest.unstable_mockModule('../dist/log/LogService.js', () => ({
   LogService: { getInstance: () => ({ generateUniformRequestId: jest.fn(() => 'modern-test'), enqueueLog: jest.fn() }) },
 }));
 
+const getSessionMock = jest.fn();
+jest.unstable_mockModule('../dist/mcp/core/SessionStore.js', () => ({
+  SessionStore: { instance: { getSession: getSessionMock } },
+}));
+
 const { ModernMcpController } = await import('../dist/mcp/modern/ModernMcpController.js');
 
 describe('ModernProtocolClassifier', () => {
-  test('routes malformed _meta through modern validation', () => {
+  beforeEach(() => {
+    getSessionMock.mockReset();
+  });
+
+  test('leaves initialize with _meta on legacy path', () => {
     const controller = new ModernMcpController();
     const req = { originalUrl: '/mcp', headers: {}, body: { jsonrpc: '2.0', id: 1, method: 'initialize', params: { _meta: 'bad' } } };
 
-    expect(controller.shouldHandle(req)).toBe(true);
+    expect(controller.shouldHandle(req)).toBe(false);
   });
 
   test('leaves plain legacy initialize on legacy path', () => {
@@ -43,5 +52,29 @@ describe('ModernProtocolClassifier', () => {
 
     expect(controller.shouldHandle(malformed)).toBe(true);
     expect(controller.shouldHandle(future)).toBe(true);
+  });
+
+  test('routes mixed-era requests through an existing legacy session', () => {
+    getSessionMock.mockReturnValue({ sessionId: 'session-1' });
+    const controller = new ModernMcpController();
+    const req = {
+      originalUrl: '/mcp',
+      headers: { 'mcp-session-id': 'session-1', 'mcp-protocol-version': '2026-07-28' },
+      body: { jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} },
+    };
+
+    expect(controller.shouldHandle(req)).toBe(false);
+  });
+
+  test('keeps stale mixed-era sessions on the modern validation path', () => {
+    getSessionMock.mockReturnValue(undefined);
+    const controller = new ModernMcpController();
+    const req = {
+      originalUrl: '/mcp',
+      headers: { 'mcp-session-id': 'stale-session', 'mcp-protocol-version': '2026-07-28' },
+      body: { jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} },
+    };
+
+    expect(controller.shouldHandle(req)).toBe(true);
   });
 });
