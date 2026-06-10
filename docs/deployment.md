@@ -199,6 +199,8 @@ Modern MCP support is a runtime flag. Disabling `MCP_2026_ENABLED` rejects sessi
 
 Downstream server launch configs may set `mcpProtocol` to `auto`, `legacy`, or `modern`. The default `auto` probes HTTP downstream servers for modern MCP when `MCP_2026_DOWNSTREAM_ENABLED=true`, then falls back to the legacy SDK HTTP/SSE path if the probe fails. Set `legacy` to skip probing. Set `modern` only for HTTP downstream servers that must use stateless MCP `2026-07-28`; non-HTTP modern configs are rejected.
 
+For local compatibility verification, `scripts/compat-smoke/run.mjs` starts fixture downstream MCP servers and a temporary Peta Core instance, seeds isolated `compat-smoke-*` server records, and performs real `/mcp` calls across legacy and modern upstream/downstream combinations. Run it with a test owner token via `PETA_COMPAT_OWNER_TOKEN=<token> node scripts/compat-smoke/run.mjs`. The generated `scripts/compat-smoke/report.json` is a local diagnostic artifact and is not committed.
+
 #### Cloudflared DDNS (optional)
 
 | Name               | Required | Default | Description                                         |

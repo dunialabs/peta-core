@@ -56,6 +56,7 @@ import {
   type ClientNotificationSchema,
   ErrorCode,
   McpError,
+  SUPPORTED_PROTOCOL_VERSIONS,
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { ClientSession } from './ClientSession.js';
@@ -372,7 +373,7 @@ export class ProxySession {
         return;
       }
 
-      await transport.handleRequest(req, res, body);
+      await this.withLegacyCompatibleHeaders(req, () => transport.handleRequest(req, res, body));
     } catch (error) {
       this.logger.error({ error }, 'ProxySession error');
       if (!res.headersSent) {
@@ -386,6 +387,64 @@ export class ProxySession {
         });
       } else {
         throw error;
+      }
+    }
+  }
+
+  private async withLegacyCompatibleHeaders<T>(req: Request, callback: () => Promise<T>): Promise<T> {
+    const removedHeaders = new Map<string, string | string[] | undefined>();
+    const rawHeadersSnapshot = Array.isArray(req.rawHeaders) ? [...req.rawHeaders] : undefined;
+    const headersDistinct = (req as Request & { headersDistinct?: Record<string, string[]> }).headersDistinct;
+    const removedDistinctHeaders = new Map<string, string[] | undefined>();
+    const removeHeader = (name: string) => {
+      removedHeaders.set(name, req.headers[name]);
+      delete req.headers[name];
+      if (headersDistinct) {
+        removedDistinctHeaders.set(name, headersDistinct[name]);
+        delete headersDistinct[name];
+      }
+      if (Array.isArray(req.rawHeaders)) {
+        for (let index = req.rawHeaders.length - 2; index >= 0; index -= 2) {
+          if (req.rawHeaders[index]?.toLowerCase() === name) {
+            req.rawHeaders.splice(index, 2);
+          }
+        }
+      }
+    };
+
+    const protocolVersion = req.headers['mcp-protocol-version'];
+    if (
+      typeof protocolVersion === 'string' &&
+      protocolVersion.length > 0 &&
+      !SUPPORTED_PROTOCOL_VERSIONS.includes(protocolVersion)
+    ) {
+      removeHeader('mcp-protocol-version');
+    }
+
+    removeHeader('mcp-method');
+    removeHeader('mcp-name');
+
+    try {
+      return await callback();
+    } finally {
+      for (const [name, value] of removedHeaders.entries()) {
+        if (value === undefined) {
+          delete req.headers[name];
+        } else {
+          req.headers[name] = value;
+        }
+      }
+      if (headersDistinct) {
+        for (const [name, value] of removedDistinctHeaders.entries()) {
+          if (value === undefined) {
+            delete headersDistinct[name];
+          } else {
+            headersDistinct[name] = value;
+          }
+        }
+      }
+      if (rawHeadersSnapshot) {
+        req.rawHeaders.splice(0, req.rawHeaders.length, ...rawHeadersSnapshot);
       }
     }
   }

@@ -126,7 +126,7 @@ ServerManager forwards to downstream MCP clients internally
 Response returns without Mcp-Session-Id
 ```
 
-The modern adapter is side-by-side with `ProxySession`. It preserves legacy behavior while adding stateless modern requests, `server/discover`, POST-based `subscriptions/listen`, and modern OAuth enforcement. Active legacy sessions remain on the sessionful path even if a client sends extra modern-looking headers.
+The modern adapter is side-by-side with `ProxySession`. It preserves legacy behavior while adding stateless modern requests, `server/discover`, POST-based `subscriptions/listen`, and modern OAuth enforcement. Active legacy sessions remain on the sessionful path even if a client sends extra modern-looking headers. Before those requests are handed to the SDK-backed legacy upstream transport, `ProxySession` removes non-authoritative modern-only headers that the installed 2025-era SDK would otherwise reject, while preserving supported legacy protocol-version headers.
 
 Downstream connections remain managed by `ServerManager`; downstream session details are not exposed upstream. `ServerManager` talks to downstream servers through a `DownstreamMcpClient` abstraction. The existing SDK-backed client handles legacy stdio, SSE, and Streamable HTTP. A modern HTTP client handles stateless downstream MCP `2026-07-28` when enabled and selected by `launchConfig.mcpProtocol`. Stdio and SSE downstream transports remain legacy-compatible in this phase.
 
