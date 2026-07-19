@@ -394,6 +394,7 @@ Permission verification is performed in ConfigController. Requests that do not m
 - If `permissions` does not include a `serverId`, availability falls back to `server.publicAccess` (true allows access)
 - If `permissions` includes a `serverId`, `permissions[serverId].enabled` takes precedence over `publicAccess`
 - Final tool/resource/prompt visibility is the merge of server capabilities and admin permissions; you can only override `enabled` for existing capability items
+- Empty `tools`/`resources`/`prompts` maps mean "no per-capability overrides"; an enabled server entry with empty maps still grants the server's enabled capabilities
 
 ---
 
@@ -445,6 +446,8 @@ null
 - **Replace semantics**: `permissions` replaces the user's existing permissions (not a patch)
 - If only some serverIds are provided, others are removed and fall back to `publicAccess`
 - Update permissions field in user database
+- Adding, removing, enabling, or disabling a server entry is persisted even when its capability maps are empty
+- Server-entry additions/removals invalidate all three capability lists, while capability-override additions/removals invalidate the affected list regardless of `enabled`; omitted entries inherit server defaults
 - If user has active sessions, push permission change notifications in real-time:
   - Send `tools/list_changed` when tools change
   - Send `resources/list_changed` when resources change

@@ -1,3 +1,4 @@
+import type { Prisma, User } from '@prisma/client';
 import { SessionStore } from '../../mcp/core/SessionStore.js';
 import { UserRepository } from '../../repositories/UserRepository.js';
 import { DisconnectReason } from '../../types/auth.types.js';
@@ -196,18 +197,21 @@ export class UserHandler {
     }
 
     // Prepare update data
-    const updateData: any = {};
+    const updateData: Prisma.UserUpdateInput = {};
     if (name !== undefined) updateData.name = name;
     if (notes !== undefined) updateData.notes = notes;
-    if (permissions !== undefined) {
-      updateData.permissions = typeof permissions === 'string' ? permissions : JSON.stringify(permissions);
-    }
-    
     if (encryptedToken !== undefined) updateData.encryptedToken = encryptedToken;
 
     if (status !== undefined) updateData.status = status;
 
-    const user = await UserRepository.update(userId, updateData);
+    const user = permissions === undefined
+      ? await UserRepository.update(userId, updateData)
+      : await this.updateUserPermissions(
+        userId,
+        typeof permissions === 'string' ? permissions : JSON.stringify(permissions),
+        updateData,
+        existingUser,
+      );
 
     // Log admin operation
     LogService.getInstance().enqueueLog({
@@ -319,25 +323,30 @@ export class UserHandler {
     return;
   }
 
-  private async updateUserPermissions(targetId: string, permissions: string): Promise<any> {
+  private async updateUserPermissions(
+    targetId: string,
+    permissions: string,
+    updateData: Prisma.UserUpdateInput = {},
+    existingUser?: User,
+  ): Promise<User> {
 
     // Find user
-    const user = await UserRepository.findByUserId(targetId);
+    const user = existingUser ?? await UserRepository.findByUserId(targetId);
     if (!user) {
       throw new AdminError(`User ${targetId} not found`, AdminErrorCode.USER_NOT_FOUND);
     }
 
-    if (permissions === user.permissions) return;
+    if (permissions === user.permissions) {
+      if (Object.keys(updateData).length === 0) return user;
+      return await UserRepository.update(targetId, updateData);
+    }
 
     // Get old permissions (for logging)
     const permissionsJson = JSON.parse(permissions) as Permissions;
     const oldPermissions = JSON.parse(user.permissions) as Permissions;
     const { toolsChanged, resourcesChanged, promptsChanged } = CapabilitiesService.comparePermissions(oldPermissions, permissionsJson);
-    if (!toolsChanged && !resourcesChanged && !promptsChanged) {
-      return;
-    }
 
-    await UserRepository.update(targetId, {permissions: permissions});
+    const updatedUser = await UserRepository.update(targetId, { ...updateData, permissions });
 
     // Get user sessions
     const userSessions = SessionStore.instance.getUserSessions(targetId);
@@ -364,6 +373,6 @@ export class UserHandler {
       this.logger.error({ error, targetId }, 'Failed to notify permission changed via Socket for user');
     }
 
-    return null;
+    return updatedUser;
   }
 }

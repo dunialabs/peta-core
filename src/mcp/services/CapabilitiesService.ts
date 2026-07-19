@@ -267,43 +267,14 @@ export class CapabilitiesService {
     // 1. Check for Server additions
     for (const serverId of newKeys) {
       if (!oldPerms.hasOwnProperty(serverId)) {
-        // Server added: if enabled=true, same as rule 1
-        if (newPerms[serverId].enabled === true) {
-          if (!toolsChanged) {
-            toolsChanged = this.hasAnyCapabilityEnabled(newPerms[serverId].tools);
-          }
-          if (!resourcesChanged) {
-            resourcesChanged = this.hasAnyCapabilityEnabled(newPerms[serverId].resources);
-          }
-          if (!promptsChanged) {
-            promptsChanged = this.hasAnyCapabilityEnabled(newPerms[serverId].prompts);
-          }
-
-          if (toolsChanged && resourcesChanged && promptsChanged) {
-            return { toolsChanged, resourcesChanged, promptsChanged };
-          }
-        }
+        return { toolsChanged: true, resourcesChanged: true, promptsChanged: true };
       }
     }
 
     // 2. Check for Server deletions
     for (const serverId of oldKeys) {
       if (!newPerms.hasOwnProperty(serverId)) {
-        // Server deleted: if originally enabled=true, same as rule 2
-        if (oldPerms[serverId].enabled === true) {
-          if (!toolsChanged) {
-            toolsChanged = this.hasAnyCapabilityEnabled(oldPerms[serverId].tools);
-          }
-          if (!resourcesChanged) {
-            resourcesChanged = this.hasAnyCapabilityEnabled(oldPerms[serverId].resources);
-          }
-          if (!promptsChanged) {
-            promptsChanged = this.hasAnyCapabilityEnabled(oldPerms[serverId].prompts);
-          }
-          if (toolsChanged && resourcesChanged && promptsChanged) {
-            return { toolsChanged, resourcesChanged, promptsChanged };
-          }
-        }
+        return { toolsChanged: true, resourcesChanged: true, promptsChanged: true };
       }
     }
 
@@ -314,32 +285,7 @@ export class CapabilitiesService {
         const newServer = newPerms[serverId];
 
         if (oldServer.enabled !== newServer.enabled) {
-          if (oldServer.enabled === false && newServer.enabled === true) {
-            // Rule 1: Changed from enabled=false to enabled=true, check newPermissions
-            if (!toolsChanged) {
-              toolsChanged = this.hasAnyCapabilityEnabled(newServer.tools);
-            }
-            if (!resourcesChanged) {
-              resourcesChanged = this.hasAnyCapabilityEnabled(newServer.resources);
-            }
-            if (!promptsChanged) {
-              promptsChanged = this.hasAnyCapabilityEnabled(newServer.prompts);
-            }
-          } else if (oldServer.enabled === true && newServer.enabled === false) {
-            // Rule 2: Changed from enabled=true to enabled=false, check oldPermissions
-            if (!toolsChanged) {
-              toolsChanged = this.hasAnyCapabilityEnabled(oldServer.tools);
-            }
-            if (!resourcesChanged) {
-              resourcesChanged = this.hasAnyCapabilityEnabled(oldServer.resources);
-            }
-            if (!promptsChanged) {
-              promptsChanged = this.hasAnyCapabilityEnabled(oldServer.prompts);
-            }
-          }
-          if (toolsChanged && resourcesChanged && promptsChanged) {
-            return { toolsChanged, resourcesChanged, promptsChanged };
-          }
+          return { toolsChanged: true, resourcesChanged: true, promptsChanged: true };
         }
       }
     }
@@ -372,23 +318,6 @@ export class CapabilitiesService {
   }
 
   /**
-   * Check if any item has enabled=true
-   *
-   * @param capabilities Capability configuration object
-   * @returns Whether any item is enabled
-   */
-  static hasAnyCapabilityEnabled(capabilities: { [name: string]: { enabled: boolean } }): boolean {
-    if (!capabilities) return false;
-
-    for (const item of Object.values(capabilities)) {
-      if (item.enabled === true) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
    * Check if capability configuration has changes that actually affect user available functionality
    *
    * @param oldCapabilities Old capability configuration
@@ -402,21 +331,15 @@ export class CapabilitiesService {
     const oldKeys = Object.keys(oldCapabilities || {});
     const newKeys = Object.keys(newCapabilities || {});
 
-    // Check for added items (only count as change if added and enabled=true)
     for (const key of newKeys) {
       if (!oldCapabilities.hasOwnProperty(key)) {
-        if (newCapabilities[key].enabled === true) {
-          return true;
-        }
+        return true;
       }
     }
 
-    // Check for deleted items (only count as change if deleted and originally enabled=true)
     for (const key of oldKeys) {
       if (!newCapabilities.hasOwnProperty(key)) {
-        if (oldCapabilities[key].enabled === true) {
-          return true;
-        }
+        return true;
       }
     }
 
