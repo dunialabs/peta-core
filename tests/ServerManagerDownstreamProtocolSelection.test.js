@@ -9,6 +9,7 @@ const updateServer = jest.fn(async (serverId, data) => ({ serverId, ...data }));
 const findAllServers = jest.fn().mockResolvedValue([]);
 const transportFactoryCreate = jest.fn();
 const modernConnect = jest.fn();
+let legacyServerInfo;
 
 class FakeClient {
   async connect(transport) {
@@ -17,7 +18,7 @@ class FakeClient {
 
   async ping() {}
   async close() {}
-  getServerVersion() { return undefined; }
+  getServerVersion() { return legacyServerInfo; }
   getServerCapabilities() { return {}; }
   setNotificationHandler() {}
   async listTools() { return { tools: [] }; }
@@ -164,10 +165,12 @@ describe('ServerManager downstream protocol selection', () => {
     manager.initializeAuthentication = jest.fn(async () => {});
     manager.updateServerCapabilities = jest.fn(async () => {});
     findByServerId.mockReset();
+    findAllServers.mockReset().mockResolvedValue([]);
     updateServer.mockClear();
     transportFactoryCreate.mockReset();
     modernConnect.mockReset();
     modernConnect.mockResolvedValue(fakeModernClient());
+    legacyServerInfo = undefined;
     transportFactoryCreate.mockResolvedValue({
       transport: { send: jest.fn(async () => {}), close: jest.fn(async () => {}) },
       transportType: 'http',
@@ -225,5 +228,79 @@ describe('ServerManager downstream protocol selection', () => {
     await expect(manager.addServer(server, 'owner-token')).rejects.toThrow('launchConfig.mcpProtocol=modern is only supported for HTTP downstream servers');
     expect(modernConnect).not.toHaveBeenCalled();
     expect(transportFactoryCreate).not.toHaveBeenCalled();
+  });
+
+  test('preserves the configured name when a modern downstream reports a different name', async () => {
+    const server = makeServer({ serverName: 'Operator Name' });
+    manager.decryptLaunchConfig = jest.fn(async () => JSON.stringify({ url: 'https://downstream.example/mcp', mcpProtocol: 'modern' }));
+
+    const context = await manager.addServer(server, 'owner-token');
+
+    expect(context.serverEntity.serverName).toBe('Operator Name');
+  });
+
+  test('fills a blank configured name from modern downstream metadata', async () => {
+    const server = makeServer({ serverName: '   ' });
+    manager.decryptLaunchConfig = jest.fn(async () => JSON.stringify({ url: 'https://downstream.example/mcp', mcpProtocol: 'modern' }));
+
+    const context = await manager.addServer(server, 'owner-token');
+
+    expect(context.serverEntity.serverName).toBe('Modern Downstream');
+    expect(updateServer).toHaveBeenCalledWith('protocol-server', { serverName: 'Modern Downstream' });
+  });
+
+  test('preserves the configured name when a legacy downstream reports a different name', async () => {
+    const server = makeServer({ serverName: 'Operator Name', transportType: 'http' });
+    legacyServerInfo = { name: 'Legacy Downstream', version: '1.0.0' };
+    manager.decryptLaunchConfig = jest.fn(async () => JSON.stringify({ url: 'https://downstream.example/mcp', mcpProtocol: 'legacy' }));
+
+    const context = await manager.addServer(server, 'owner-token');
+
+    expect(context.serverEntity.serverName).toBe('Operator Name');
+  });
+
+  test('fills a blank configured name from legacy downstream metadata', async () => {
+    const server = makeServer({ serverName: '', transportType: 'http' });
+    legacyServerInfo = { name: 'Legacy Downstream', version: '1.0.0' };
+    manager.decryptLaunchConfig = jest.fn(async () => JSON.stringify({ url: 'https://downstream.example/mcp', mcpProtocol: 'legacy' }));
+
+    const context = await manager.addServer(server, 'owner-token');
+
+    expect(context.serverEntity.serverName).toBe('Legacy Downstream');
+    expect(updateServer).toHaveBeenCalledWith('protocol-server', { serverName: 'Legacy Downstream' });
+  });
+
+  test('keys health status by server ID when configured names are duplicated', async () => {
+    findAllServers.mockResolvedValue([
+      makeServer({ serverId: 'server-a', serverName: 'Shared Name' }),
+      makeServer({ serverId: 'server-b', serverName: 'Shared Name' }),
+    ]);
+    manager.serverContexts.set('server-a', { status: ServerStatus.Online });
+    manager.serverContexts.set('server-b', { status: ServerStatus.Online });
+
+    await expect(manager.getAllServersStatus()).resolves.toEqual({
+      'server-a': 'Online',
+      'server-b': 'Online',
+    });
+  });
+
+  test('keys personal server health by server ID when configured names are duplicated', async () => {
+    findAllServers.mockResolvedValue([
+      makeServer({ serverId: 'server-a', serverName: 'Shared Name', allowUserInput: true }),
+      makeServer({ serverId: 'server-b', serverName: 'Shared Name', allowUserInput: true }),
+    ]);
+    manager.temporaryServers.set('server-a:user-1', {
+      serverEntity: { serverId: 'server-a' },
+      status: ServerStatus.Online,
+    });
+    manager.temporaryServers.set('server-b:user-2', {
+      serverEntity: { serverId: 'server-b' },
+      status: ServerStatus.Online,
+    });
+
+    await expect(manager.getAllServersStatus()).resolves.toEqual({
+      'server-a': 'Online(1)',
+      'server-b': 'Online(1)',
+    });
   });
 });

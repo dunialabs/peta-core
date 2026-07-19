@@ -833,7 +833,7 @@ null
 **Request Parameters** (data):
 
 - `serverId` (string, required): Server ID (unique identifier)
-- `serverName` (string, optional): Server name, defaults to empty string
+- `serverName` (string, optional): Operator-managed display name, defaults to empty string. A custom downstream may fill an empty name from `serverInfo.name`, but reconnects do not overwrite a non-empty configured name
 - `enabled` (boolean, optional): Whether enabled, defaults to `true`
 - `launchConfig` (string, **required**): Encrypted launch configuration JSON (EncryptedData); must be non-empty and not `{}`; encrypted with Owner token
 - `capabilities` (string or object, optional): **ignored on create**; use `UPDATE_SERVER_CAPABILITIES (2003)` to set capabilities
@@ -1006,7 +1006,7 @@ null
 **Request Parameters** (data):
 
 - `serverId` (string, required): Server ID
-- `serverName` (string, optional): Server name
+- `serverName` (string, optional): Operator-managed display name; downstream `serverInfo.name` does not overwrite a non-empty configured value
 - `launchConfig` (string or object, optional): Launch configuration encrypted with owner token. **Not updatable for Template with allowUserInput=true**
 - `capabilities` (string or object, optional): Capability configuration. **Merge semantics; omitted fields are not removed**
 - `enabled` (boolean, optional): Whether enabled

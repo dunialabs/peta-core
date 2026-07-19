@@ -217,4 +217,9 @@ Explicit `DELETE /mcp` termination records a short-lived in-memory reconnect tom
    - Examples: `filesystem::read_file`, `database::users`
    - Prevents resource name conflicts between different servers
 
+7. **Stable Downstream Identity**
+   - `serverId` is the unique key for runtime registries, permissions, namespaces, and health output
+   - `serverName` is an operator-managed display label and may be duplicated
+   - Custom downstream `serverInfo.name` only fills an empty configured label; reconnects do not overwrite an operator-supplied name
+
 ---

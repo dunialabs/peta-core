@@ -1345,7 +1345,7 @@ export class ServerManager {
         serverEntity.category === ServerCategory.CustomStdio
       ) {
         const serverInfo = client.getServerVersion();
-        if (serverInfo?.name && serverInfo.name !== serverEntity.serverName) {
+        if (serverInfo?.name && serverEntity.serverName.trim() === '') {
           let name = serverInfo.name.trim();
           if (serverEntity.allowUserInput) {
             name += ' Personal';
@@ -1446,7 +1446,7 @@ export class ServerManager {
       serverEntity.category === ServerCategory.CustomStdio
     ) {
       const serverInfo = client.getServerVersion();
-      if (serverInfo?.name && serverInfo.name !== serverEntity.serverName) {
+      if (serverInfo?.name && serverEntity.serverName.trim() === '') {
         let name = serverInfo.name.trim();
         if (serverEntity.allowUserInput) {
           name += ' Personal';
@@ -2327,8 +2327,8 @@ export class ServerManager {
     return results;
   }
 
-  async getAllServersStatus(): Promise<{ [serverName: string]: string }> {
-    const results: { [serverName: string]: string } = {};
+  async getAllServersStatus(): Promise<{ [serverId: string]: string }> {
+    const results: { [serverId: string]: string } = {};
     const servers = await this.getAllServers();
     for (const server of servers) {
       if (server.allowUserInput) {
@@ -2341,19 +2341,19 @@ export class ServerManager {
             statusCount[context.status.toString()] =
               (statusCount[context.status.toString()] || 0) + 1;
           }
-          results[server.serverName] = Object.entries(statusCount)
+          results[server.serverId] = Object.entries(statusCount)
             .map(([status, count]) => `${ServerStatus[Number.parseInt(status)]}(${count})`)
             .join(', ');
         } else {
-          results[server.serverName] = ServerStatus[ServerStatus.Offline];
+          results[server.serverId] = ServerStatus[ServerStatus.Offline];
         }
       } else {
         const context = this.serverContexts.get(server.serverId);
         if (context) {
-          results[server.serverName] = ServerStatus[context.status];
+          results[server.serverId] = ServerStatus[context.status];
           continue;
         } else {
-          results[server.serverName] = ServerStatus[ServerStatus.Offline];
+          results[server.serverId] = ServerStatus[ServerStatus.Offline];
         }
       }
     }

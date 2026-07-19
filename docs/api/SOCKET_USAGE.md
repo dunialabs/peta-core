@@ -1186,10 +1186,15 @@ Response example:
     "onlineUsers": 3,
     "totalConnections": 5
   },
-  "servers": { ... },
+  "servers": {
+    "github-primary": "Online",
+    "github-secondary": "Online"
+  },
   "memory": { ... }
 }
 ```
+
+The `servers` object is keyed by unique `serverId`, not the display `serverName`, so servers may share the same configured or downstream-reported name without colliding.
 
 ---
 
