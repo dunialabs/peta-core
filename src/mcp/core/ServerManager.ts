@@ -61,6 +61,7 @@ interface SubscriptionState {
   scopeId: string;
   subscribedSessions: Set<string>; // Session IDs subscribed to this resource
   downstreamSubscribed: boolean; // Whether already subscribed to downstream
+  downstreamSubscription?: Promise<void>;
 }
 
 type DownstreamMcpProtocolPreference = 'auto' | 'legacy' | 'modern';
@@ -307,6 +308,13 @@ export class ServerManager {
       await context.closeConnection(status);
     } catch (error) {
       this.logger.error({ error, ...logContext }, 'Error closing server connection');
+    }
+
+    for (const state of this.resourceSubscriptions.values()) {
+      if (state.scopeId === context.id) {
+        state.downstreamSubscribed = false;
+        state.downstreamSubscription = undefined;
+      }
     }
   }
 
@@ -1152,7 +1160,7 @@ export class ServerManager {
           startupDiagnostics?.deactivate();
           return;
         } catch (error) {
-          if (protocolPreference === 'modern') {
+          if (protocolPreference === 'modern' || this.isModernProtocolError(error)) {
             throw error;
           }
           this.logger.warn(
@@ -1425,6 +1433,10 @@ export class ServerManager {
     throw new Error(`Invalid launchConfig.mcpProtocol: ${String(value)}. Expected auto, legacy, or modern.`);
   }
 
+  private isModernProtocolError(error: unknown): boolean {
+    return error instanceof McpError && [-32020, -32021, -32022].includes(error.code);
+  }
+
   private async createModernHttpServerConnection(
     serverContext: ServerContext,
     launchConfig: Record<string, any>,
@@ -1432,7 +1444,12 @@ export class ServerManager {
     const serverEntity = serverContext.serverEntity;
     const client = await ModernHttpDownstreamClient.connect({
       url: new URL(launchConfig.url),
-      headers: launchConfig.headers ?? {},
+      headers: {
+        ...launchConfig.headers,
+        ...(serverContext.getCurrentToken()
+          ? { Authorization: `Bearer ${serverContext.getCurrentToken()}` }
+          : {}),
+      },
       timeoutMs: launchConfig.timeout,
     });
 
@@ -1459,9 +1476,9 @@ export class ServerManager {
 
     serverContext.connection = client;
     serverContext.transport = undefined;
-    serverContext.status = ServerStatus.Online;
     this.registerDownstreamNotificationHandlers(client, serverContext);
     await this.updateServerCapabilities(serverContext);
+    serverContext.status = ServerStatus.Online;
     serverContext.clearError();
     serverContext.clearTimeout();
 
@@ -1499,11 +1516,13 @@ export class ServerManager {
     }
 
     const client = serverContext.connection;
+    let supportsResourceSubscriptions = false;
 
     try {
       const capabilities = client.getServerCapabilities();
 
       if (capabilities) {
+        supportsResourceSubscriptions = capabilities.resources?.subscribe === true;
         serverContext.updateCapabilities(capabilities);
 
         const serverCapabilities = serverContext.capabilitiesConfig;
@@ -1681,18 +1700,20 @@ export class ServerManager {
         }
 
         if (toolsEmpty && resourcesEmpty && promptsEmpty) {
-          try {
-            const configTemplateValue = serverContext.serverEntity.configTemplate!;
-            const template = JSON.parse(configTemplateValue);
-            const config = template?.toolDefaultConfig;
-            if (config !== undefined) {
-              const defaultConfig = typeof config === 'string' ? JSON.parse(config) : config;
-              serverContext.updateCapabilitiesConfig(
-                JSON.stringify({ tools: defaultConfig, resources: {}, prompts: {} }),
-              );
+          const configTemplateValue = serverContext.serverEntity.configTemplate?.trim();
+          if (configTemplateValue) {
+            try {
+              const template = JSON.parse(configTemplateValue);
+              const config = template?.toolDefaultConfig;
+              if (config !== undefined) {
+                const defaultConfig = typeof config === 'string' ? JSON.parse(config) : config;
+                serverContext.updateCapabilitiesConfig(
+                  JSON.stringify({ tools: defaultConfig, resources: {}, prompts: {} }),
+                );
+              }
+            } catch (error) {
+              this.logger.error({ error }, 'Invalid configTemplate JSON');
             }
-          } catch (error) {
-            this.logger.error({ error }, 'Invalid configTemplate JSON');
           }
 
           const newCapabilities = serverContext.getMcpCapabilities();
@@ -1723,6 +1744,10 @@ export class ServerManager {
         { error, serverName: serverContext.serverEntity.serverName },
         'Failed to get capabilities',
       );
+    }
+
+    if (supportsResourceSubscriptions) {
+      await this.restoreResourceSubscriptions(serverContext, client);
     }
   }
 
@@ -2120,6 +2145,7 @@ export class ServerManager {
   }> {
     // Create connections for all serverContexts concurrently
     const connectPromises: Promise<Server>[] = [];
+    const initializationFailures: Server[] = [];
 
     const enabledServers = await this.getAllEnabledServers();
     const contexts: ServerContext[] = [];
@@ -2154,6 +2180,7 @@ export class ServerManager {
         contexts.push(serverContext);
         this.logger.info({ serverName: server.serverName }, 'Server context initialized');
       } catch (error) {
+        initializationFailures.push(server);
         this.logger.error({ error, serverName: server.serverName }, 'Failed to initialize server');
       }
     }
@@ -2161,8 +2188,7 @@ export class ServerManager {
     for (const serverContext of contexts) {
       connectPromises.push(
         this.createServerConnection(serverContext, token)
-          .then(() => serverContext.serverEntity)
-          .catch((error) => serverContext.serverEntity),
+          .then(() => serverContext.serverEntity),
       );
     }
     const results = await Promise.allSettled(connectPromises);
@@ -2170,9 +2196,12 @@ export class ServerManager {
     const successServers = results
       .filter((result) => result.status === 'fulfilled')
       .map((result) => result.value);
-    const failedServers = results
-      .filter((result) => result.status === 'rejected')
-      .map((result) => result.reason);
+    const failedServers = [
+      ...initializationFailures,
+      ...results
+        .map((result, index) => result.status === 'rejected' ? contexts[index].serverEntity : undefined)
+        .filter((server): server is Server => server !== undefined),
+    ];
     return {
       successServers: successServers.map((server) => ({
         serverId: server.serverId,
@@ -2388,6 +2417,37 @@ export class ServerManager {
     return undefined;
   }
 
+  private async restoreResourceSubscriptions(
+    serverContext: ServerContext,
+    client: DownstreamMcpClient,
+  ): Promise<void> {
+    for (const state of this.resourceSubscriptions.values()) {
+      if (
+        state.scopeId !== serverContext.id ||
+        state.subscribedSessions.size === 0 ||
+        state.downstreamSubscribed ||
+        state.downstreamSubscription
+      ) {
+        continue;
+      }
+
+      state.downstreamSubscribed = false;
+      const subscription = client.subscribeResource({ uri: state.resourceUri })
+        .then(() => {
+          if (state.downstreamSubscription === subscription) {
+            state.downstreamSubscribed = true;
+          }
+        })
+        .finally(() => {
+          if (state.downstreamSubscription === subscription) {
+            state.downstreamSubscription = undefined;
+          }
+        });
+      state.downstreamSubscription = subscription;
+      await subscription;
+    }
+  }
+
   private findResourceSubscriptionEntry(
     serverId: string,
     resourceUri: string,
@@ -2425,9 +2485,13 @@ export class ServerManager {
   ): Promise<void> {
     state.subscribedSessions.delete(sessionId);
 
-    if (state.subscribedSessions.size === 0 && state.downstreamSubscribed) {
+    if (state.subscribedSessions.size === 0 && state.downstreamSubscription) {
+      await state.downstreamSubscription.catch(() => undefined);
+    }
+
+    if (state.subscribedSessions.size === 0) {
       const serverContext = this.findServerContextByScopeId(state.scopeId);
-      if (serverContext && serverContext.connection) {
+      if (state.downstreamSubscribed && serverContext?.connection) {
         try {
           await serverContext.connection.unsubscribeResource({
             uri: state.resourceUri,
@@ -2480,14 +2544,15 @@ export class ServerManager {
       this.resourceSubscriptions.set(subscriptionKey, state);
     }
 
-    // If already subscribed, return directly
-    if (state.subscribedSessions.has(sessionId)) {
+    const sessionAlreadySubscribed = state.subscribedSessions.has(sessionId);
+    if (sessionAlreadySubscribed && state.downstreamSubscribed) {
       this.logger.debug({ sessionId, subscriptionKey }, 'Session already subscribed');
       return;
     }
 
-    // Add session to subscription list
-    state.subscribedSessions.add(sessionId);
+    if (!sessionAlreadySubscribed) {
+      state.subscribedSessions.add(sessionId);
+    }
 
     // If this is the first subscription, send subscription request to downstream
     if (!state.downstreamSubscribed) {
@@ -2496,16 +2561,26 @@ export class ServerManager {
       }
 
       try {
-        // Send subscription request to downstream
-        await serverContext.connection.subscribeResource({
-          uri: resourceUri,
-        });
-
-        state.downstreamSubscribed = true;
+        if (!state.downstreamSubscription) {
+          const subscription = serverContext.connection.subscribeResource({ uri: resourceUri })
+            .then(() => {
+              if (state.downstreamSubscription === subscription) {
+                state.downstreamSubscribed = true;
+              }
+            })
+            .finally(() => {
+              if (state.downstreamSubscription === subscription) {
+                state.downstreamSubscription = undefined;
+              }
+            });
+          state.downstreamSubscription = subscription;
+        }
+        await state.downstreamSubscription;
         this.logger.info({ subscriptionKey }, 'Subscribed to downstream resource');
       } catch (error) {
-        // Subscription failed, remove session record
-        state.subscribedSessions.delete(sessionId);
+        if (!sessionAlreadySubscribed) {
+          state.subscribedSessions.delete(sessionId);
+        }
         if (state.subscribedSessions.size === 0) {
           this.resourceSubscriptions.delete(subscriptionKey);
         }

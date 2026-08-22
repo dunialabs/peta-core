@@ -101,6 +101,10 @@ Peta Core is one component of the Peta MCP stack:
 - [Deployment & Configuration](./docs/deployment.md) — Docker, PM2 deployment, and environment variables.
 - [Reference](./docs/reference.md) — API surfaces, usage examples, and contributing.
 
+## Verification
+
+Run `PETA_COMPAT_OWNER_TOKEN=<test-owner-token> npm run compat:smoke` to verify real legacy and modern MCP gateway flows. It requires the local database and `JWT_SECRET`, cleans up its `compat-smoke-*` records, and writes the ignored diagnostic report at `scripts/compat-smoke/report.json`.
+
 ---
 
 ## License

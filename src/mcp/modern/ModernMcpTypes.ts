@@ -5,7 +5,7 @@ export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 export type JsonObject = { [key: string]: JsonValue };
 
-export type JsonRpcId = string | number | null;
+export type JsonRpcId = string | number;
 
 export interface ModernJsonRpcRequest {
   jsonrpc: '2.0';
@@ -19,18 +19,18 @@ export type ModernClientInfo = JsonObject & {
   version: string;
 };
 
-export interface ModernRequestMeta extends JsonObject {
+export type ModernRequestMeta = JsonObject & {
   'io.modelcontextprotocol/protocolVersion': string;
-  'io.modelcontextprotocol/clientInfo': ModernClientInfo;
+  'io.modelcontextprotocol/clientInfo'?: ModernClientInfo;
   'io.modelcontextprotocol/clientCapabilities': JsonObject;
-}
+};
 
 export interface ModernRequestContext {
   req: Request;
   res: Response;
   authContext: AuthContext;
   protocolVersion: string;
-  clientInfo: ModernClientInfo;
+  clientInfo?: ModernClientInfo;
   clientCapabilities: JsonObject;
   requestId: JsonRpcId | undefined;
   uniformRequestId: string;

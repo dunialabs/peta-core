@@ -3,7 +3,7 @@
  * Responsible for registering MCP endpoint middleware and routes
  */
 
-import { Express } from 'express';
+import type { Express, NextFunction, Request, Response } from 'express';
 import { AuthMiddleware } from '../middleware/AuthMiddleware.js';
 import { IpWhitelistMiddleware } from '../middleware/IpWhitelistMiddleware.js';
 import { RateLimitMiddleware } from '../middleware/RateLimitMiddleware.js';
@@ -12,6 +12,8 @@ import { createLogger } from '../logger/index.js';
 import { TokenValidator } from '../security/TokenValidator.js';
 import { ModernMcpController } from './modern/ModernMcpController.js';
 import { ModernMcpAuthMiddleware } from './modern/ModernMcpAuthMiddleware.js';
+import { getPublicUrl } from '../utils/urlUtils.js';
+import { ModernErrorCodes, ModernMcpError, modernErrorResponse } from './modern/ModernMcpErrors.js';
 
 /**
  * MCP middleware configuration interface
@@ -49,6 +51,8 @@ export class MCPRouter {
 
     // IP whitelist middleware - applied before authentication
     app.use(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], ipWhitelistMiddleware.checkIpWhitelist);
+
+    app.use(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], this.rejectInvalidModernOrigin);
 
     app.use(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], this.modernMcpController.rejectMixedEra);
 
@@ -107,5 +111,55 @@ export class MCPRouter {
 
 
     this.logger.info('MCP routes registered successfully');
+  }
+
+  private rejectInvalidModernOrigin = (req: Request, res: Response, next: NextFunction): void => {
+    if (req.method !== 'POST' || !this.modernMcpController.shouldHandle(req) || this.isAllowedModernOrigin(req)) {
+      return next();
+    }
+    res.status(403).json(modernErrorResponse(undefined, new ModernMcpError(403, ModernErrorCodes.InvalidRequest, 'Invalid Origin header')));
+  };
+
+  private isAllowedModernOrigin(req: Request): boolean {
+    const rawOrigin = req.headers.origin;
+    if (rawOrigin === undefined) {
+      return true;
+    }
+    if (Array.isArray(rawOrigin) || rawOrigin.trim() !== rawOrigin || rawOrigin === 'null') {
+      return false;
+    }
+
+    let origin: URL;
+    try {
+      origin = new URL(rawOrigin);
+    } catch {
+      return false;
+    }
+    const isHttpOrigin = origin.protocol === 'http:' || origin.protocol === 'https:';
+    const hasOriginPath = origin.pathname !== '/' || rawOrigin.endsWith('/') || rawOrigin.includes('?') || rawOrigin.includes('#');
+    if (!isHttpOrigin || hasOriginPath || origin.username || origin.password) {
+      return false;
+    }
+
+    const allowedHostnames = new Set(['localhost', '127.0.0.1', '[::1]']);
+    for (const hostname of (process.env.MCP_2026_ALLOWED_ORIGIN_HOSTNAMES ?? '').split(',')) {
+      const trimmedHostname = hostname.trim().toLowerCase();
+      if (trimmedHostname) {
+        allowedHostnames.add(trimmedHostname);
+      }
+    }
+    const canonicalHostname = this.getCanonicalHostname(req);
+    if (canonicalHostname) {
+      allowedHostnames.add(canonicalHostname);
+    }
+    return allowedHostnames.has(origin.hostname);
+  }
+
+  private getCanonicalHostname(req: Request): string | undefined {
+    try {
+      return new URL(getPublicUrl(req)).hostname;
+    } catch {
+      return undefined;
+    }
   }
 }

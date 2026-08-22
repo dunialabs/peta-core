@@ -7,7 +7,7 @@ import { UserStatus, UserRole } from './enums.js';
 export interface AuthContext {
   kind?: 'anonymous'; // Only set for anonymous sessions; undefined means authenticated
   userId: string; // User ID (first 32 characters of SHA-256)
-  token: string; // Original token
+  token: string;
   role: UserRole; // User role
   status: UserStatus; // User status
   permissions: Permissions; // User permissions (configured by administrator)

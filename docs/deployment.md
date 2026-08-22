@@ -144,8 +144,10 @@ All configuration is set via environment variables (for example in a `.env` file
 | `ENABLE_HTTPS`  |          | `false` | Enable HTTPS termination in the Node.js process.          |
 | `SSL_CERT_PATH` |          | –       | Path to TLS certificate, required if `ENABLE_HTTPS=true`. |
 | `SSL_KEY_PATH`  |          | –       | Path to TLS private key, required if `ENABLE_HTTPS=true`. |
+| `PETA_PUBLIC_URL` |          | –       | Canonical public origin for OAuth issuer and `/mcp` protected-resource URLs, for example `https://peta.example.com`. |
+| `TRUST_PROXY` |          | –       | Explicit Express trusted-proxy setting (IP/subnet list, hop count, `true`, or `false`) controlling whether forwarded host/proto headers are accepted. |
 
-For OAuth-based MCP clients, the externally visible Peta Core URL must be stable before production use. Peta Core derives its OAuth issuer and MCP resource from `X-Forwarded-Proto` and `X-Forwarded-Host` when they are present, then falls back to the request protocol and `Host` header. Configure reverse proxies, tunnels, and load balancers to send values such as:
+For OAuth-based MCP clients, the externally visible Peta Core URL must be stable before production use. Public deployments require `PETA_PUBLIC_URL` to pin the canonical public origin, or a trusted proxy configured through `TRUST_PROXY` that supplies `X-Forwarded-Proto` and `X-Forwarded-Host`. Without either, Peta Core accepts raw `Host` only for localhost and loopback development addresses. Configure reverse proxies, tunnels, and load balancers to send values such as:
 
 ```http
 X-Forwarded-Proto: https
@@ -192,14 +194,19 @@ If you are certain you will not use Peta-managed credentials, set `PETA_AUTH_AUT
 | `MCP_2026_ENABLED` | | `false` | Enable stateless MCP `2026-07-28` handling on `/mcp` and `/mcp/public`. Leave disabled until clients and operators are ready. |
 | `MCP_2026_DOWNSTREAM_ENABLED` | | same as `MCP_2026_ENABLED` | Enable probing and use of stateless MCP `2026-07-28` for HTTP downstream servers when `launchConfig.mcpProtocol` is `auto` or `modern`. |
 | `MCP_2026_SUPPORTED_VERSIONS` | | `2026-07-28` | Comma-separated allowlist of modern MCP protocol versions accepted by the modern adapter. |
+| `MCP_2026_ALLOWED_ORIGIN_HOSTNAMES` | | | Optional comma-separated exact hostnames allowed for a present modern browser `Origin`; entries must be hostnames only (no scheme, port, or path). `localhost`, `127.0.0.1`, and `[::1]` are always allowed, with origin scheme and port ignored. |
 | `MCP_2026_ALLOWED_CLIENT_IDS` | | | Optional comma-separated OAuth client allowlist for canary rollout. Empty allows all modern OAuth clients. |
 | `MCP_2026_ALLOWED_TENANT_IDS` | | | Optional comma-separated tenant allowlist for canary rollout. Empty allows all tenants. |
 
 Modern MCP support is a runtime flag. Disabling `MCP_2026_ENABLED` rejects sessionless modern-looking upstream requests fail-closed before they can fall through to the legacy sessionful MCP surface, without rolling back the additive OAuth metadata migration. Active legacy sessions continue using the legacy path.
 
-Downstream server launch configs may set `mcpProtocol` to `auto`, `legacy`, or `modern`. The default `auto` probes HTTP downstream servers for modern MCP when `MCP_2026_DOWNSTREAM_ENABLED=true`, then falls back to the legacy SDK HTTP/SSE path if the probe fails. Set `legacy` to skip probing. Set `modern` only for HTTP downstream servers that must use stateless MCP `2026-07-28`; non-HTTP modern configs are rejected.
+After a POST is classified as modern MCP, Streamable HTTP validates a present `Origin` before mixed-era rejection and authentication. Missing `Origin` remains valid for non-browser MCP clients. A valid browser origin must use `http` or `https` and its exact hostname must be the canonical public hostname, an explicitly configured `MCP_2026_ALLOWED_ORIGIN_HOSTNAMES` entry, or a loopback hostname; malformed, `null`, or other hostnames receive HTTP 403.
 
-For local compatibility verification, `scripts/compat-smoke/run.mjs` starts fixture downstream MCP servers and a temporary Peta Core instance, seeds isolated `compat-smoke-*` server records, and performs real `/mcp` calls across legacy and modern upstream/downstream combinations. Run it with a test owner token via `PETA_COMPAT_OWNER_TOKEN=<token> node scripts/compat-smoke/run.mjs`. The generated `scripts/compat-smoke/report.json` is a local diagnostic artifact and is not committed.
+Downstream server launch configs may set `mcpProtocol` to `auto`, `legacy`, or `modern`. The default `auto` probes HTTP downstream servers for modern MCP when `MCP_2026_DOWNSTREAM_ENABLED=true`. Transport or legacy-compatible probe failures fall back to the legacy SDK HTTP/SSE path, while recognized modern protocol errors received from a downstream (`-32020`, `-32021`, or `-32022`) fail closed rather than silently changing protocol eras. Set `legacy` to skip probing. Set `modern` only for HTTP downstream servers that must use stateless MCP `2026-07-28`; its URL is treated as Streamable HTTP even when the path includes `/sse` or `/events`. An explicit `type: "sse"` takes precedence over protocol-era inference and is rejected with `mcpProtocol: "modern"`. Non-HTTP modern configs are rejected. The gateway currently does not emit `-32021` for its own ingress metadata validation; missing `clientCapabilities` is `-32602`.
+
+For local compatibility verification, `npm run compat:smoke` starts fixture downstream MCP servers and a temporary Peta Core instance, seeds isolated `compat-smoke-*` server records, and performs real `/mcp` calls across legacy and modern upstream/downstream combinations. It requires `PETA_COMPAT_OWNER_TOKEN` and `JWT_SECRET`, plus a reachable database configured through `DATABASE_URL`; use `PETA_COMPAT_BACKEND_PORT` or `--backend-port` to choose its port. The generated `scripts/compat-smoke/report.json` is a local diagnostic artifact and is not committed.
+
+`mcpProtocol=modern` is HTTP-only. It supports stateless requests and response SSE correlation, not a persistent downstream modern subscription/progress/cancel bridge; retain `legacy` for stdio or SSE downstreams.
 
 #### Cloudflared DDNS (optional)
 

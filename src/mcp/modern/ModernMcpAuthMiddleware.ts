@@ -7,6 +7,9 @@ import { LogService } from '../../log/LogService.js';
 import { getPublicUrl } from '../../utils/urlUtils.js';
 import { createLogger } from '../../logger/index.js';
 import { MODERN_MCP_CONFIG } from '../../config/modernMcp.config.js';
+import { maskToken } from '../../utils/tokenMask.js';
+
+const PUBLIC_URL_CONFIGURATION_ERROR = 'PETA_PUBLIC_URL or a trusted proxy is required for public URLs';
 
 export class ModernMcpAuthMiddleware {
   private oauthTokenValidator = new OAuthTokenValidator();
@@ -33,7 +36,7 @@ export class ModernMcpAuthMiddleware {
       this.enforceRolloutAllowlist(authContext);
       authContext.userAgent = req.headers['user-agent'] as string | undefined;
       req.authContext = authContext;
-      await this.logAuth(req, authContext, authContext.token);
+      await this.logAuth(req, authContext, maskToken(authContext.token));
       return next();
     } catch (error) {
       this.logger.error({
@@ -78,18 +81,29 @@ export class ModernMcpAuthMiddleware {
     error: 'invalid_token' | 'invalid_request' | 'insufficient_scope',
     description: string,
   ): void {
-    const protocol = req.headers['x-forwarded-proto'] as string || (req.secure ? 'https' : 'http');
-    const host = req.headers['x-forwarded-host'] as string || req.headers.host;
-    const metadataUrl = `${protocol}://${host}/.well-known/oauth-protected-resource/mcp`;
-    res.setHeader(
-      'WWW-Authenticate',
-      `Bearer realm="peta-core", error="${error}", error_description="${description}", resource_metadata="${metadataUrl}", scope="mcp:tools mcp:resources mcp:prompts"`,
-    );
+    const metadataUrl = this.getResourceMetadataUrl(req);
+    if (metadataUrl) {
+      res.setHeader(
+        'WWW-Authenticate',
+        `Bearer realm="peta-core", error="${error}", error_description="${description}", resource_metadata="${metadataUrl}", scope="mcp:tools mcp:resources mcp:prompts"`,
+      );
+    }
     res.status(401).json({
       jsonrpc: '2.0',
       error: { code: -32000, message: description },
       id: null,
     });
+  }
+
+  private getResourceMetadataUrl(req: Request): string | undefined {
+    try {
+      return getPublicUrl(req).replace(/\/mcp$/, '/.well-known/oauth-protected-resource/mcp');
+    } catch (error) {
+      if (error instanceof Error && error.message === PUBLIC_URL_CONFIGURATION_ERROR) {
+        return undefined;
+      }
+      throw error;
+    }
   }
 
   private getCanonicalMcpResource(req: Request): string {

@@ -14,6 +14,10 @@ import { UserRole, UserStatus, MCPEventLogType } from '../types/enums.js';
 import { LogService } from '../log/LogService.js';
 import { createLogger } from '../logger/index.js';
 import { prisma } from '../config/prisma.js';
+import { getAuthorizationServerUrl } from '../utils/urlUtils.js';
+import { maskToken } from '../utils/tokenMask.js';
+
+const PUBLIC_URL_CONFIGURATION_ERROR = 'PETA_PUBLIC_URL or a trusted proxy is required for public URLs';
 
 // Extend Express Request type
 declare global {
@@ -295,13 +299,16 @@ export class AuthMiddleware {
     req: Request,
     error: 'invalid_token' | 'invalid_request' | 'insufficient_scope',
     errorDescription: string
-  ): string {
-    // Build resource_metadata URL (MCP specific)
-    const protocol = req.headers['x-forwarded-proto'] as string ||
-                     (req.secure ? 'https' : 'http');
-    const host = req.headers['x-forwarded-host'] as string || req.headers.host;
-    const baseUrl = `${protocol}://${host}`;
-    const metadataUrl = `${baseUrl}/.well-known/oauth-protected-resource`;
+  ): string | undefined {
+    let metadataUrl: string;
+    try {
+      metadataUrl = `${getAuthorizationServerUrl(req)}/.well-known/oauth-protected-resource`;
+    } catch (error) {
+      if (error instanceof Error && error.message === PUBLIC_URL_CONFIGURATION_ERROR) {
+        return undefined;
+      }
+      throw error;
+    }
 
     // Build WWW-Authenticate header
     // Format: Bearer error="...", error_description="...", resource_metadata="..."
@@ -324,10 +331,10 @@ export class AuthMiddleware {
 
     // For 401 errors, add WWW-Authenticate response header
     if (statusCode === 401) {
-      res.setHeader(
-        'WWW-Authenticate',
-        this.buildWWWAuthenticateHeader(req, wwwAuthError, error.message)
-      );
+      const header = this.buildWWWAuthenticateHeader(req, wwwAuthError, error.message);
+      if (header) {
+        res.setHeader('WWW-Authenticate', header);
+      }
     }
 
     res.status(statusCode).json({
@@ -515,7 +522,7 @@ export class AuthMiddleware {
     const permissions = parsedPermissions as Permissions;
     const userPreferences = JSON.parse(user.userPreferences || '{}') as Permissions;
 
-    const tokenMask = session.token.substring(0, 8) + '...' + session.token.substring(session.token.length - 8);
+    const tokenMask = maskToken(session.token);
 
     const updatedAuthContext: AuthContext = {
       kind: session.authContext.kind,

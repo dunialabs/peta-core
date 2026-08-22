@@ -122,6 +122,19 @@ describe('OAuthClientServiceValidation', () => {
     expect(createMock).not.toHaveBeenCalled();
   });
 
+  test('URL-based duplicate registration does not return a stored legacy client secret', async () => {
+    findFirstMock.mockResolvedValueOnce(existingUrlClient({
+      clientSecret: 'legacy-secret',
+      scopes: ['mcp:tools', 'mcp:resources'],
+    }));
+    const service = new OAuthClientService();
+
+    const client = await service.registerClient({ client_id: 'https://client.example/metadata.json' }, undefined, 'https://issuer.example');
+
+    expect(client.client_secret).toBeUndefined();
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
   test('URL-based registration does not overwrite existing custom scopes', async () => {
     findFirstMock.mockResolvedValueOnce(existingUrlClient({ scopes: ['mcp:tools', 'mcp:resources'] }));
     const service = new OAuthClientService();
@@ -170,6 +183,28 @@ describe('OAuthClientServiceValidation', () => {
     }, undefined, 'https://issuer.example');
 
     expect(client.client_name).toMatch(/^Client /);
+    expect(createMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('traditional duplicate registration creates a new client without returning the existing secret', async () => {
+    findFirstMock.mockResolvedValueOnce(existingUrlClient({
+      clientId: 'existing-client',
+      clientSecret: 'persisted-secret',
+      name: 'Conventional Client',
+      tokenEndpointAuthMethod: 'client_secret_post',
+      redirectUris: ['https://client.example/callback'],
+      grantTypes: ['authorization_code', 'refresh_token'],
+      responseTypes: ['code'],
+    }));
+    const service = new OAuthClientService();
+
+    const client = await service.registerClient({
+      client_name: 'Conventional Client',
+      redirect_uris: ['https://client.example/callback'],
+    }, undefined, 'https://issuer.example');
+
+    expect(client.client_id).not.toBe('existing-client');
+    expect(client.client_secret).not.toBe('persisted-secret');
     expect(createMock).toHaveBeenCalledTimes(1);
   });
 

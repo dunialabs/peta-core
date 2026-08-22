@@ -29,6 +29,7 @@ export const ModernErrorCodes = {
   MethodNotFound: -32601,
   InvalidParams: -32602,
   InternalError: -32603,
-  HeaderMismatch: -32001,
-  UnsupportedProtocolVersion: -32004,
+  HeaderMismatch: -32020,
+  MissingRequiredClientCapability: -32021,
+  UnsupportedProtocolVersion: -32022,
 } as const;

@@ -14,6 +14,7 @@ import { CapabilitiesService } from '../services/CapabilitiesService.js';
 import { discoveryConfigService } from '../services/DiscoveryConfigService.js';
 import { createLogger } from '../../logger/index.js';
 import { createHash } from 'crypto';
+import { maskToken } from '../../utils/tokenMask.js';
 
 export interface SessionCloseOptions {
   preserveForReconnect?: boolean;
@@ -78,7 +79,7 @@ export class SessionStore {
     this.eventStores.set(sessionId, eventStore);
 
     // 4. Create SessionLogger with initial HTTP context
-    const tokenMask = token.substring(0, 8) + '***' + token.substring(token.length - 8);
+    const tokenMask = maskToken(token);
     const sessionLogger = new SessionLogger({
       userId,
       sessionId,

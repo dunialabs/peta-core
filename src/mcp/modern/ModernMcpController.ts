@@ -28,6 +28,7 @@ import { ResultCacheService } from '../core/cache/ResultCacheService.js';
 import type { CacheScopeContext } from '../core/cache/types.js';
 import { SessionStore } from '../core/SessionStore.js';
 import { getPublicUrl } from '../../utils/urlUtils.js';
+import { maskToken } from '../../utils/tokenMask.js';
 import { ModernErrorCodes, ModernMcpError, modernErrorResponse } from './ModernMcpErrors.js';
 import { modernSubscriptionBus, type ModernSubscriptionEvent } from './ModernSubscriptionBus.js';
 import type {
@@ -47,6 +48,7 @@ type GatewayRoute = { serverID: string; originalName: string; resourceName?: str
 type ModernOAuthScope = 'mcp:tools' | 'mcp:resources' | 'mcp:prompts';
 type ModernCallToolResult = JsonObject & { isError?: boolean };
 type ModernCacheableResult = JsonObject & { resultType?: string; ttlMs?: number; cacheScope?: string };
+type ModernResourceSubscription = { serverId: string; resourceUri: string; requestedUri: string };
 
 const MODERN_META_VERSION_KEY = 'io.modelcontextprotocol/protocolVersion';
 const MODERN_META_CLIENT_INFO_KEY = 'io.modelcontextprotocol/clientInfo';
@@ -101,10 +103,13 @@ export class ModernMcpController {
 
     const sessionId = this.getHeader(req, 'mcp-session-id');
     const method = this.getBodyMethod(req.body);
-    const hasModernMeta = this.hasRequestMetaKeyFromUnknown(req.body);
     const lastEventId = this.getHeader(req, 'last-event-id');
 
     const hasModernSignal = this.hasModernSignal(req);
+
+    if (method === 'initialize' && hasModernSignal) {
+      return this.sendModernError(res, req.body, new ModernMcpError(400, ModernErrorCodes.InvalidRequest, 'Mixed protocol-era signals: initialize is not part of modern MCP'), req);
+    }
 
     if (this.shouldPreferLegacy(req)) {
       if (hasModernSignal && sessionId) {
@@ -119,9 +124,6 @@ export class ModernMcpController {
     if (hasModernSignal && sessionId) {
       return this.sendModernError(res, req.body, new ModernMcpError(400, ModernErrorCodes.InvalidRequest, 'Mixed protocol-era signals: modern requests must not include Mcp-Session-Id'), req);
     }
-    if (hasModernMeta && method === 'initialize') {
-      return this.sendModernError(res, req.body, new ModernMcpError(400, ModernErrorCodes.InvalidRequest, 'Mixed protocol-era signals: initialize must not include modern request metadata'), req);
-    }
     if (hasModernSignal && lastEventId) {
       return this.sendModernError(res, req.body, new ModernMcpError(400, ModernErrorCodes.InvalidRequest, 'Mixed protocol-era signals: modern POST requests must not include Last-Event-ID'), req);
     }
@@ -131,7 +133,7 @@ export class ModernMcpController {
   private shouldPreferLegacy(req: Request): boolean {
     const method = this.getBodyMethod(req.body);
     if (method === 'initialize') {
-      return true;
+      return !this.hasModernSignal(req);
     }
 
     const sessionId = this.getHeader(req, 'mcp-session-id');
@@ -148,7 +150,7 @@ export class ModernMcpController {
 
   handlePost = async (req: Request, res: Response): Promise<void> => {
     const started = Date.now();
-    let requestId: JsonRpcId | undefined;
+    const requestId = this.extractId(req.body);
     try {
       if (!MODERN_MCP_CONFIG.enabled) {
         throw new ModernMcpError(400, ModernErrorCodes.UnsupportedProtocolVersion, 'MCP 2026-07-28 support is disabled', {
@@ -162,7 +164,6 @@ export class ModernMcpController {
       }
 
       const validation = this.validateRequest(req);
-      requestId = validation.request.id;
       const context = this.buildContext(req, res, validation);
 
       if (validation.notification) {
@@ -264,7 +265,7 @@ export class ModernMcpController {
     if (typeof version !== 'string' || version.length === 0) {
       throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, `Missing ${MODERN_META_VERSION_KEY}`);
     }
-    if (!this.isModernClientInfo(clientInfo)) {
+    if (clientInfo !== undefined && !this.isModernClientInfo(clientInfo)) {
       throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, `Missing ${MODERN_META_CLIENT_INFO_KEY}`);
     }
     if (!this.isJsonObject(clientCapabilities)) {
@@ -273,8 +274,8 @@ export class ModernMcpController {
     return {
       ...meta,
       [MODERN_META_VERSION_KEY]: version,
-      [MODERN_META_CLIENT_INFO_KEY]: clientInfo,
       [MODERN_META_CLIENT_CAPABILITIES_KEY]: clientCapabilities,
+      ...(clientInfo === undefined ? {} : { [MODERN_META_CLIENT_INFO_KEY]: clientInfo }),
     };
   }
 
@@ -310,12 +311,12 @@ export class ModernMcpController {
     const capabilities = this.buildServerCapabilities(context);
     return {
       supportedVersions: MODERN_MCP_CONFIG.supportedVersions,
-      serverInfo: {
-        name: APP_INFO.name,
-        version: APP_INFO.version,
-      },
       capabilities,
       _meta: {
+        'io.modelcontextprotocol/serverInfo': {
+          name: APP_INFO.name,
+          version: APP_INFO.version,
+        },
         peta: {
           protocolEra: 'modern',
           protocolVersion: MODERN_MCP_PROTOCOL_VERSION,
@@ -338,6 +339,7 @@ export class ModernMcpController {
 
   private listTools(context: ModernRequestContext): ListToolsResult {
     const tools: Tool[] = [];
+    const supportsMcpApps = this.supportsMcpApps(context.clientCapabilities);
     for (const serverContext of this.getAvailableServers(context.authContext)) {
       const sourceTools = serverContext.tools?.tools ?? serverContext.cachedTools?.tools ?? [];
       for (const tool of sourceTools) {
@@ -350,15 +352,17 @@ export class ModernMcpController {
         }
         const userDangerLevel = this.getUserToolDangerLevel(context.authContext, serverContext.serverID, tool.name);
         const dangerLevel = userDangerLevel ?? serverContext.getDangerLevel(tool.name);
-        const originalResourceUri = this.getToolUiResourceUri(tool);
+        const originalResourceUri = supportsMcpApps ? this.getToolUiResourceUri(tool) : undefined;
         const proxiedResourceUri = originalResourceUri
           ? this.generateGatewayName(serverContext.id, originalResourceUri)
           : undefined;
-        const nextMeta = this.buildToolMetaWithProxiedResourceUri(tool, proxiedResourceUri);
+        const nextMeta = supportsMcpApps
+          ? this.buildToolMetaWithProxiedResourceUri(tool, proxiedResourceUri)
+          : this.stripUiToolMeta(tool);
         tools.push({
           ...tool,
           name: this.generateGatewayName(serverContext.id, tool.name),
-          ...(nextMeta ? { _meta: nextMeta } : {}),
+          _meta: nextMeta,
           annotations: {
             ...(tool.annotations ?? {}),
             readOnlyHint: tool.annotations?.readOnlyHint === true || dangerLevel === DangerLevel.Silent,
@@ -526,7 +530,12 @@ export class ModernMcpController {
     const rawResult = cachePolicy
       ? (await cacheService.executeWithCache('resource', route.serverID, route.originalName, this.cacheScopeContext(context.authContext), cachePolicy, params, execute)).result
       : await execute();
-    const result = this.rewriteResourceResult(rawResult, route.serverID, context.authContext.userId);
+    const result = this.rewriteResourceResult(
+      rawResult,
+      route.serverID,
+      context.authContext.userId,
+      this.supportsMcpApps(context.clientCapabilities),
+    );
     await this.logRequest(context, MCPEventLogType.ResponseResource, route.serverID, request, result, undefined, started, 200);
     return result;
   }
@@ -655,9 +664,29 @@ export class ModernMcpController {
     }
     const filter = this.buildSubscriptionFilter(params);
     this.enforceSubscriptionScopes(context, filter);
-    const subscriptionId = String(request.id);
-    const downstreamSubscriptionId = `${context.uniformRequestId}:${subscriptionId}`;
+    const subscriptionId = request.id;
+    const downstreamSubscriptionId = `${context.uniformRequestId}:${String(subscriptionId)}`;
     const downstreamSubscriptions = await this.subscribeModernResources(context, filter, downstreamSubscriptionId);
+    const capabilities = this.buildServerCapabilities(context);
+    const acknowledgedNotifications: JsonObject = {};
+    if (filter.notifications.toolsListChanged === true
+      && this.isJsonObject(capabilities.tools)
+      && capabilities.tools.listChanged === true) {
+      acknowledgedNotifications.toolsListChanged = true;
+    }
+    if (filter.notifications.promptsListChanged === true
+      && this.isJsonObject(capabilities.prompts)
+      && capabilities.prompts.listChanged === true) {
+      acknowledgedNotifications.promptsListChanged = true;
+    }
+    if (filter.notifications.resourcesListChanged === true
+      && this.isJsonObject(capabilities.resources)
+      && capabilities.resources.listChanged === true) {
+      acknowledgedNotifications.resourcesListChanged = true;
+    }
+    if (downstreamSubscriptions.length > 0) {
+      acknowledgedNotifications.resourceSubscriptions = downstreamSubscriptions.map((subscription) => subscription.requestedUri);
+    }
     const res = context.res;
     res.status(200);
     res.setHeader('Content-Type', 'text/event-stream');
@@ -667,7 +696,7 @@ export class ModernMcpController {
     this.writeSse(res, {
       jsonrpc: '2.0',
       method: 'notifications/subscriptions/acknowledged',
-      params: { notifications: filter.notifications, _meta: { 'io.modelcontextprotocol/subscriptionId': subscriptionId } },
+      params: { notifications: acknowledgedNotifications, _meta: { 'io.modelcontextprotocol/subscriptionId': subscriptionId } },
     });
 
     const heartbeat = setInterval(() => {
@@ -682,20 +711,6 @@ export class ModernMcpController {
       cleanedUp = true;
       void this.cleanupModernResourceSubscriptions(context, downstreamSubscriptionId, downstreamSubscriptions);
     };
-    const authExpiry = this.authExpirationMs(context.authContext);
-    const authExpiryTimer = authExpiry === null
-      ? null
-      : setTimeout(() => {
-          this.logger.info({
-            protocolEra: 'modern',
-            protocolVersion: context.protocolVersion,
-            subscriptionDurationMs: Date.now() - subscriptionStarted,
-            subscriptionDropReason: 'auth_expired',
-            subscriptionId,
-          }, 'Modern MCP subscription closed by auth expiry');
-          cleanup();
-          res.end();
-        }, authExpiry);
     const listener = (event: ModernSubscriptionEvent) => {
       if (!this.subscriptionMatches(context, filter, event)) {
         return;
@@ -716,24 +731,49 @@ export class ModernMcpController {
         },
       });
     };
-
-    modernSubscriptionBus.onEvent(listener);
-    context.req.on('close', () => {
+    let closed = false;
+    let authExpiryTimer: ReturnType<typeof setTimeout> | null = null;
+    const closeSubscription = (reason: 'auth_expired' | 'client_closed') => {
+      if (closed) {
+        return;
+      }
+      closed = true;
       clearInterval(heartbeat);
       if (authExpiryTimer) {
         clearTimeout(authExpiryTimer);
       }
       modernSubscriptionBus.offEvent(listener);
       cleanup();
+      if (reason === 'auth_expired') {
+        this.writeSse(res, {
+          jsonrpc: '2.0',
+          id: subscriptionId,
+          result: {
+            resultType: 'complete',
+            _meta: {
+              'io.modelcontextprotocol/subscriptionId': subscriptionId,
+              'io.modelcontextprotocol/serverInfo': {
+                name: APP_INFO.name,
+                version: APP_INFO.version,
+              },
+            },
+          },
+        });
+      }
       this.logger.info({
         protocolEra: 'modern',
         protocolVersion: context.protocolVersion,
         subscriptionDurationMs: Date.now() - subscriptionStarted,
-        subscriptionDropReason: 'client_closed',
+        subscriptionDropReason: reason,
         subscriptionId,
-      }, 'Modern MCP subscription closed');
+      }, reason === 'auth_expired' ? 'Modern MCP subscription closed by auth expiry' : 'Modern MCP subscription closed');
       res.end();
-    });
+    };
+    const authExpiry = this.authExpirationMs(context.authContext);
+    authExpiryTimer = authExpiry === null ? null : setTimeout(() => closeSubscription('auth_expired'), authExpiry);
+
+    modernSubscriptionBus.onEvent(listener);
+    context.req.on('close', () => closeSubscription('client_closed'));
   }
 
   private async handleNotification(context: ModernRequestContext, request: ModernJsonRpcRequest): Promise<void> {
@@ -972,21 +1012,60 @@ export class ModernMcpController {
   }
 
   private buildServerCapabilities(context: ModernRequestContext): JsonObject {
-    const capabilities: JsonObject = { tools: { listChanged: true } };
-    for (const serverContext of this.getAvailableServers(context.authContext)) {
-      if (serverContext.capabilities?.resources) {
-        capabilities.resources = { listChanged: true, subscribe: true };
+    const availableServers = this.getAvailableServers(context.authContext);
+    const capabilities: JsonObject = {};
+    if (availableServers.some((serverContext) =>
+      serverContext.capabilities?.tools !== undefined
+      || serverContext.tools?.tools !== undefined
+      || serverContext.cachedTools?.tools !== undefined)) {
+      capabilities.tools = availableServers.some((serverContext) =>
+        serverContext.connection?.protocolEra === 'legacy'
+        && serverContext.capabilities?.tools?.listChanged === true)
+        ? { listChanged: true }
+        : {};
+    }
+    for (const serverContext of availableServers) {
+      if (serverContext.capabilities?.resources
+        || serverContext.resources?.resources !== undefined
+        || serverContext.cachedResources?.resources !== undefined
+        || serverContext.resourceTemplates?.resourceTemplates !== undefined
+        || serverContext.cachedResourceTemplates?.resourceTemplates !== undefined) {
+        const alreadySupportsListChanges = this.isJsonObject(capabilities.resources)
+          && capabilities.resources.listChanged === true;
+        const alreadySupportsSubscriptions = this.isJsonObject(capabilities.resources)
+          && capabilities.resources.subscribe === true;
+        capabilities.resources = {
+          ...(alreadySupportsListChanges
+            || (serverContext.connection?.protocolEra === 'legacy' && serverContext.capabilities?.resources?.listChanged === true)
+            ? { listChanged: true }
+            : {}),
+          ...(alreadySupportsSubscriptions
+            || (serverContext.connection?.protocolEra === 'legacy' && serverContext.capabilities?.resources?.subscribe === true)
+            ? { subscribe: true }
+            : {}),
+        };
       }
-      if (serverContext.capabilities?.prompts) {
-        capabilities.prompts = { listChanged: true };
+      if (serverContext.capabilities?.prompts
+        || serverContext.prompts?.prompts !== undefined
+        || serverContext.cachedPrompts?.prompts !== undefined) {
+        const alreadySupportsListChanges = this.isJsonObject(capabilities.prompts)
+          && capabilities.prompts.listChanged === true;
+        capabilities.prompts = alreadySupportsListChanges
+          || (serverContext.connection?.protocolEra === 'legacy' && serverContext.capabilities?.prompts?.listChanged === true)
+          ? { listChanged: true }
+          : {};
       }
       if (serverContext.capabilities?.completions) {
         capabilities.completions = {};
       }
     }
-    capabilities.subscriptions = {
-      methods: [...MODERN_SUBSCRIPTION_METHODS],
-    };
+    if (this.supportsMcpApps(context.clientCapabilities) && this.hasAvailableMcpApps(context.authContext, availableServers)) {
+      capabilities.extensions = {
+        'io.modelcontextprotocol/ui': {
+          mimeTypes: ['text/html;profile=mcp-app'],
+        },
+      };
+    }
     return capabilities;
   }
 
@@ -995,6 +1074,13 @@ export class ModernMcpController {
       const cacheableResult = result as ModernCacheableResult;
       return {
         ...result,
+        _meta: {
+          ...(this.isJsonObject(result._meta) ? result._meta : {}),
+          'io.modelcontextprotocol/serverInfo': {
+            name: APP_INFO.name,
+            version: APP_INFO.version,
+          },
+        },
         resultType: cacheableResult.resultType ?? 'complete',
         ttlMs: cacheableResult.ttlMs ?? MODERN_MCP_CONFIG.defaultListTtlMs,
         cacheScope: cacheableResult.cacheScope ?? MODERN_MCP_CONFIG.defaultCacheScope,
@@ -1070,7 +1156,7 @@ export class ModernMcpController {
     }
     const params = this.requireParams(request);
     const expected = request.method === 'resources/read' ? this.requireString(params.uri, 'params.uri') : this.requireString(params.name, 'params.name');
-    if (header !== expected) {
+    if (this.decodeHeaderMirrorValue(header, 'Mcp-Name') !== expected) {
       throw new ModernMcpError(400, ModernErrorCodes.HeaderMismatch, 'Mcp-Name does not match request params');
     }
   }
@@ -1125,21 +1211,7 @@ export class ModernMcpController {
   private buildSubscriptionNotifications(params: JsonObject): JsonObject {
     const notifications = params.notifications;
     if (notifications === undefined) {
-      const extensionNotifications: JsonObject = {};
-      if (this.requireStringArrayFilter(params, 'methods').includes('notifications/tools/list_changed')) {
-        extensionNotifications.toolsListChanged = true;
-      }
-      if (this.requireStringArrayFilter(params, 'methods').includes('notifications/prompts/list_changed')) {
-        extensionNotifications.promptsListChanged = true;
-      }
-      if (this.requireStringArrayFilter(params, 'methods').includes('notifications/resources/list_changed')) {
-        extensionNotifications.resourcesListChanged = true;
-      }
-      const resourceUris = this.requireStringArrayFilter(params, 'resourceUris');
-      if (resourceUris.length > 0) {
-        extensionNotifications.resourceSubscriptions = resourceUris;
-      }
-      return extensionNotifications;
+      throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, 'params.notifications is required');
     }
     if (!this.isJsonObject(notifications)) {
       throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, 'notifications must be an object');
@@ -1256,29 +1328,38 @@ export class ModernMcpController {
     context: ModernRequestContext,
     filter: ModernSubscriptionFilter,
     subscriptionId: string,
-  ): Promise<Array<{ serverId: string; resourceUri: string }>> {
+  ): Promise<ModernResourceSubscription[]> {
     if (!filter.methods.has('notifications/resources/updated') || filter.resourceUris.size === 0) {
       return [];
     }
-    const subscriptions: Array<{ serverId: string; resourceUri: string }> = [];
-    for (const uri of filter.resourceUris) {
-      const route = this.resolveResourceUriForSubscription(context.authContext, uri, filter.serverIds);
-      if (!route) {
-        throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, `Invalid resource subscription URI: ${uri}`);
+    const subscriptions: ModernResourceSubscription[] = [];
+    try {
+      for (const uri of filter.resourceUris) {
+        const route = this.resolveResourceUriForSubscription(context.authContext, uri, filter.serverIds);
+        if (!route) {
+          throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, `Invalid resource subscription URI: ${uri}`);
+        }
+        if (!this.canAccessResourceById(context.authContext, route.serverID, route.resourceName ?? route.originalName)) {
+          throw new ModernMcpError(403, ModernErrorCodes.InvalidRequest, `Permission denied for resource subscription: ${uri}`);
+        }
+        const serverContext = ServerManager.instance.getServerContext(route.serverID, context.authContext.userId);
+        if (serverContext?.connection?.protocolEra !== 'legacy' || serverContext.capabilities?.resources?.subscribe !== true) {
+          continue;
+        }
+        await ServerManager.instance.subscribeResource(route.serverID, route.originalName, subscriptionId, context.authContext.userId);
+        subscriptions.push({ serverId: route.serverID, resourceUri: route.originalName, requestedUri: uri });
       }
-      if (!this.canAccessResourceById(context.authContext, route.serverID, route.resourceName ?? route.originalName)) {
-        throw new ModernMcpError(403, ModernErrorCodes.InvalidRequest, `Permission denied for resource subscription: ${uri}`);
-      }
-      await ServerManager.instance.subscribeResource(route.serverID, route.originalName, subscriptionId, context.authContext.userId);
-      subscriptions.push({ serverId: route.serverID, resourceUri: route.originalName });
+      return subscriptions;
+    } catch (error) {
+      await this.cleanupModernResourceSubscriptions(context, subscriptionId, subscriptions);
+      throw error;
     }
-    return subscriptions;
   }
 
   private async cleanupModernResourceSubscriptions(
     context: ModernRequestContext,
     subscriptionId: string,
-    subscriptions: Array<{ serverId: string; resourceUri: string }>,
+    subscriptions: ModernResourceSubscription[],
   ): Promise<void> {
     await Promise.all(subscriptions.map((subscription) =>
       ServerManager.instance.unsubscribeResource(subscription.serverId, subscription.resourceUri, subscriptionId, context.authContext.userId).catch((error) => {
@@ -1297,7 +1378,7 @@ export class ModernMcpController {
       uniformRequestId: context.uniformRequestId,
       ip: context.req.clientIp || context.req.ip,
       userAgent: context.req.headers['user-agent'],
-      tokenMask: context.authContext.token,
+      tokenMask: maskToken(context.authContext.token),
       requestParams: JSON.stringify({
         ...(request.params ?? {}),
         _peta: {
@@ -1503,6 +1584,45 @@ export class ModernMcpController {
     return undefined;
   }
 
+  private supportsMcpApps(clientCapabilities: JsonObject | undefined): boolean {
+    const extensions = clientCapabilities && this.isJsonObject(clientCapabilities.extensions)
+      ? clientCapabilities.extensions
+      : undefined;
+    const ui = extensions && this.isJsonObject(extensions['io.modelcontextprotocol/ui'])
+      ? extensions['io.modelcontextprotocol/ui']
+      : undefined;
+    return Boolean(ui && Array.isArray(ui.mimeTypes) && ui.mimeTypes.includes('text/html;profile=mcp-app'));
+  }
+
+  private hasAvailableMcpApps(authContext: AuthContext, serverContexts: ServerContext[]): boolean {
+    return serverContexts.some((serverContext) => {
+      const resources = serverContext.resources?.resources ?? serverContext.cachedResources?.resources ?? [];
+      const appResourceUris = new Set(
+        resources
+          .filter((resource) => resource.uri.startsWith('ui://')
+            && resource.mimeType === 'text/html;profile=mcp-app'
+            && this.canAccessResource(authContext, serverContext, resource.name))
+          .map((resource) => resource.uri),
+      );
+      const tools = serverContext.tools?.tools ?? serverContext.cachedTools?.tools ?? [];
+      return tools.some((tool) => {
+        if (!this.canUseTool(authContext, serverContext, tool.name)) {
+          return false;
+        }
+        const resourceUri = this.getToolUiResourceUri(tool);
+        return resourceUri !== undefined && appResourceUris.has(resourceUri);
+      });
+    });
+  }
+
+  private stripUiToolMeta(tool: Tool): Tool['_meta'] | undefined {
+    if (!tool._meta) {
+      return undefined;
+    }
+    const entries = Object.entries(tool._meta).filter(([key]) => key !== 'ui' && key !== 'ui/resourceUri');
+    return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+  }
+
   private buildToolMetaWithProxiedResourceUri(tool: Tool, proxiedResourceUri?: string): Tool['_meta'] | undefined {
     if (!proxiedResourceUri) {
       return tool._meta;
@@ -1621,13 +1741,13 @@ export class ModernMcpController {
     return current;
   }
 
-  private decodeHeaderMirrorValue(value: string): string {
+  private decodeHeaderMirrorValue(value: string, headerName = 'Mcp-Param'): string {
     const match = /^=\?base64\?([A-Za-z0-9+/]*={0,2})\?=$/.exec(value);
     if (!match) {
       return value;
     }
     if (match[1].length === 0 || match[1].length % 4 !== 0 || /=[^=]/.test(match[1])) {
-      throw new ModernMcpError(400, ModernErrorCodes.HeaderMismatch, 'Invalid base64 Mcp-Param header value');
+      throw new ModernMcpError(400, ModernErrorCodes.HeaderMismatch, `Invalid base64 ${headerName} header value`);
     }
     return Buffer.from(match[1], 'base64').toString('utf8');
   }
@@ -1661,7 +1781,7 @@ export class ModernMcpController {
     };
   }
 
-  private rewriteResourceResult(result: ReadResourceResult, serverID: string, userId: string): ReadResourceResult {
+  private rewriteResourceResult(result: ReadResourceResult, serverID: string, userId: string, supportsMcpApps: boolean): ReadResourceResult {
     const serverContext = ServerManager.instance.getServerContext(serverID, userId);
     const replacements = serverContext ? this.buildAppResourceReplacements(serverContext) : [];
     return {
@@ -1674,7 +1794,7 @@ export class ModernMcpController {
           return {
             ...content,
             uri: rewrittenUri,
-            text: this.rewriteAppResourceText(content.text, content.mimeType, replacements),
+            text: supportsMcpApps ? this.rewriteAppResourceText(content.text, content.mimeType, replacements) : content.text,
           };
         }
         return { ...content, uri: rewrittenUri };
@@ -1764,7 +1884,7 @@ export class ModernMcpController {
   }
 
   private isJsonRpcId(value: unknown): value is JsonRpcId {
-    return value === null || typeof value === 'string' || typeof value === 'number';
+    return typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value));
   }
 
   private isModernClientInfo(value: JsonValue | undefined): value is ModernClientInfo {

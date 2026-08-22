@@ -447,7 +447,7 @@ export class ServerContext {
    * Notify downstream server of token update
    */
   private async notifyTokenUpdate(newToken: string): Promise<void> {
-    if (!this.connection || !this.transport) {
+    if (!this.connection) {
       this.logger.warn({
         serverName: this.serverEntity.serverName
       }, 'Cannot notify token update: no connection');
@@ -455,6 +455,17 @@ export class ServerContext {
     }
 
     try {
+      if (this.connection.protocolEra === 'modern') {
+        await this.connection.notification({
+          jsonrpc: '2.0',
+          method: 'notifications/token/update',
+          params: { token: newToken, timestamp: Date.now() },
+        });
+        return;
+      }
+      if (!this.transport) {
+        return;
+      }
       const transport = this.transport as any;
       if (transport.send) {
         await transport.send({

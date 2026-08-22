@@ -24,11 +24,11 @@ describe('ModernProtocolClassifier', () => {
     getSessionMock.mockReset();
   });
 
-  test('leaves initialize with _meta on legacy path', () => {
+  test('routes initialize with a modern _meta signal to fail-closed validation', () => {
     const controller = new ModernMcpController();
     const req = { originalUrl: '/mcp', headers: {}, body: { jsonrpc: '2.0', id: 1, method: 'initialize', params: { _meta: 'bad' } } };
 
-    expect(controller.shouldHandle(req)).toBe(false);
+    expect(controller.shouldHandle(req)).toBe(true);
   });
 
   test('leaves plain legacy initialize on legacy path', () => {

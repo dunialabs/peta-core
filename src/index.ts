@@ -174,6 +174,19 @@ export async function startApplication() {
 
     // Create Express application
     const app = express();
+    const configuredTrustProxy = process.env.TRUST_PROXY?.trim();
+    if (configuredTrustProxy) {
+      app.set(
+        'trust proxy',
+        configuredTrustProxy === 'true'
+          ? true
+          : configuredTrustProxy === 'false'
+            ? false
+            : /^\d+$/.test(configuredTrustProxy)
+              ? Number(configuredTrustProxy)
+              : configuredTrustProxy,
+      );
+    }
     let resultCacheStore: ResultCacheStore = new NoopResultCacheStore();
 
     // CORS configuration constants - centralized management of all CORS-related settings
@@ -283,11 +296,7 @@ export async function startApplication() {
         req.query.api_key !== undefined
       );
 
-      // Get base URL (supports local development and production environments)
-      const protocol = (req.headers['x-forwarded-proto'] as string) || 'https';
-      const host = (req.headers['x-forwarded-host'] as string) || req.headers.host;
-      const baseUrl = `${protocol}://${host}`;
-      const metadataUrl = `${baseUrl}/.well-known/oauth-protected-resource`;
+      const metadataUrl = `${urlUtils.getAuthorizationServerUrl(req)}/.well-known/oauth-protected-resource`;
       if (isDevelopment) {
         requestLogger.debug(
           {

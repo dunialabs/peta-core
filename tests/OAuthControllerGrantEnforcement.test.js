@@ -1,6 +1,8 @@
 import { jest } from '@jest/globals';
+import crypto from 'crypto';
 
 process.env.JWT_SECRET = 'test-jwt-secret';
+const originalPublicUrl = process.env.PETA_PUBLIC_URL;
 
 let client = {
   client_id: 'client-1',
@@ -91,9 +93,13 @@ jest.unstable_mockModule('../dist/security/OAuthTokenValidator.js', () => ({
 const { OAuthController } = await import('../dist/oauth/controllers/OAuthController.js');
 const { deskAuthorizationFlowService } = await import('../dist/oauth/services/DeskAuthorizationFlowService.js');
 
-function createReq(body) {
+function createReq(body = {}) {
   return {
-    body,
+    body: {
+      code_challenge: s256CodeChallenge,
+      code_challenge_method: 'S256',
+      ...body,
+    },
     query: {},
     headers: { host: 'issuer.example', 'x-forwarded-proto': 'https' },
     protocol: 'https',
@@ -129,6 +135,9 @@ function authCode(overrides = {}) {
   };
 }
 
+const codeVerifier = 'test-code-verifier';
+const s256CodeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
 function authorizeQuery(overrides = {}) {
   return {
     response_type: 'code',
@@ -153,6 +162,7 @@ function extractDeskFlowId(html) {
 
 describe('OAuthControllerGrantEnforcement', () => {
   beforeEach(() => {
+    process.env.PETA_PUBLIC_URL = 'https://issuer.example';
     client = {
       client_id: 'client-1',
       issuer: 'https://issuer.example',
@@ -317,6 +327,44 @@ describe('OAuthControllerGrantEnforcement', () => {
     }), res);
 
     expect(res.body.redirect).toContain('error=invalid_scope');
+    expect(codeCreate).not.toHaveBeenCalled();
+  });
+
+  test('authorization rejects authorization-code requests without an S256 PKCE challenge', async () => {
+    const controller = new OAuthController();
+    const res = createRes();
+
+    await controller.authorize(createReq({
+      client_id: 'client-1',
+      redirect_uri: 'https://client.example/callback',
+      scope: 'mcp:tools',
+      approved: true,
+      user_token: 'user-token',
+      code_challenge: 'challenge-1',
+      code_challenge_method: 'plain',
+    }), res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('invalid_request');
+    expect(codeCreate).not.toHaveBeenCalled();
+  });
+
+  test('authorization rejects authorization-code requests without a PKCE challenge', async () => {
+    const controller = new OAuthController();
+    const res = createRes();
+
+    await controller.authorize(createReq({
+      client_id: 'client-1',
+      redirect_uri: 'https://client.example/callback',
+      scope: 'mcp:tools',
+      approved: true,
+      user_token: 'user-token',
+      code_challenge: undefined,
+      code_challenge_method: undefined,
+    }), res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('invalid_request');
     expect(codeCreate).not.toHaveBeenCalled();
   });
 
@@ -485,6 +533,8 @@ describe('OAuthControllerGrantEnforcement', () => {
       client_id: 'client-1',
       redirect_uri: 'https://client.example/callback',
       scope: 'mcp:tools',
+      code_challenge: s256CodeChallenge,
+      code_challenge_method: 'S256',
       resource: 'https://issuer.example/mcp',
     }, 'https://issuer.example');
     const controller = new OAuthController();
@@ -594,28 +644,108 @@ describe('OAuthControllerGrantEnforcement', () => {
   });
 
   test('authorization_code exchange omits refresh token when client lacks refresh_token grant', async () => {
+    codeFindUnique.mockResolvedValue(authCode({
+      codeChallenge: s256CodeChallenge,
+      challengeMethod: 'S256',
+    }));
+    codeUpdateMany.mockResolvedValue({ count: 1 });
+    tokenCreate.mockResolvedValue({});
+    const controller = new OAuthController();
+    const res = createRes();
+
+    await controller.token(createReq({ grant_type: 'authorization_code', code: 'code-1', redirect_uri: 'https://client.example/callback', client_id: 'client-1', code_verifier: codeVerifier }), res);
+
+    expect(res.body.refresh_token).toBeUndefined();
+    expect(tokenCreate.mock.calls[0][0].data.refreshToken).toBeNull();
+  });
+
+  test('authorization_code exchange rejects codes without a stored S256 challenge', async () => {
     codeFindUnique.mockResolvedValue(authCode());
     codeUpdateMany.mockResolvedValue({ count: 1 });
     tokenCreate.mockResolvedValue({});
     const controller = new OAuthController();
     const res = createRes();
 
-    await controller.token(createReq({ grant_type: 'authorization_code', code: 'code-1', redirect_uri: 'https://client.example/callback', client_id: 'client-1' }), res);
+    await controller.token(createReq({
+      grant_type: 'authorization_code',
+      code: 'code-1',
+      redirect_uri: 'https://client.example/callback',
+      client_id: 'client-1',
+      code_verifier: 'verifier-1',
+    }), res);
 
-    expect(res.body.refresh_token).toBeUndefined();
-    expect(tokenCreate.mock.calls[0][0].data.refreshToken).toBeNull();
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('invalid_grant');
+    expect(codeUpdateMany).not.toHaveBeenCalled();
+    expect(tokenCreate).not.toHaveBeenCalled();
+  });
+
+  test('authorization_code exchange rejects a missing code verifier for an S256 challenge', async () => {
+    codeFindUnique.mockResolvedValue(authCode({
+      codeChallenge: 'challenge-1',
+      challengeMethod: 'S256',
+    }));
+    const controller = new OAuthController();
+    const res = createRes();
+
+    await controller.token(createReq({
+      grant_type: 'authorization_code',
+      code: 'code-1',
+      redirect_uri: 'https://client.example/callback',
+      client_id: 'client-1',
+    }), res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('invalid_grant');
+    expect(codeUpdateMany).not.toHaveBeenCalled();
+    expect(tokenCreate).not.toHaveBeenCalled();
+  });
+
+  test('authorization_code exchange rejects a stored plain PKCE challenge even when its verifier matches', async () => {
+    codeFindUnique.mockResolvedValue(authCode({
+      codeChallenge: codeVerifier,
+      challengeMethod: 'plain',
+    }));
+    codeUpdateMany.mockResolvedValue({ count: 1 });
+    tokenCreate.mockResolvedValue({});
+    const controller = new OAuthController();
+    const res = createRes();
+
+    await controller.token(createReq({
+      grant_type: 'authorization_code',
+      code: 'code-1',
+      redirect_uri: 'https://client.example/callback',
+      client_id: 'client-1',
+      code_verifier: codeVerifier,
+    }), res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('invalid_grant');
+    expect(codeUpdateMany).not.toHaveBeenCalled();
+    expect(tokenCreate).not.toHaveBeenCalled();
   });
 
   test('authorization_code exchange fails when atomic code claim loses the race', async () => {
-    codeFindUnique.mockResolvedValue(authCode());
+    codeFindUnique.mockResolvedValue(authCode({
+      codeChallenge: s256CodeChallenge,
+      challengeMethod: 'S256',
+    }));
     codeUpdateMany.mockResolvedValue({ count: 0 });
     const controller = new OAuthController();
     const res = createRes();
 
-    await controller.token(createReq({ grant_type: 'authorization_code', code: 'code-1', redirect_uri: 'https://client.example/callback', client_id: 'client-1' }), res);
+    await controller.token(createReq({ grant_type: 'authorization_code', code: 'code-1', redirect_uri: 'https://client.example/callback', client_id: 'client-1', code_verifier: codeVerifier }), res);
 
     expect(res.statusCode).toBe(400);
     expect(res.body.error).toBe('invalid_grant');
     expect(tokenCreate).not.toHaveBeenCalled();
+  });
+
+  afterAll(() => {
+    if (originalPublicUrl === undefined) {
+      delete process.env.PETA_PUBLIC_URL;
+    } else {
+      process.env.PETA_PUBLIC_URL = originalPublicUrl;
+    }
   });
 });

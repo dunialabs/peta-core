@@ -25,13 +25,13 @@ Peta Core uses two kinds of bearer tokens:
 
 ### MCP Initialization
 
-For the initial `initialize` call to `POST /mcp`, provide a token via:
+For the initial legacy `initialize` call to `POST /mcp`, provide a Peta access token via:
 
 ```http
 Authorization: Bearer <token>
 ```
 
-Or for legacy `POST /mcp` initialization only. Modern MCP `2026-07-28` rejects query tokens and requires an OAuth bearer token in the `Authorization` header:
+Legacy `POST /mcp` initialization also accepts the Peta access token through one of these query parameters. This compatibility path does not apply to modern MCP `2026-07-28`, which rejects query credentials and requires an audience-bound OAuth bearer token in the `Authorization` header:
 
 ```http
 POST /mcp?token=<token>
@@ -56,7 +56,13 @@ Mcp-Method: <json-rpc-method>
 Accept: application/json, text/event-stream
 ```
 
-For `tools/call`, `prompts/get`, and `resources/read`, include `Mcp-Name` matching `params.name` or `params.uri`. Every modern JSON-RPC request must include `params._meta.io.modelcontextprotocol/protocolVersion`, `params._meta.io.modelcontextprotocol/clientInfo` with both `name` and `version`, and `params._meta.io.modelcontextprotocol/clientCapabilities`.
+When present, `Origin` is validated before authentication to prevent DNS rebinding. The origin must be `http` or `https` and use the canonical public hostname, an exact hostname from `MCP_2026_ALLOWED_ORIGIN_HOSTNAMES`, or `localhost`, `127.0.0.1`, or `[::1]`; scheme and port are ignored. Allowlist entries are hostnames only, without a scheme, port, or path. Missing `Origin` is accepted for non-browser clients, while malformed, `null`, or non-allowlisted origins receive HTTP 403.
+
+For `tools/call`, `prompts/get`, and `resources/read`, include `Mcp-Name` matching `params.name` or `params.uri`. Send an ordinary printable ASCII value unchanged; values with non-printable characters, leading/trailing whitespace, non-ASCII text, or the sentinel-shaped form are encoded as `=?base64?<UTF-8 base64>?=`. Peta Core decodes that sentinel before comparing it to the request parameter.
+
+When a tool input-schema property has an `x-mcp-header` annotation, mirror its supplied string, integer, or boolean argument in `Mcp-Param-<annotation>` for `tools/call`. Nested annotated properties use their nested argument value. Missing or `null` values omit the header, and values that are unsafe for a plain HTTP header use the same Base64 sentinel encoding. Peta Core filters tools whose annotations use invalid header names, duplicate case-insensitive names, or unsupported value types.
+
+Every modern JSON-RPC request must include `params._meta.io.modelcontextprotocol/protocolVersion` and `params._meta.io.modelcontextprotocol/clientCapabilities`. `params._meta.io.modelcontextprotocol/clientInfo` is optional; when present, it must contain non-empty `name` and `version`. A request id, when supplied, must be a string or finite number; `null`, booleans, arrays, objects, and non-finite numbers are rejected.
 
 Modern methods currently implemented by the gateway:
 
@@ -71,13 +77,19 @@ Modern methods currently implemented by the gateway:
 - `completion/complete`
 - `subscriptions/listen`
 
-Modern requests are routed before legacy session creation, but an established legacy session remains authoritative: when `Mcp-Session-Id` maps to an active legacy session and the request method is legacy-compatible, Peta Core keeps the request on the legacy session path even if non-authoritative modern-looking headers are present. Mixed-era requests with no active legacy session still fail closed through modern validation. Header/body mismatches return `-32001`. Unsupported modern versions return `-32004`.
+`initialize` remains a legacy sessionful method. A request that combines `initialize` with modern headers or request metadata is rejected as a mixed protocol-era request; modern clients start with `server/discover` instead.
 
-For downstream gatewaying, Peta Core supports `launchConfig.mcpProtocol` values `auto`, `legacy`, and `modern`. HTTP downstream servers in `auto` mode are probed for modern MCP `2026-07-28` when downstream modern support is enabled, then fall back to the existing legacy SDK HTTP/SSE path if the probe fails. Stdio and SSE downstream transports remain legacy-compatible and are not forced into stateless modern mode.
+Modern requests are routed before legacy session creation, but an established legacy session remains authoritative: when `Mcp-Session-Id` maps to an active legacy session and the request method is legacy-compatible, Peta Core keeps the request on the legacy session path even if non-authoritative modern-looking headers are present. Mixed-era requests with no active legacy session still fail closed through modern validation. Peta Core uses `-32020` for header/body mismatch and `-32022` for an unsupported version (with the supported versions in error data). The standard `-32021` code applies only when processing requires an undeclared client capability; the current gateway filters or degrades optional features instead of requiring one, so it does not emit `-32021` on ingress today.
+
+For downstream gatewaying, Peta Core supports `launchConfig.mcpProtocol` values `auto`, `legacy`, and `modern`. HTTP downstream servers in `auto` mode are probed for modern MCP `2026-07-28` when downstream modern support is enabled. Transport or legacy-compatible probe failures fall back to the existing legacy SDK HTTP/SSE path; recognized modern protocol errors received from a downstream (`-32020`, `-32021`, or `-32022`) fail closed instead of silently changing protocol eras. An explicit `mcpProtocol: "modern"` with a URL always selects Streamable HTTP regardless of path names such as `/sse` or `/events`; an explicit `type: "sse"` still takes precedence and is rejected for modern mode. Stdio and SSE downstream transports remain legacy-compatible and are not forced into stateless modern mode.
 
 OAuth clients are scope-gated on the modern surface: tool methods require `mcp:tools`, resource methods and resource subscriptions require `mcp:resources`, and prompt methods and prompt subscriptions require `mcp:prompts`.
 
-Successful modern results include `resultType: "complete"` plus conservative cache metadata unless a downstream result already supplies `ttlMs` or `cacheScope`. `subscriptions/listen` uses `params.notifications` (`toolsListChanged`, `promptsListChanged`, `resourcesListChanged`, `resourceSubscriptions`) and acknowledges with `notifications/subscriptions/acknowledged`; the subscription id is the JSON-RPC request id. Resource subscriptions are forwarded to downstream servers when the referenced resource supports subscription, and MCP Apps resource/tool references are rewritten into gateway namespaced URIs.
+Successful modern results include `resultType: "complete"` plus conservative cache metadata unless a downstream result already supplies `ttlMs` or `cacheScope`; Peta Core identifies itself in `result._meta["io.modelcontextprotocol/serverInfo"]`. `server/discover` advertises a capability only when an accessible downstream provides it or a sleeping server has the corresponding cached catalog. Cached catalogs preserve list-method availability but never synthesize `listChanged` or subscription support. The MCP Apps extension is negotiated through `clientCapabilities.extensions["io.modelcontextprotocol/ui"].mimeTypes`; Peta advertises the matching server extension and exposes/re-writes UI tool metadata only when `text/html;profile=mcp-app` is supported and an accessible matching UI resource exists. Without that extension, the same tools remain available with their text-only behavior and UI metadata removed. `subscriptions/listen` requires `params.notifications` (`toolsListChanged`, `promptsListChanged`, `resourcesListChanged`, `resourceSubscriptions`) and acknowledges with `notifications/subscriptions/acknowledged`; omission returns HTTP 400 with JSON-RPC `-32602`, and the subscription id is the JSON-RPC request id. Peta extension filters `methods`, `serverIds`, and `resourceUris` remain additive when the required `notifications` object is present, but never synthesize standard notification opt-in. Subscription filters are negotiated on the `subscriptions/listen` request itself; Peta Core does not invent a non-standard `capabilities.subscriptions` field. Tool, resource, and prompt `listChanged` flags and acknowledgements are emitted only when an accessible legacy downstream explicitly declares that support; modern downstream list-change notifications are not bridged. A server-initiated graceful close sends the final JSON-RPC result on the SSE stream, while an abrupt client transport close ends without that result. `resources.subscribe` is advertised only when an accessible legacy downstream actually supports it. Resource subscriptions are forwarded only to those legacy downstreams, and a failed multi-resource setup removes subscriptions already established by that request.
+
+Modern HTTP downstreams correlate an SSE response by JSON-RPC id, including error responses, rather than by event position. During `server/discover`, a downstream `-32022` response that advertises a mutually supported version causes one retry at that version. Token-update notifications refresh the downstream `Authorization: Bearer` header for later requests. `connectAllServers` reports rejected connection attempts as failed servers rather than omitting them.
+
+Current limits: downstream modern mode is HTTP-only. Modern stdio requires a separate process/client lifecycle migration. Persistent modern downstream `subscriptions/listen`, progress, and cancellation bridging also require a shared incremental SSE listener and request-id lifecycle; they are not advertised or bridged in this release.
 
 Modern MCP requires OAuth bearer authentication on both `/mcp` and `/mcp/public`; query `token` and `api_key` are rejected before modern request handling.
 
@@ -126,7 +138,7 @@ Anonymous access is configured per-server via the Admin API:
 
 ### 1. MCP Protocol Interface
 
-Peta Core fully implements the **Model Context Protocol (MCP)** standard protocol.
+Peta Core implements the MCP gateway methods and transports listed below across its legacy sessionful and modern stateless surfaces. It does not claim every optional MCP capability; current exclusions such as reverse requests, modern stdio, and persistent modern downstream streaming are documented in [Modern MCP 2026-07-28](#modern-mcp-2026-07-28).
 
 #### Core Endpoints
 
@@ -155,7 +167,7 @@ Peta Core does not expose standard downstream reverse-request capabilities such 
 per-user temporary-connection modes. Downstream MCP servers should not expect the
 gateway to route those server-initiated requests back to upstream clients.
 
-For normal upstream client requests, Peta Core preserves MCP progress and cancellation
+For normal upstream client requests routed through legacy SDK-backed downstreams, Peta Core preserves MCP progress and cancellation
 semantics across the proxy boundary. Downstream progress notifications are routed back
 to the originating upstream session and restored to the client's original
 `progressToken`, while upstream `notifications/cancelled` are translated to the actual
@@ -228,13 +240,15 @@ curl -X POST http://localhost:3002/register \
 
 If you provide `grant_types` in client metadata, Peta Core accepts `authorization_code` and `refresh_token`. `client_credentials` is rejected because the `/token` endpoint does not implement that grant.
 
+Dynamic registration returns a generated `client_secret` only when it creates a new confidential traditional client. Re-registering a URL-based client returns public metadata only and never returns a stored secret.
+
 Peta Core stores OAuth client registrations with the authorization-server issuer and accepts `application_type` (`web` or `native`). Authorization redirects include the `iss` parameter, and protected-resource metadata advertises header bearer tokens only for the MCP resource. Native clients may register loopback redirect URIs such as `http://localhost/callback`; authorization accepts the same loopback path with an ephemeral callback port. URL-based Client ID metadata documents must use HTTPS, avoid redirects, and stay within the metadata size limit. If a URL-based MCP client metadata document omits `scope`, Peta Core registers the client with the advertised MCP scopes: `mcp:tools`, `mcp:resources`, and `mcp:prompts`. Metadata fetches reject localhost, private, link-local, and other SSRF-sensitive addresses. Hostname-based metadata URLs that resolve to the VPN/TUN fake-IP range `198.18.0.0/15` are allowed by default for Clash, Surge, Shadowrocket, and similar local proxy environments; direct metadata URLs targeting `198.18.0.0/15` are rejected. Set `OAUTH_CLIENT_METADATA_ALLOW_FAKE_IP=false` to disable this compatibility behavior. If DNS returns multiple validated addresses, Peta Core tries the next validated address when a pinned connection attempt fails.
 
 #### Canonical Issuer And Public URL
 
-OAuth client registrations, authorization codes, and access-token audiences are bound to the public issuer Peta Core derives from the incoming request. Behind a proxy or tunnel, Peta Core uses `X-Forwarded-Proto` and `X-Forwarded-Host`; otherwise it falls back to the request protocol and `Host` header.
+Public Peta Core deployments require `PETA_PUBLIC_URL` set to the canonical external origin (for example `https://peta.example.com`), or a trusted proxy configured through `TRUST_PROXY` that supplies `X-Forwarded-Proto` and `X-Forwarded-Host`. `PETA_PUBLIC_URL` overrides request headers for OAuth issuer and `/mcp` protected-resource URLs. Without either public configuration, raw `Host` is accepted only for localhost and loopback development addresses. Do not set `TRUST_PROXY=true` on a directly exposed service: use an explicit proxy address/subnet or hop count.
 
-`http://localhost:3002` and `https://your-domain.example` are different issuers. Ordinary dynamic registration only reuses an existing client within the same issuer, even when the client name and callback URL are the same. A ChatGPT test against localhost may create one client, while the same ChatGPT callback against the production domain creates or uses a separate production-domain client.
+`http://localhost:3002` and `https://your-domain.example` are different issuers. Each traditional dynamic-registration request creates a new client within the issuer. URL-based registration may reconcile the same public client metadata within its original issuer, but it never returns a previously stored secret. A ChatGPT test against localhost and the same callback against the production domain therefore produce issuer-specific registrations rather than sharing a confidential client.
 
 URL-based Client IDs behave more strictly: the URL itself is the `client_id`, and the current implementation does not allow the same URL-based `client_id` to be registered under another issuer. If you register a URL-based client while testing with localhost, a later registration for the same URL-based `client_id` through the public domain can be rejected.
 
@@ -243,6 +257,8 @@ For production MCP/OAuth clients such as ChatGPT, Claude, or Cursor, configure a
 #### Supported Grant Types
 
 ##### 1. Authorization Code Grant with PKCE (Web/Mobile Apps)
+
+Authorization-code clients must use PKCE `S256`: both `code_challenge` and `code_challenge_method=S256` are required at `/authorize`, and the matching `code_verifier` is required at `/token`. Plain PKCE and no-PKCE authorization-code requests are rejected.
 
 **Step 1**: Generate PKCE parameters
 

@@ -5,6 +5,7 @@
   "description": "Peta Core - Backend service for MCP protocol",
   "main": "dist/index.js",
   "scripts": {
+    "compat:smoke": "node scripts/compat-smoke/run.mjs",
     "dev": "NODE_ENV=development node scripts/start-app.js",
     "dev:backend-only": "tsx src/index.ts",
     "build": "tsc && copyfiles -u 1 'src/**/*.html' dist/",

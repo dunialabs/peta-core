@@ -1,4 +1,5 @@
 import type { LoggerOptions } from 'pino';
+import { redactLogLine } from '../utils/logRedaction.js';
 
 /**
  * Pino logger configuration
@@ -20,16 +21,17 @@ const shouldPrettyPrint = process.env.LOG_PRETTY === 'true' || (isDevelopment &&
  * This ensures that Error.message and custom properties (like UserError.code) are included
  */
 const errorSerializer = (err: Error) => {
-  const serialized: Record<string, any> = {
+  const serialized: Record<string, unknown> = {
     type: err.constructor.name,
+    name: err.name,
     message: err.message,
     stack: err.stack,
   };
 
   // Include all custom properties (like UserError.code, McpError.code, etc.)
-  Object.keys(err).forEach((key) => {
+  Object.entries(err).forEach(([key, value]) => {
     if (!['name', 'message', 'stack'].includes(key)) {
-      serialized[key] = (err as any)[key];
+      serialized[key] = value;
     }
   });
 
@@ -56,6 +58,10 @@ export const loggerConfig: LoggerOptions = {
   serializers: {
     error: errorSerializer,
     err: errorSerializer, // Support both 'error' and 'err' keys
+  },
+
+  hooks: {
+    streamWrite: redactLogLine,
   },
 
   // Pretty printing for development

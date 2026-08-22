@@ -13,11 +13,21 @@ import {
   type ServerCapabilities,
 } from '@modelcontextprotocol/sdk/types.js';
 import { APP_INFO } from '../../config/config.js';
-import { MODERN_MCP_PROTOCOL_VERSION } from '../../config/modernMcp.config.js';
+import { MODERN_MCP_CONFIG, MODERN_MCP_PROTOCOL_VERSION } from '../../config/modernMcp.config.js';
 import type { DownstreamMcpClient } from './DownstreamMcpClient.js';
+import {
+  createRequestBody,
+  encodeHeaderValue,
+  headerAnnotations,
+  isImplementation,
+  isJsonObject,
+  readJsonRpcResponse,
+  toolHeaderValues,
+  type JsonObject,
+  type JsonRpcId,
+} from './ModernHttpDownstreamCodec.js';
 
-type JsonRpcId = string | number | null;
-type JsonObject = Record<string, unknown>;
+type NormalizedOptions = Required<ModernHttpDownstreamClientOptions> & { protocolVersion: string };
 
 export interface ModernHttpDownstreamClientOptions {
   url: URL;
@@ -28,6 +38,7 @@ export interface ModernHttpDownstreamClientOptions {
 interface ModernDiscoverResult extends JsonObject {
   capabilities?: ServerCapabilities;
   serverInfo?: Implementation;
+  _meta?: JsonObject;
 }
 
 export class ModernHttpDownstreamClient implements DownstreamMcpClient {
@@ -35,30 +46,54 @@ export class ModernHttpDownstreamClient implements DownstreamMcpClient {
   private nextId = 1;
   private capabilities: ServerCapabilities;
   private serverInfo: Implementation | undefined;
+  private readonly toolInputSchemas = new Map<string, JsonObject>();
 
   private constructor(
-    private readonly options: Required<ModernHttpDownstreamClientOptions>,
+    private readonly options: NormalizedOptions,
     discoverResult: ModernDiscoverResult,
   ) {
-    this.capabilities = discoverResult.capabilities ?? { tools: {}, resources: {}, prompts: {} };
+    const capabilities = discoverResult.capabilities ?? { tools: {}, resources: {}, prompts: {} };
+    if (capabilities.resources?.subscribe === true) {
+      const resources = { ...capabilities.resources };
+      delete resources.subscribe;
+      this.capabilities = { ...capabilities, resources };
+    } else {
+      this.capabilities = capabilities;
+    }
     this.serverInfo = discoverResult.serverInfo;
   }
 
   static async connect(options: ModernHttpDownstreamClientOptions): Promise<ModernHttpDownstreamClient> {
-    const normalized: Required<ModernHttpDownstreamClientOptions> = {
-      headers: options.headers ?? {},
+    const normalized: NormalizedOptions = {
+      headers: { ...options.headers },
+      protocolVersion: MODERN_MCP_PROTOCOL_VERSION,
       timeoutMs: options.timeoutMs ?? 10_000,
       url: options.url,
     };
-    const discoverResult = await ModernHttpDownstreamClient.sendRequest<ModernDiscoverResult>(
-      normalized,
-      'server/discover',
-      {},
-    );
-    if (!Array.isArray(discoverResult.supportedVersions) || !discoverResult.supportedVersions.includes(MODERN_MCP_PROTOCOL_VERSION)) {
-      throw new Error(`Downstream server does not advertise MCP ${MODERN_MCP_PROTOCOL_VERSION}`);
+    let discoverResult: ModernDiscoverResult;
+    try {
+      discoverResult = await ModernHttpDownstreamClient.sendRequest(normalized, 'server/discover', {});
+    } catch (error) {
+      const supported = error instanceof McpError && error.code === -32022 && isJsonObject(error.data)
+        ? error.data.supported
+        : undefined;
+      const mutuallySupported = Array.isArray(supported)
+        ? MODERN_MCP_CONFIG.supportedVersions.find((version) => supported.includes(version))
+        : undefined;
+      if (!mutuallySupported) {
+        throw error;
+      }
+      normalized.protocolVersion = mutuallySupported;
+      discoverResult = await ModernHttpDownstreamClient.sendRequest(normalized, 'server/discover', {});
     }
-    return new ModernHttpDownstreamClient(normalized, discoverResult);
+    if (!Array.isArray(discoverResult.supportedVersions) || !discoverResult.supportedVersions.includes(normalized.protocolVersion)) {
+      throw new Error(`Downstream server does not advertise MCP ${normalized.protocolVersion}`);
+    }
+    const canonicalServerInfo = discoverResult._meta?.['io.modelcontextprotocol/serverInfo'];
+    const serverInfo = isImplementation(canonicalServerInfo)
+      ? canonicalServerInfo
+      : discoverResult.serverInfo;
+    return new ModernHttpDownstreamClient(normalized, { ...discoverResult, serverInfo });
   }
 
   getServerCapabilities(): ServerCapabilities | undefined {
@@ -77,12 +112,28 @@ export class ModernHttpDownstreamClient implements DownstreamMcpClient {
     // Stateless modern HTTP has no protocol session to close.
   }
 
-  listTools(): Promise<ListToolsResult> {
-    return this.request<ListToolsResult>('tools/list', {});
+  async listTools(): Promise<ListToolsResult> {
+    const result = await this.request<ListToolsResult>('tools/list', {});
+    return {
+      ...result,
+      tools: result.tools.filter((tool) => {
+        const inputSchema = isJsonObject(tool.inputSchema) ? tool.inputSchema : undefined;
+        if (!inputSchema) {
+          this.toolInputSchemas.delete(tool.name);
+          return true;
+        }
+        if (headerAnnotations(inputSchema) === undefined) {
+          this.toolInputSchemas.delete(tool.name);
+          return false;
+        }
+        this.toolInputSchemas.set(tool.name, inputSchema);
+        return true;
+      }),
+    };
   }
 
   callTool(params: JsonObject): Promise<CallToolResult | unknown> {
-    return this.request('tools/call', params, this.headerNameFromParams(params, 'name'));
+    return this.request('tools/call', params, this.headerNameFromParams(params, 'name'), this.toolHeaders(params));
   }
 
   listResources(): Promise<ListResourcesResult> {
@@ -117,8 +168,14 @@ export class ModernHttpDownstreamClient implements DownstreamMcpClient {
     throw new McpError(ErrorCode.MethodNotFound, 'Modern HTTP downstream resource subscriptions are not supported yet');
   }
 
-  async notification(): Promise<void> {
-    // Stateless modern HTTP downstream cancellation/progress notification bridging is not available yet.
+  async notification(notification: unknown): Promise<void> {
+    if (!isJsonObject(notification) || notification.method !== 'notifications/token/update') {
+      return;
+    }
+    const params = notification.params;
+    if (isJsonObject(params) && typeof params.token === 'string') {
+      this.options.headers.Authorization = `Bearer ${params.token}`;
+    }
   }
 
   setNotificationHandler(): void {
@@ -129,8 +186,8 @@ export class ModernHttpDownstreamClient implements DownstreamMcpClient {
     // Shared downstream reverse-request roots are not bridged for modern HTTP downstreams.
   }
 
-  private request<T>(method: string, params: JsonObject, nameHeader?: string): Promise<T> {
-    return ModernHttpDownstreamClient.sendRequest<T>(this.options, method, params, nameHeader, this.nextRequestId());
+  private request<T>(method: string, params: JsonObject, nameHeader?: string, headers: Record<string, string> = {}): Promise<T> {
+    return ModernHttpDownstreamClient.sendRequest<T>(this.options, method, params, nameHeader, this.nextRequestId(), headers);
   }
 
   private nextRequestId(): JsonRpcId {
@@ -142,12 +199,19 @@ export class ModernHttpDownstreamClient implements DownstreamMcpClient {
     return typeof value === 'string' ? value : undefined;
   }
 
+  private toolHeaders(params: JsonObject): Record<string, string> {
+    const name = params.name;
+    const schema = typeof name === 'string' ? this.toolInputSchemas.get(name) : undefined;
+    return toolHeaderValues(schema, isJsonObject(params.arguments) ? params.arguments : {});
+  }
+
   private static async sendRequest<T>(
-    options: Required<ModernHttpDownstreamClientOptions>,
+    options: NormalizedOptions,
     method: string,
     params: JsonObject,
     nameHeader?: string,
     id: JsonRpcId = 0,
+    customHeaders: Record<string, string> = {},
   ): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
@@ -158,62 +222,35 @@ export class ModernHttpDownstreamClient implements DownstreamMcpClient {
           ...options.headers,
           'Content-Type': 'application/json',
           Accept: 'application/json, text/event-stream',
-          'MCP-Protocol-Version': MODERN_MCP_PROTOCOL_VERSION,
+          'MCP-Protocol-Version': options.protocolVersion,
           'Mcp-Method': method,
-          ...(nameHeader ? { 'Mcp-Name': nameHeader } : {}),
+          ...(nameHeader === undefined ? {} : { 'Mcp-Name': encodeHeaderValue(nameHeader) }),
+          ...customHeaders,
         },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id,
-          method,
-          params: {
-            ...params,
-            _meta: {
-              ...(ModernHttpDownstreamClient.isJsonObject(params._meta) ? params._meta : {}),
-              'io.modelcontextprotocol/protocolVersion': MODERN_MCP_PROTOCOL_VERSION,
-              'io.modelcontextprotocol/clientInfo': { name: APP_INFO.name, version: APP_INFO.version },
-              'io.modelcontextprotocol/clientCapabilities': {},
-            },
-          },
-        }),
+        body: JSON.stringify(createRequestBody(params, id, method, options.protocolVersion, APP_INFO)),
         signal: controller.signal,
       });
 
-      if (!response.ok) {
-        throw new Error(`Modern downstream HTTP ${response.status}: ${await response.text()}`);
-      }
-
-      const body = await ModernHttpDownstreamClient.readJsonRpcResponse<T>(response);
+      const body = await readJsonRpcResponse<T>(response, id).catch(async (error) => {
+        if (!response.ok) {
+          throw new Error(`Modern downstream HTTP ${response.status}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        throw error;
+      });
       if (body.error) {
         throw new McpError(
-          typeof body.error.code === 'number' ? body.error.code : ErrorCode.InternalError,
-          body.error.message ?? 'Modern downstream request failed',
+          body.error.code,
+          body.error.message,
+          body.error.data,
         );
       }
-      return body.result as T;
+      if (!response.ok) {
+        throw new Error(`Modern downstream HTTP ${response.status}`);
+      }
+      return body.result;
     } finally {
       clearTimeout(timeout);
     }
   }
 
-  private static isJsonObject(value: unknown): value is JsonObject {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
-  }
-
-  private static async readJsonRpcResponse<T>(response: Response): Promise<{ result?: T; error?: { code?: number; message?: string } }> {
-    const contentType = response.headers.get('content-type') ?? '';
-    if (!contentType.toLowerCase().includes('text/event-stream')) {
-      return await response.json() as { result?: T; error?: { code?: number; message?: string } };
-    }
-
-    const text = await response.text();
-    const dataLine = text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find((line) => line.startsWith('data:'));
-    if (!dataLine) {
-      throw new Error('Modern downstream SSE response did not include a data event');
-    }
-    return JSON.parse(dataLine.slice('data:'.length).trim()) as { result?: T; error?: { code?: number; message?: string } };
-  }
 }

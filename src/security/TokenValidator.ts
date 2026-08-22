@@ -3,6 +3,7 @@ import { AuthContext, AuthError, AuthErrorType, isValidPermissions } from '../ty
 import { UserStatus } from '../types/enums.js';
 import { CryptoService } from './CryptoService.js';
 import { Permissions } from '../mcp/types/mcp.js';
+import { maskToken } from '../utils/tokenMask.js';
 
 export class TokenValidator {
 
@@ -70,7 +71,7 @@ export class TokenValidator {
     // 9. Construct authentication context
     return {
       userId: user.userId,
-      token: token.substring(0, 8) + '...' + token.substring(token.length - 8),
+      token: maskToken(token),
       role: user.role,
       status: user.status,
       permissions: permissions,

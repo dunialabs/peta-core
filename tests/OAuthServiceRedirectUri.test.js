@@ -24,4 +24,10 @@ describe('OAuthService redirect URI compatibility', () => {
       'https://client.example/callback',
     ])).toBe(false);
   });
+
+  test('advertises only S256 PKCE support', () => {
+    const service = new OAuthService();
+
+    expect(service.generateAuthorizationServerMetadata('https://issuer.example').code_challenge_methods_supported).toEqual(['S256']);
+  });
 });

@@ -28,11 +28,17 @@ jest.unstable_mockModule('../dist/logger/index.js', () => ({
 }));
 
 const { ServerManager } = await import('../dist/mcp/core/ServerManager.js');
+const { LogService } = await import('../dist/log/LogService.js');
 const { HubSpotAuthStrategy } = await import('../dist/mcp/auth/HubSpotAuthStrategy.js');
 const { ServerAuthType, ServerCategory } = await import('../dist/types/enums.js');
 
 describe('ServerManager HubSpot OAuth initialization', () => {
   const manager = ServerManager.instance;
+
+  afterAll(async () => {
+    manager.stopIdleCheck?.();
+    await LogService.getInstance().shutdown();
+  });
 
   beforeEach(() => {
     manager.stopIdleCheck?.();

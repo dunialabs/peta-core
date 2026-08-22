@@ -41,6 +41,10 @@ export class OAuthController {
     return typeof value === 'string' ? value : '';
   }
 
+  private hasS256PKCE(codeChallenge: unknown, codeChallengeMethod: unknown): boolean {
+    return typeof codeChallenge === 'string' && codeChallenge.length > 0 && codeChallengeMethod === 'S256';
+  }
+
   /**
    * Escape string for safe inclusion in HTML content
    */
@@ -223,6 +227,11 @@ export class OAuthController {
       // Validate response_type
       if (response_type !== 'code') {
         res.status(400).send('Unsupported response_type');
+        return;
+      }
+
+      if (!this.hasS256PKCE(code_challenge, code_challenge_method)) {
+        res.status(400).send('S256 code_challenge and code_challenge_method are required');
         return;
       }
 
@@ -554,6 +563,10 @@ export class OAuthController {
 
     if (!this.oauthService.validateRedirectUri(redirect_uri, client.redirect_uris)) {
       throw new Error('invalid_request: Invalid redirect_uri');
+    }
+
+    if (!this.hasS256PKCE(code_challenge, code_challenge_method)) {
+      throw new Error('invalid_request: S256 code_challenge and code_challenge_method are required');
     }
 
     let userId = validatedUserId;
@@ -933,31 +946,27 @@ export class OAuthController {
       return;
     }
 
-    // Validate PKCE
-    if (authCode.codeChallenge) {
-      if (!code_verifier) {
-        this.addCorsHeaders(res);
-        res.status(400).json({
-          error: 'invalid_grant',
-          error_description: 'code_verifier is required'
-        });
-        return;
-      }
+    if (!authCode.codeChallenge || authCode.challengeMethod !== 'S256' || !code_verifier) {
+      this.addCorsHeaders(res);
+      res.status(400).json({
+        error: 'invalid_grant',
+        error_description: 'S256 PKCE code_verifier is required'
+      });
+      return;
+    }
 
-      const validPKCE = this.oauthService.verifyPKCEChallenge(
-        code_verifier,
-        authCode.codeChallenge,
-        (authCode.challengeMethod as 'plain' | 'S256') || 'S256'
-      );
+    const validPKCE = this.oauthService.verifyPKCEChallenge(
+      code_verifier,
+      authCode.codeChallenge,
+    );
 
-      if (!validPKCE) {
-        this.addCorsHeaders(res);
-        res.status(400).json({
-          error: 'invalid_grant',
-          error_description: 'Invalid code_verifier'
-        });
-        return;
-      }
+    if (!validPKCE) {
+      this.addCorsHeaders(res);
+      res.status(400).json({
+        error: 'invalid_grant',
+        error_description: 'Invalid code_verifier'
+      });
+      return;
     }
 
     const claim = await prisma.oAuthAuthorizationCode.updateMany({

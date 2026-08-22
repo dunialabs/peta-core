@@ -127,14 +127,32 @@ jest.unstable_mockModule('../dist/mcp/core/cache/ResultCacheService.js', () => (
 
 const { ProxySession } = await import('../dist/mcp/core/ProxySession.js');
 
+function createResponse() {
+  const res = {
+    headersSent: false,
+    status: jest.fn(function () {
+      return this;
+    }),
+    json: jest.fn(),
+  };
+  return res;
+}
+
 describe('ProxySession roots notification registration', () => {
+  let proxySession;
+
   beforeEach(() => {
     transportHandleRequest.mockClear();
     FakeServer.instances.length = 0;
   });
 
+  afterEach(async () => {
+    await proxySession?.cleanup();
+    proxySession = undefined;
+  });
+
   test('registers roots/list_changed handler before client capabilities are populated', async () => {
-    const proxySession = new ProxySession(
+    proxySession = new ProxySession(
       'session-1',
       'user-1',
       {
@@ -163,8 +181,8 @@ describe('ProxySession roots notification registration', () => {
     };
 
     await proxySession.handleRequest(
-      { method: 'POST', body: initializeRequest },
-      {},
+      { method: 'POST', headers: {}, body: initializeRequest },
+      createResponse(),
       initializeRequest,
     );
 

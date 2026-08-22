@@ -3,6 +3,7 @@ import { LogEntry } from '../repositories/LogRepository.js';
 import { MCPEventLogType } from '../types/enums.js';
 import { DisconnectReason } from '../types/auth.types.js';
 import { createLogger } from '../logger/index.js';
+import { redactError, redactStructuredField } from '../utils/logRedaction.js';
 
 /**
  * Async Log Service with Batch Queue
@@ -143,6 +144,11 @@ export class LogService {
    * This is the main method for logging all event types
    */
   async enqueueLog(entry: LogEntry): Promise<void> {
-    await this.enqueue(entry);
+    await this.enqueue({
+      ...entry,
+      requestParams: redactStructuredField(entry.requestParams),
+      responseResult: redactStructuredField(entry.responseResult),
+      error: entry.error === undefined ? undefined : redactError(entry.error),
+    });
   }
 }

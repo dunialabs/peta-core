@@ -128,11 +128,28 @@ jest.unstable_mockModule('../dist/mcp/core/cache/ResultCacheService.js', () => (
 
 const { ProxySession } = await import('../dist/mcp/core/ProxySession.js');
 
+function createResponse() {
+  const res = {
+    headersSent: false,
+    status: jest.fn(function () {
+      return this;
+    }),
+    json: jest.fn(),
+  };
+  return res;
+}
+
 describe('ProxySession transport resumability wiring', () => {
+  const proxySessions = [];
+
   beforeEach(() => {
     transportHandleRequest.mockClear();
     createdTransportOptions.length = 0;
     FakeServer.instances.length = 0;
+  });
+
+  afterEach(async () => {
+    await Promise.all(proxySessions.splice(0).map((proxySession) => proxySession.cleanup()));
   });
 
   test('passes eventStore into StreamableHTTPServerTransport during initialize', async () => {
@@ -153,6 +170,7 @@ describe('ProxySession transport resumability wiring', () => {
       eventStore,
       async () => {},
     );
+    proxySessions.push(proxySession);
 
     const initializeRequest = {
       jsonrpc: '2.0',
@@ -165,9 +183,10 @@ describe('ProxySession transport resumability wiring', () => {
       },
     };
 
+    const res = createResponse();
     await proxySession.handleRequest(
-      { method: 'POST', body: initializeRequest },
-      {},
+      { method: 'POST', headers: {}, body: initializeRequest },
+      res,
       initializeRequest,
     );
 
@@ -175,7 +194,7 @@ describe('ProxySession transport resumability wiring', () => {
     expect(createdTransportOptions[0].eventStore).toBe(eventStore);
     expect(transportHandleRequest).toHaveBeenCalledWith(
       expect.objectContaining({ body: initializeRequest }),
-      {},
+      res,
       initializeRequest,
     );
   });
@@ -201,6 +220,7 @@ describe('ProxySession transport resumability wiring', () => {
       eventStore,
       async () => {},
     );
+    proxySessions.push(proxySession);
 
     const initializeRequest = {
       jsonrpc: '2.0',
@@ -214,8 +234,8 @@ describe('ProxySession transport resumability wiring', () => {
     };
 
     await proxySession.handleRequest(
-      { method: 'POST', body: initializeRequest },
-      {},
+      { method: 'POST', headers: {}, body: initializeRequest },
+      createResponse(),
       initializeRequest,
     );
 

@@ -250,9 +250,16 @@ MCP_2026_ENABLED=false
 # Defaults to MCP_2026_ENABLED. Enables modern probing for HTTP downstream servers.
 MCP_2026_DOWNSTREAM_ENABLED=false
 MCP_2026_SUPPORTED_VERSIONS=2026-07-28
+# Optional exact hostnames allowed in a present modern browser Origin header.
+# MCP_2026_ALLOWED_ORIGIN_HOSTNAMES=
 # Optional canary allowlists; leave empty to allow all modern OAuth clients/tenants.
 # MCP_2026_ALLOWED_CLIENT_IDS=
 # MCP_2026_ALLOWED_TENANT_IDS=
+
+# Canonical public OAuth/MCP origin when publishing through a tunnel or reverse proxy.
+# PETA_PUBLIC_URL=https://peta.example.com
+# Trust only the proxy addresses/hops that supply forwarded headers.
+# TRUST_PROXY='loopback, linklocal, uniquelocal'
 
 # -------------------- Logging Configuration (Pino Logger) --------------------
 LOG_LEVEL=info
@@ -286,7 +293,7 @@ docker compose logs -f
 - **API Service**: http://localhost:3002
 - **Health Check**: http://localhost:3002/health
 
-> **OAuth issuer note:** Docker service names, container ports, host `localhost`, and your public domain are different OAuth issuers from a client perspective. If you expose Peta Core through Cloudflare Tunnel or another reverse proxy, complete ChatGPT, Claude, Cursor, and other MCP/OAuth client setup with the final public `/mcp` URL, not the temporary localhost URL. Ensure the proxy forwards `X-Forwarded-Proto: https` and `X-Forwarded-Host: your-domain.example` so OAuth client registrations, authorization codes, and token audiences are bound to the public domain.
+> **OAuth issuer note:** Docker service names, container ports, host `localhost`, and your public domain are different OAuth issuers from a client perspective. Public Docker deployments require `PETA_PUBLIC_URL=https://your-domain.example` and final public `/mcp` client setup, or `TRUST_PROXY` configured for the proxy that supplies `X-Forwarded-Proto: https` and `X-Forwarded-Host: your-domain.example`. Raw `Host` fallback is localhost/loopback development-only; never trust arbitrary client-supplied forwarding headers.
 
 ## ⚙️ Configuration
 
@@ -377,6 +384,8 @@ curl http://localhost:3002/health
 ### OAuth 2.0 Authentication
 
 Peta Core supports OAuth 2.0 authorization code + PKCE for user-interactive clients and refresh tokens for renewal.
+
+Authorization-code OAuth requires PKCE `S256`: `/authorize` requires `code_challenge` and `code_challenge_method=S256`, and `/token` requires the corresponding `code_verifier`.
 
 For non-interactive automation, you can also authenticate to `/mcp` and `/admin` using a Peta access token (opaque bearer token) associated with a user.
 

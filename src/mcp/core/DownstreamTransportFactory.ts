@@ -56,6 +56,10 @@ export class DownstreamTransportFactory {
       return config.type;
     }
 
+    if (config.mcpProtocol === 'modern' && config.url) {
+      return 'http';
+    }
+
     // Infer from configuration properties
     if (config.command) {
       return 'stdio';

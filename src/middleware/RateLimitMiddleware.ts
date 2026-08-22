@@ -3,6 +3,7 @@ import { RateLimitService } from '../security/RateLimitService.js';
 import { MCPEventLogType } from '../types/enums.js';
 import { LogService } from '../log/LogService.js';
 import { createLogger } from '../logger/index.js';
+import { maskToken } from '../utils/tokenMask.js';
 
 export class RateLimitMiddleware {
   // Logger for RateLimitMiddleware
@@ -38,7 +39,7 @@ export class RateLimitMiddleware {
           sessionId: req.clientSession?.sessionId,
           ip: req.ip,
           userAgent: req.headers['user-agent'],
-          tokenMask: req.authContext.token,
+          tokenMask: maskToken(req.authContext.token),
           error: `Rate limit exceeded: ${rateLimit} requests/min, currentCount: ${rateLimit - result.remaining}`,
         });
 

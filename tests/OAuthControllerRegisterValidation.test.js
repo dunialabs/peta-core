@@ -25,8 +25,21 @@ jest.unstable_mockModule('../dist/security/OAuthTokenValidator.js', () => ({
 }));
 
 const { OAuthController } = await import('../dist/oauth/controllers/OAuthController.js');
+const originalPublicUrl = process.env.PETA_PUBLIC_URL;
 
 describe('OAuthControllerRegisterValidation', () => {
+  beforeEach(() => {
+    process.env.PETA_PUBLIC_URL = 'https://issuer.example';
+  });
+
+  afterAll(() => {
+    if (originalPublicUrl === undefined) {
+      delete process.env.PETA_PUBLIC_URL;
+    } else {
+      process.env.PETA_PUBLIC_URL = originalPublicUrl;
+    }
+  });
+
   test('maps invalid_redirect_uri registration errors to 400', async () => {
     const controller = new OAuthController();
     const status = jest.fn(() => res);

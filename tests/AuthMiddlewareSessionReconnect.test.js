@@ -7,6 +7,7 @@ const getSessionLogger = jest.fn();
 const validateTraditionalToken = jest.fn();
 const validateOAuthToken = jest.fn();
 const findAnonymousServers = jest.fn();
+const findUserById = jest.fn();
 const enqueueLog = jest.fn();
 
 jest.unstable_mockModule('../dist/mcp/core/SessionStore.js', () => ({
@@ -30,7 +31,7 @@ jest.unstable_mockModule('../dist/security/OAuthTokenValidator.js', () => ({
 
 jest.unstable_mockModule('../dist/repositories/UserRepository.js', () => ({
   UserRepository: {
-    findByUserId: jest.fn(),
+    findByUserId: findUserById,
   },
 }));
 
@@ -64,6 +65,7 @@ jest.unstable_mockModule('../dist/logger/index.js', () => ({
 const { AuthMiddleware } = await import('../dist/middleware/AuthMiddleware.js');
 
 const token = 'a'.repeat(128);
+const originalPublicUrl = process.env.PETA_PUBLIC_URL;
 function authenticatedContext() {
   return {
     userId: 'user-1',
@@ -102,6 +104,7 @@ function mockResponse() {
 
 describe('AuthMiddleware session reconnect grace', () => {
   beforeEach(() => {
+    delete process.env.PETA_PUBLIC_URL;
     getSession.mockReset().mockReturnValue(undefined);
     createSession.mockReset().mockImplementation(async (sessionId, userId, sessionToken, authContext) => ({
       sessionId,
@@ -117,7 +120,26 @@ describe('AuthMiddleware session reconnect grace', () => {
     validateTraditionalToken.mockReset().mockImplementation(async () => authenticatedContext());
     validateOAuthToken.mockReset().mockResolvedValue({ valid: false, error: 'not oauth' });
     findAnonymousServers.mockReset().mockResolvedValue([]);
+    findUserById.mockReset().mockResolvedValue({
+      userId: 'user-1',
+      status: 1,
+      role: 1,
+      permissions: '{}',
+      userPreferences: '{}',
+      launchConfigs: '{}',
+      expiresAt: 0,
+      ratelimit: 10,
+      proxyId: 0,
+    });
     enqueueLog.mockReset();
+  });
+
+  afterAll(() => {
+    if (originalPublicUrl === undefined) {
+      delete process.env.PETA_PUBLIC_URL;
+    } else {
+      process.env.PETA_PUBLIC_URL = originalPublicUrl;
+    }
   });
 
   test('reuses a deleted session id only when the tombstone matches the authenticated token', async () => {
@@ -180,6 +202,75 @@ describe('AuthMiddleware session reconnect grace', () => {
     expect(createSession.mock.calls[0][0]).not.toBe('attacker-session');
     expect(createSession.mock.calls[0][0]).toMatch(/^session-/);
     expect(next).toHaveBeenCalled();
+  });
+
+  test('does not expose attacker-controlled forwarded metadata URLs in legacy auth challenges', async () => {
+    process.env.PETA_PUBLIC_URL = 'https://gateway.example.test';
+    const middleware = new AuthMiddleware({ validateToken: validateTraditionalToken });
+    const req = {
+      method: 'POST',
+      body: initializeBody(),
+      headers: {
+        host: 'internal.example.test',
+        'x-forwarded-host': 'attacker.example.test',
+        'x-forwarded-proto': 'https',
+      },
+      originalUrl: '/mcp',
+      query: {},
+      protocol: 'http',
+      app: { get: jest.fn() },
+      socket: { remoteAddress: '127.0.0.1' },
+    };
+    const res = mockResponse();
+
+    await middleware.authenticate(req, res, jest.fn());
+
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'WWW-Authenticate',
+      expect.stringContaining('resource_metadata="https://gateway.example.test/.well-known/oauth-protected-resource"'),
+    );
+  });
+
+  test('returns safe JSON when an unauthenticated request has a hostile raw Host', async () => {
+    const middleware = new AuthMiddleware({ validateToken: validateTraditionalToken });
+    const req = {
+      method: 'POST',
+      body: initializeBody(),
+      headers: { host: 'attacker.example' },
+      originalUrl: '/mcp',
+      protocol: 'http',
+      app: { get: jest.fn() },
+      socket: { remoteAddress: '203.0.113.8' },
+      query: {},
+    };
+    const res = mockResponse();
+
+    await expect(middleware.authenticate(req, res, jest.fn())).resolves.toBeUndefined();
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({
+      jsonrpc: '2.0',
+      error: { code: -32000, message: 'Authorization header with Bearer token is required' },
+    });
+    expect(res.setHeader).not.toHaveBeenCalledWith('WWW-Authenticate', expect.anything());
+  });
+
+  test('fully redacts a short token when refreshing session user information', async () => {
+    const middleware = new AuthMiddleware({ validateToken: validateTraditionalToken });
+    const updateAuthContext = jest.fn();
+    const session = {
+      authContext: authenticatedContext(),
+      userId: 'user-1',
+      token: '1234567890abcdef',
+      sessionId: 'session-1',
+      getLastUserInfoRefresh: () => 0,
+      updateLastUserInfoRefresh: jest.fn(),
+      updateAuthContext,
+    };
+
+    await middleware.refreshUserInfoIfNeeded(session);
+
+    expect(updateAuthContext).toHaveBeenCalledWith(expect.objectContaining({ token: '[redacted]' }));
   });
 
   test('anonymous public initialize can reuse a matching deleted session id', async () => {

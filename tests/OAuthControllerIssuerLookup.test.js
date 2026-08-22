@@ -2,6 +2,7 @@ import { jest } from '@jest/globals';
 
 const getClientForIssuer = jest.fn(async (_clientId, issuer) => ({
   client_id: 'client-1',
+  client_secret: 'stored-confidential-secret',
   issuer,
   client_name: 'Client',
   application_type: 'web',
@@ -44,6 +45,7 @@ jest.unstable_mockModule('../dist/security/OAuthTokenValidator.js', () => ({
 }));
 
 const { OAuthController } = await import('../dist/oauth/controllers/OAuthController.js');
+const originalPublicUrl = process.env.PETA_PUBLIC_URL;
 
 function createReq(overrides = {}) {
   return {
@@ -67,8 +69,17 @@ function createRes() {
 
 describe('OAuthControllerIssuerLookup', () => {
   beforeEach(() => {
+    process.env.PETA_PUBLIC_URL = 'https://issuer.example';
     getClientForIssuer.mockClear();
     verifyClientCredentials.mockClear();
+  });
+
+  afterAll(() => {
+    if (originalPublicUrl === undefined) {
+      delete process.env.PETA_PUBLIC_URL;
+    } else {
+      process.env.PETA_PUBLIC_URL = originalPublicUrl;
+    }
   });
 
   test('getClientInfo scopes lookup by request issuer', async () => {
@@ -79,6 +90,7 @@ describe('OAuthControllerIssuerLookup', () => {
 
     expect(getClientForIssuer).toHaveBeenCalledWith('client-1', 'https://issuer.example');
     expect(res.body.issuer).toBe('https://issuer.example');
+    expect(res.body.client_secret).toBeUndefined();
   });
 
   test('introspect verifies confidential clients against request issuer', async () => {

@@ -81,21 +81,12 @@ export class OAuthService {
   verifyPKCEChallenge(
     codeVerifier: string,
     codeChallenge: string,
-    method: 'plain' | 'S256' = 'S256'
   ): boolean {
-    if (method === 'plain') {
-      return codeVerifier === codeChallenge;
-    }
-
-    if (method === 'S256') {
-      const hash = crypto
-        .createHash('sha256')
-        .update(codeVerifier)
-        .digest('base64url');
-      return hash === codeChallenge;
-    }
-
-    return false;
+    const hash = crypto
+      .createHash('sha256')
+      .update(codeVerifier)
+      .digest('base64url');
+    return hash === codeChallenge;
   }
 
   /**
@@ -300,7 +291,7 @@ export class OAuthService {
       ],
       // New: Token endpoint signature algorithm
       token_endpoint_auth_signing_alg_values_supported: ['HS256'],
-      code_challenge_methods_supported: ['S256', 'plain'],
+      code_challenge_methods_supported: ['S256'],
       authorization_response_iss_parameter_supported: true,
       // New: SEP-991 - URL-based Client ID support
       client_id_metadata_document_supported: true,

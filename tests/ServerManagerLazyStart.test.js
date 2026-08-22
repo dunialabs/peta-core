@@ -152,6 +152,7 @@ jest.unstable_mockModule('../dist/mcp/core/ConnectionStartupDiagnostics.js', () 
 }));
 
 const { ServerManager } = await import('../dist/mcp/core/ServerManager.js');
+const { LogService } = await import('../dist/log/LogService.js');
 const { ServerStatus, ServerCategory, ServerAuthType } = await import('../dist/types/enums.js');
 const { ServerRepository } = await import('../dist/repositories/ServerRepository.js');
 const { SessionStore } = await import('../dist/mcp/core/SessionStore.js');
@@ -195,8 +196,9 @@ describe('ServerManager lazy start lifecycle', () => {
     manager.stopIdleCheck?.();
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     manager.stopIdleCheck?.();
+    await LogService.getInstance().shutdown();
   });
 
   beforeEach(() => {

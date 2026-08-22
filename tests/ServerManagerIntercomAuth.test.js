@@ -31,6 +31,7 @@ jest.unstable_mockModule('../dist/logger/index.js', () => ({
 }));
 
 const { ServerManager } = await import('../dist/mcp/core/ServerManager.js');
+const { LogService } = await import('../dist/log/LogService.js');
 const { IntercomAuthStrategy } = await import('../dist/mcp/auth/IntercomAuthStrategy.js');
 const { ServerAuthType, ServerCategory } = await import('../dist/types/enums.js');
 const { INTERCOM_FAKE_REFRESH_TOKEN } = await import('../dist/mcp/auth/IntercomTokenHelper.js');
@@ -38,8 +39,9 @@ const { INTERCOM_FAKE_REFRESH_TOKEN } = await import('../dist/mcp/auth/IntercomT
 describe('ServerManager Intercom OAuth support', () => {
   const manager = ServerManager.instance;
 
-  afterAll(() => {
+  afterAll(async () => {
     manager.stopIdleCheck?.();
+    await LogService.getInstance().shutdown();
   });
 
   beforeEach(() => {

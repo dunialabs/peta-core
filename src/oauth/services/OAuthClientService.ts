@@ -142,7 +142,6 @@ export class OAuthClientService {
 
         return {
           client_id: reconciledClient.clientId,
-          client_secret: reconciledClient.clientSecret || undefined,
           issuer: reconciledClient.issuer,
           client_name: reconciledClient.name,
           application_type: reconciledClient.applicationType,
@@ -225,49 +224,6 @@ export class OAuthClientService {
     // Default grant types and response types
     const grantTypes = metadata.grant_types || ['authorization_code', 'refresh_token'];
     const responseTypes = metadata.response_types || ['code'];
-
-    // Check for duplicate clients (global uniqueness check)
-    // Duplicate criteria: name + redirectUris + tokenEndpointAuthMethod + grantTypes all the same
-    // Note: Only perform duplicate check when client_name is explicitly provided
-    if (metadata.client_name) {
-      const existingClient = await this.clients.findFirst({
-        where: {
-          name: metadata.client_name,
-          redirectUris: { equals: metadata.redirect_uris },
-          issuer,
-          tokenEndpointAuthMethod: authMethod,
-          grantTypes: { equals: grantTypes },
-          responseTypes: { equals: responseTypes },
-        },
-      });
-
-      // If duplicate client found, return existing client information
-      if (existingClient) {
-        this.logger.info({
-          existingClientId: existingClient.clientId,
-          attemptedClientName: metadata.client_name,
-          redirectUris: metadata.redirect_uris,
-          authMethod,
-          grantTypes,
-        }, 'Duplicate client registration detected, returning existing client');
-
-        return {
-          client_id: existingClient.clientId,
-          issuer: existingClient.issuer,
-          client_secret: existingClient.clientSecret || undefined,
-          client_name: existingClient.name,
-          application_type: existingClient.applicationType,
-          redirect_uris: existingClient.redirectUris as string[],
-          grant_types: existingClient.grantTypes as string[],
-          response_types: existingClient.responseTypes as string[],
-          scopes: existingClient.scopes as string[],
-          token_endpoint_auth_method: existingClient.tokenEndpointAuthMethod,
-          trusted: existingClient.trusted,
-          created_at: existingClient.createdAt,
-          updated_at: existingClient.updatedAt,
-        };
-      }
-    }
 
     // Generate client credentials (only when confirmed to create new client)
     const clientId = this.oauthService.generateClientId();

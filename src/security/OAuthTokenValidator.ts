@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import { UserRepository } from '../repositories/UserRepository.js';
 import { prisma } from '../config/prisma.js';
 import { createLogger } from '../logger/index.js';
+import { maskToken } from '../utils/tokenMask.js';
 
 interface OAuthTokenPayload {
   type: string;
@@ -91,7 +92,7 @@ export class OAuthTokenValidator {
 
       const authContext: AuthContext = {
         userId: user.userId,
-        token: token.substring(0, 8) + '...' + token.substring(token.length - 8),
+        token: maskToken(token),
         role: user.role,
         status: user.status,
         permissions: parsedPermissions as Permissions,

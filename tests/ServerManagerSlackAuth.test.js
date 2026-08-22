@@ -28,11 +28,17 @@ jest.unstable_mockModule('../dist/logger/index.js', () => ({
 }));
 
 const { ServerManager } = await import('../dist/mcp/core/ServerManager.js');
+const { LogService } = await import('../dist/log/LogService.js');
 const { SlackAuthStrategy } = await import('../dist/mcp/auth/SlackAuthStrategy.js');
 const { ServerAuthType, ServerCategory } = await import('../dist/types/enums.js');
 
 describe('ServerManager Slack OAuth initialization', () => {
   const manager = ServerManager.instance;
+
+  afterAll(async () => {
+    manager.stopIdleCheck?.();
+    await LogService.getInstance().shutdown();
+  });
 
   beforeEach(() => {
     manager.stopIdleCheck?.();

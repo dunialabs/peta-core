@@ -42,6 +42,12 @@ if (!JWT_SECRET) {
 
 const MODERN_VERSION = '2026-07-28';
 const LEGACY_VERSION = '2025-11-25';
+const MODERN_ERROR_CODES = {
+  invalidRequest: -32600,
+  invalidParams: -32602,
+  authFailure: -32000,
+  unsupportedProtocolVersion: -32022,
+};
 const PREFIX = 'compat-smoke';
 const oauthClientId = `${PREFIX}-client`;
 const resource = `${BASE_URL}/mcp`;
@@ -182,6 +188,7 @@ try {
   await verifyLegacyUpstream();
   await verifyModernUpstream(modernToken);
   await verifyModernNegativeCases(modernToken);
+  await verifyModernSubscriptionAcknowledgement(modernToken);
 
   report.completedAt = new Date().toISOString();
   report.ok = report.cases.every((item) => item.ok);
@@ -257,7 +264,7 @@ async function verifyLegacyUpstream() {
     clientInfo: { name: 'compat-smoke-legacy-client', version: '1.0.0' },
   }, { id: 1 });
   await testCase('legacy initialize returns session header', async () => {
-    assert(init.status === 200, `initialize status ${init.status}`);
+    assertLegacyRpcSuccess(init, 1, 'legacy initialize');
     assert(init.headers['mcp-session-id'], 'missing mcp-session-id');
     assert(init.body?.result?.protocolVersion, 'missing initialize result');
     return { sessionId: mask(init.headers['mcp-session-id']), protocolVersion: init.body.result.protocolVersion };
@@ -269,6 +276,7 @@ async function verifyLegacyUpstream() {
   const toolNames = list.body?.result?.tools?.map((tool) => tool.name) ?? [];
 
   await testCase('legacy tools/list sees all positive compat tools', async () => {
+    assertLegacyRpcSuccess(list, 2, 'legacy tools/list');
     for (const original of positiveToolOriginals()) {
       assert(toolNames.some((name) => name.startsWith(`${original}_-_`)), `missing ${original}`);
     }
@@ -278,10 +286,13 @@ async function verifyLegacyUpstream() {
   const mixed = await legacyRpc('tools/list', {}, {
     id: 3,
     sessionId,
-    headers: { 'MCP-Protocol-Version': MODERN_VERSION },
+    headers: {
+      'MCP-Protocol-Version': MODERN_VERSION,
+      Origin: 'https://attacker.example.test',
+    },
   });
-  await testCase('legacy valid session tolerates modern-looking header', async () => {
-    assert(mixed.status === 200, `mixed status ${mixed.status}: ${JSON.stringify(mixed.body)}`);
+  await testCase('legacy valid session tolerates modern-looking header and invalid Origin', async () => {
+    assertLegacyRpcSuccess(mixed, 3, 'legacy mixed-era tools/list');
     assert(Array.isArray(mixed.body?.result?.tools), 'missing tools result');
     return { toolCount: mixed.body.result.tools.length };
   });
@@ -292,7 +303,7 @@ async function verifyLegacyUpstream() {
     arguments: { message: 'legacy-to-modern' },
   }, { id: 4, sessionId });
   await testCase('legacy upstream calls modern downstream tool', async () => {
-    assert(call.status === 200, `call status ${call.status}`);
+    assertLegacyRpcSuccess(call, 4, 'legacy tools/call');
     const text = call.body?.result?.content?.[0]?.text ?? '';
     assert(text.includes('modern http tool ok: modern-auto'), `unexpected result: ${text}`);
     return { tool: targetTool, text };
@@ -303,6 +314,8 @@ async function verifyLegacyUpstream() {
   const modernResource = findGatewayName(resourceUris, 'compat://smoke/modern-auto/resource');
   const read = await legacyRpc('resources/read', { uri: modernResource }, { id: 6, sessionId });
   await testCase('legacy upstream reads modern downstream resource', async () => {
+    assertLegacyRpcSuccess(resources, 5, 'legacy resources/list');
+    assertLegacyRpcSuccess(read, 6, 'legacy resources/read');
     const text = read.body?.result?.contents?.[0]?.text ?? '';
     assert(text.includes('modern http resource ok: modern-auto'), `unexpected resource result: ${text}`);
     return { uri: modernResource, text };
@@ -312,7 +325,7 @@ async function verifyLegacyUpstream() {
 async function verifyModernUpstream(modernToken) {
   const discover = await modernRpc(modernToken, 'server/discover', {}, { id: 101 });
   await testCase('modern server/discover is sessionless', async () => {
-    assert(discover.status === 200, `discover status ${discover.status}`);
+    assertJsonRpcSuccess(discover, 101, 'modern server/discover');
     assert(!discover.headers['mcp-session-id'], 'modern response must not include session id');
     assert(discover.body?.result?.supportedVersions?.includes(MODERN_VERSION), 'missing modern version');
     return { supportedVersions: discover.body.result.supportedVersions };
@@ -321,6 +334,7 @@ async function verifyModernUpstream(modernToken) {
   const list = await modernRpc(modernToken, 'tools/list', {}, { id: 102 });
   const toolNames = list.body?.result?.tools?.map((tool) => tool.name) ?? [];
   await testCase('modern tools/list sees all positive compat tools', async () => {
+    assertJsonRpcSuccess(list, 102, 'modern tools/list');
     assert(!list.headers['mcp-session-id'], 'modern tools/list must not include session id');
     for (const original of positiveToolOriginals()) {
       assert(toolNames.some((name) => name.startsWith(`${original}_-_`)), `missing ${original}`);
@@ -334,6 +348,7 @@ async function verifyModernUpstream(modernToken) {
     arguments: { message: 'modern-to-legacy' },
   }, { id: 103, nameHeader: legacyTool });
   await testCase('modern upstream calls legacy stdio downstream tool', async () => {
+    assertJsonRpcSuccess(legacyCall, 103, 'modern legacy tools/call');
     const text = legacyCall.body?.result?.content?.[0]?.text ?? '';
     assert(text.includes('legacy stdio tool ok: legacy-stdio-auto'), `unexpected result: ${text}`);
     return { tool: legacyTool, text };
@@ -345,6 +360,7 @@ async function verifyModernUpstream(modernToken) {
     arguments: { message: 'modern-to-modern' },
   }, { id: 104, nameHeader: modernTool });
   await testCase('modern upstream calls modern downstream tool', async () => {
+    assertJsonRpcSuccess(modernCall, 104, 'modern tools/call');
     const text = modernCall.body?.result?.content?.[0]?.text ?? '';
     assert(text.includes('modern http tool ok: modern-forced'), `unexpected result: ${text}`);
     return { tool: modernTool, text };
@@ -355,6 +371,8 @@ async function verifyModernUpstream(modernToken) {
   const legacyResource = findGatewayName(resourceUris, 'compat://smoke/legacy-http-auto/resource');
   const read = await modernRpc(modernToken, 'resources/read', { uri: legacyResource }, { id: 106, nameHeader: legacyResource });
   await testCase('modern upstream reads legacy downstream resource', async () => {
+    assertJsonRpcSuccess(resources, 105, 'modern resources/list');
+    assertJsonRpcSuccess(read, 106, 'modern resources/read');
     const text = read.body?.result?.contents?.[0]?.text ?? '';
     assert(text.includes('legacy http resource ok: legacy-http-auto'), `unexpected resource result: ${text}`);
     return { uri: legacyResource, text };
@@ -362,6 +380,23 @@ async function verifyModernUpstream(modernToken) {
 }
 
 async function verifyModernNegativeCases(modernToken) {
+  const invalidOrigin = await rawRpc(`${BASE_URL}/mcp`, {
+    jsonrpc: '2.0',
+    id: 200,
+    method: 'tools/list',
+    params: modernParams({}),
+  }, {
+    Authorization: `Bearer ${modernToken}`,
+    Accept: 'application/json, text/event-stream',
+    'MCP-Protocol-Version': MODERN_VERSION,
+    'Mcp-Method': 'tools/list',
+    Origin: 'https://attacker.example.test',
+  });
+  await testCase('modern invalid Origin is rejected', async () => {
+    assertJsonRpcError(invalidOrigin, 403, MODERN_ERROR_CODES.invalidRequest, null, 'modern invalid Origin');
+    return { status: invalidOrigin.status, error: invalidOrigin.body.error };
+  });
+
   const invalidMixed = await rawRpc(`${BASE_URL}/mcp`, {
     jsonrpc: '2.0',
     id: 201,
@@ -374,8 +409,7 @@ async function verifyModernNegativeCases(modernToken) {
     'Mcp-Session-Id': 'stale-compat-smoke-session',
   });
   await testCase('invalid mixed-era request fails closed', async () => {
-    assert(invalidMixed.status >= 400, `expected error status, got ${invalidMixed.status}`);
-    assert(invalidMixed.body?.error, 'expected JSON-RPC error');
+    assertJsonRpcError(invalidMixed, 400, MODERN_ERROR_CODES.invalidRequest, 201, 'mixed-era request');
     return { status: invalidMixed.status, error: invalidMixed.body.error };
   });
 
@@ -389,7 +423,7 @@ async function verifyModernNegativeCases(modernToken) {
     'Mcp-Method': 'tools/list',
   });
   await testCase('modern query token is rejected', async () => {
-    assert(queryToken.status === 401, `expected 401, got ${queryToken.status}`);
+    assertJsonRpcError(queryToken, 401, MODERN_ERROR_CODES.authFailure, null, 'modern query token');
     return { status: queryToken.status, error: queryToken.body?.error };
   });
 
@@ -400,12 +434,12 @@ async function verifyModernNegativeCases(modernToken) {
     params: {},
   }, {
     Authorization: `Bearer ${modernToken}`,
+    Accept: 'application/json, text/event-stream',
     'MCP-Protocol-Version': MODERN_VERSION,
     'Mcp-Method': 'tools/list',
   });
   await testCase('modern missing _meta is rejected', async () => {
-    assert(missingMeta.status >= 400, `expected error status, got ${missingMeta.status}`);
-    assert(missingMeta.body?.error, 'expected JSON-RPC error');
+    assertJsonRpcError(missingMeta, 400, MODERN_ERROR_CODES.invalidParams, 203, 'modern missing _meta');
     return { status: missingMeta.status, error: missingMeta.body.error };
   });
 
@@ -416,13 +450,31 @@ async function verifyModernNegativeCases(modernToken) {
     params: modernParams({}, '2027-01-01'),
   }, {
     Authorization: `Bearer ${modernToken}`,
+    Accept: 'application/json, text/event-stream',
     'MCP-Protocol-Version': '2027-01-01',
     'Mcp-Method': 'tools/list',
   });
   await testCase('future modern version is rejected', async () => {
-    assert(future.status >= 400, `expected error status, got ${future.status}`);
-    assert(future.body?.error, 'expected JSON-RPC error');
+    assertJsonRpcError(future, 400, MODERN_ERROR_CODES.unsupportedProtocolVersion, 204, 'future modern version');
     return { status: future.status, error: future.body.error };
+  });
+}
+
+async function verifyModernSubscriptionAcknowledgement(modernToken) {
+  const acknowledgement = await modernSseRpc(modernToken, 'subscriptions/listen', {
+    notifications: { toolsListChanged: true },
+  }, { id: 107 });
+  await testCase('modern subscription acknowledgement is SSE-correlated', async () => {
+    assertSseContentType(acknowledgement, 'modern subscriptions/listen');
+    assert(acknowledgement.status === 200, `modern subscriptions/listen status ${acknowledgement.status}`);
+    assert(acknowledgement.body?.jsonrpc === '2.0', 'modern subscriptions/listen must return JSON-RPC SSE data');
+    assert(acknowledgement.body?.method === 'notifications/subscriptions/acknowledged', 'missing subscription acknowledgement');
+    assert(
+      acknowledgement.body?.params?._meta?.['io.modelcontextprotocol/subscriptionId'] === 107,
+      `unexpected subscription id: ${JSON.stringify(acknowledgement.body)}`,
+    );
+    assert(acknowledgement.body?.params?.notifications?.toolsListChanged === true, 'missing acknowledged toolsListChanged filter');
+    return { subscriptionId: 107, notification: acknowledgement.body.params.notifications };
   });
 }
 
@@ -489,6 +541,41 @@ async function modernRpc(token, method, params, options = {}) {
   });
 }
 
+async function modernSseRpc(token, method, params, options = {}) {
+  const controller = new AbortController();
+  try {
+    const response = await fetch(`${BASE_URL}/mcp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json, text/event-stream',
+        'MCP-Protocol-Version': MODERN_VERSION,
+        'Mcp-Method': method,
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: options.id ?? 1,
+        method,
+        params: modernParams(params),
+      }),
+      signal: controller.signal,
+    });
+    const reader = response.body?.getReader();
+    assert(reader, 'modern SSE response has no body');
+    const { value } = await reader.read();
+    const raw = new TextDecoder().decode(value);
+    return {
+      status: response.status,
+      headers: Object.fromEntries(response.headers.entries()),
+      body: parseRpcBody(raw, response.headers.get('content-type') ?? ''),
+      raw,
+    };
+  } finally {
+    controller.abort();
+  }
+}
+
 function modernParams(params, version = MODERN_VERSION) {
   return {
     ...params,
@@ -542,6 +629,42 @@ function parseRpcBody(text, contentType = '') {
   } catch {
     return { text };
   }
+}
+
+function assertJsonRpcSuccess(response, id, label) {
+  assert(response.status === 200, `${label} status ${response.status}`);
+  assertJsonContentType(response, label);
+  assert(response.body?.jsonrpc === '2.0', `${label} must return JSON-RPC 2.0`);
+  assert(response.body?.id === id, `${label} response id ${JSON.stringify(response.body?.id)} does not match ${id}`);
+}
+
+function assertLegacyRpcSuccess(response, id, label) {
+  assert(response.status === 200, `${label} status ${response.status}`);
+  assertSseContentType(response, label);
+  assert(response.body?.jsonrpc === '2.0', `${label} must return JSON-RPC 2.0`);
+  assert(response.body?.id === id, `${label} response id ${JSON.stringify(response.body?.id)} does not match ${id}`);
+}
+
+function assertJsonRpcError(response, status, code, id, label) {
+  assert(response.status === status, `${label} status ${response.status}, expected ${status}`);
+  assertJsonContentType(response, label);
+  assert(response.body?.jsonrpc === '2.0', `${label} must return JSON-RPC 2.0`);
+  assert(response.body?.id === id, `${label} error id ${JSON.stringify(response.body?.id)} does not match ${id}`);
+  assert(response.body?.error?.code === code, `${label} error code ${response.body?.error?.code}, expected ${code}`);
+}
+
+function assertJsonContentType(response, label) {
+  assert(
+    response.headers['content-type']?.split(';', 1)[0]?.toLowerCase() === 'application/json',
+    `${label} content type ${response.headers['content-type']}`,
+  );
+}
+
+function assertSseContentType(response, label) {
+  assert(
+    response.headers['content-type']?.split(';', 1)[0]?.toLowerCase() === 'text/event-stream',
+    `${label} content type ${response.headers['content-type']}`,
+  );
 }
 
 async function testCase(name, fn) {

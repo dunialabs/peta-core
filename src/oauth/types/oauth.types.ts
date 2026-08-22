@@ -151,7 +151,7 @@ export interface ProtectedResourceMetadata {
 /**
  * PKCE verification method
  */
-export type PKCEMethod = 'plain' | 'S256';
+export type PKCEMethod = 'S256';
 
 /**
  * OAuth error response
