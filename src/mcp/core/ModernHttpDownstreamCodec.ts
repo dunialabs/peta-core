@@ -1,5 +1,7 @@
 import type { Implementation } from '@modelcontextprotocol/sdk/types.js';
 
+const MAX_SSE_EVENT_BYTES = 64 * 1024;
+
 export type JsonObject = Record<string, unknown>;
 
 export type JsonRpcId = string | number;
@@ -103,12 +105,19 @@ export async function readJsonRpcResponse<T>(response: Response, expectedId: Jso
         buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
         let boundary = /(?:\r\n|\r|\n){2}/.exec(buffer);
         while (boundary) {
-          const result = parseSseEvent<T>(buffer.slice(0, boundary.index), expectedId);
+          const event = buffer.slice(0, boundary.index);
+          if (Buffer.byteLength(event, 'utf8') > MAX_SSE_EVENT_BYTES) {
+            throw new Error('Modern downstream SSE response exceeded the buffer limit');
+          }
+          const result = parseSseEvent<T>(event, expectedId);
           buffer = buffer.slice(boundary.index + boundary[0].length);
           if (result) {
             return result;
           }
           boundary = /(?:\r\n|\r|\n){2}/.exec(buffer);
+        }
+        if (Buffer.byteLength(buffer, 'utf8') > MAX_SSE_EVENT_BYTES) {
+          throw new Error('Modern downstream SSE response exceeded the buffer limit');
         }
         if (done) {
           const result = parseSseEvent<T>(buffer, expectedId);

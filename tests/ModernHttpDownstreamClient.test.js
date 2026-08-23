@@ -179,6 +179,37 @@ describe('ModernHttpDownstreamClient', () => {
     }
   });
 
+  test('rejects an incomplete SSE event that exceeds the response buffer limit', async () => {
+    let openResponse;
+    const server = http.createServer((req, res) => {
+      let raw = '';
+      req.on('data', (chunk) => { raw += chunk; });
+      req.on('end', () => {
+        const body = JSON.parse(raw);
+        res.setHeader('Content-Type', body.method === 'server/discover' ? 'application/json' : 'text/event-stream');
+        if (body.method === 'server/discover') {
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: body.id, result: { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } } }));
+          return;
+        }
+        openResponse = res;
+        res.write(`data: ${'x'.repeat(65 * 1024)}`);
+      });
+    });
+    await new Promise((resolve) => server.listen(0, resolve));
+    try {
+      const { port } = server.address();
+      const client = await ModernHttpDownstreamClient.connect({
+        url: new URL(`http://127.0.0.1:${port}/mcp`),
+        timeoutMs: 500,
+      });
+
+      await expect(client.listTools()).rejects.toThrow('Modern downstream SSE response exceeded the buffer limit');
+    } finally {
+      openResponse?.destroy();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
   test('ignores an unrelated SSE error before the matching response', async () => {
     const server = http.createServer((req, res) => {
       let raw = '';

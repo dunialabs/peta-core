@@ -89,6 +89,8 @@ Successful modern results include `resultType: "complete"` plus conservative cac
 
 Modern HTTP downstreams correlate an SSE response by JSON-RPC id, including error responses, rather than by event position. During `server/discover`, a downstream `-32022` response that advertises a mutually supported version causes one retry at that version. Token-update notifications refresh the downstream `Authorization: Bearer` header for later requests. `connectAllServers` reports rejected connection attempts as failed servers rather than omitting them.
 
+Each complete or incomplete modern downstream SSE event is limited to 64 KiB; oversized events fail closed.
+
 Current limits: downstream modern mode is HTTP-only. Modern stdio requires a separate process/client lifecycle migration. Persistent modern downstream `subscriptions/listen`, progress, and cancellation bridging also require a shared incremental SSE listener and request-id lifecycle; they are not advertised or bridged in this release.
 
 Modern MCP requires OAuth bearer authentication on both `/mcp` and `/mcp/public`; query `token` and `api_key` are rejected before modern request handling.
