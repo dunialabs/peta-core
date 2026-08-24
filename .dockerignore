@@ -10,9 +10,15 @@ dist/
 .git/
 .gitignore
 
+.env
+.env.*
+!.env.example
+
 # IDE
 .vscode/
 .idea/
+.omo/
+.debug-journal.md
 
 # Logs
 logs/
