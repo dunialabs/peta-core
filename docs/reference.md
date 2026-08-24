@@ -188,7 +188,7 @@ Profiles are managed through the Admin API (9310-9314) and the Console UI (Progr
 
 ## Tech Stack
 
-- **Runtime**: Node.js (v18+) and TypeScript
+- **Runtime**: Node.js (v20+) and TypeScript
 - **Framework**: Express
 - **Database**: PostgreSQL with Prisma ORM
 - **Real-time**: Socket.IO

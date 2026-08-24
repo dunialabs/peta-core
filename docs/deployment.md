@@ -4,7 +4,7 @@
 
 ### Prerequisites
 
-- Node.js **v18+**
+- Node.js **v20+**
 - npm
 - Docker and Docker Compose (for PostgreSQL and optional Cloudflare DDNS)
 

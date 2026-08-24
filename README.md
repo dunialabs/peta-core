@@ -4,7 +4,7 @@ A control-plane runtime for MCP (Model Context Protocol). Gateway, vault, policy
 
 Supports the core infrastructure components required to run MCP in production: gateway routing, runtime supervision, policy enforcement, credential management, and audit logging.
 
-![Node](https://img.shields.io/badge/node-%3E%3D18-green.svg)
+![Node](https://img.shields.io/badge/node-%3E%3D20-green.svg)
 ![License](https://img.shields.io/badge/license-ELv2-blue.svg)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-blue.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)
