@@ -3,7 +3,7 @@
 # ====================================
 # Peta-Core One-Click Deployment Script
 # ====================================
-# This script deploys Peta-Core service from Docker image petaio/peta-core:latest
+# This script deploys Peta-Core service from Docker image petaio/peta-core:1.3.0
 # Including PostgreSQL, peta-core, optional peta-auth, and Cloudflared services
 
 set -e
@@ -190,7 +190,7 @@ services:
 
   # Peta Core Service (MCP Gateway)
   peta-core:
-    image: petaio/peta-core:latest
+    image: petaio/peta-core:1.3.0
     container_name: peta-core
     restart: unless-stopped
     user: root  # Root permission required to access Docker socket
@@ -232,7 +232,7 @@ EOF
 
   # Peta Auth Service
   peta-auth:
-    image: petaio/peta-auth:latest
+    image: petaio/peta-auth:1.3.0
     container_name: peta-auth
     restart: unless-stopped
     networks:

@@ -70,6 +70,7 @@ The script will:
 6. Print connection information and next steps.
 
 You can also adapt the generated files to your own Docker or orchestration setup.
+For repeatable production deployments of this release, pin Peta Core to `petaio/peta-core:1.3.0` rather than the moving `latest` tag; the complete Compose example and rollback steps are in [DOCKER_DEPLOYMENT.md](./DOCKER_DEPLOYMENT.md).
 
 ### Production with Node.js/PM2
 

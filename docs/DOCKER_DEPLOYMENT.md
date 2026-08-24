@@ -136,7 +136,7 @@ services:
 
   # Peta Auth Service (used by peta-core)
   peta-auth:
-    image: petaio/peta-auth:latest
+    image: petaio/peta-auth:1.3.0
     container_name: peta-auth
     restart: unless-stopped
     # Optional: required only when using Peta-managed OAuth credentials
@@ -150,7 +150,7 @@ services:
 
   # Peta Core Service (MCP Gateway)
   peta-core:
-    image: petaio/peta-core:latest
+    image: petaio/peta-core:1.3.0
     container_name: peta-core
     restart: unless-stopped
     user: root  # Root permission required to access Docker socket
@@ -515,20 +515,22 @@ lsof -i :5434
 kill -9 <PID>
 ```
 
-### Q2: How to update to the latest version?
+### Q2: How do I update or roll back Peta Core?
 
-**A**: Pull the latest image and restart:
+**A**: Use a versioned image tag for a repeatable deployment. This release is `petaio/peta-core:1.3.0`; update the `peta-core.image` value in `docker-compose.yml`, then pull and recreate only that service:
 
 ```bash
-# Pull latest image
-docker compose pull
+# Pull the pinned Peta Core release
+docker compose pull peta-core
 
-# Restart services
-docker compose up -d
+# Recreate Peta Core without restarting PostgreSQL
+docker compose up -d peta-core
 
 # Verify successful update
-docker compose ps
+docker compose ps peta-core
 ```
+
+To roll back, replace `1.3.0` with the previously deployed version tag and run the same commands. Reserve `latest` for non-production evaluation because it can move between pulls.
 
 ### Q3: Database connection failed?
 

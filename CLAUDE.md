@@ -339,13 +339,13 @@ node scripts/release-main.js cleanup --manifest /tmp/.../manifest.json
 
 **Quick Docker Operations:**
 ```bash
-# Pull latest image
-docker pull petaio/peta-core:latest
+# Pull the current immutable release
+docker pull petaio/peta-core:1.3.0
 
 # Run container
 docker run -d -p 3002:3002 \
   -e DATABASE_URL="postgresql://user:pass@host:5432/db" \
-  petaio/peta-core:latest
+  petaio/peta-core:1.3.0
 
 # Check health
 curl http://localhost:3002/health

@@ -28,8 +28,11 @@ docker login
 ```bash
 cd /path/to/peta-core
 
-# Build multi-architecture image and push to Docker Hub
-docker buildx build --platform linux/amd64,linux/arm64 -t petaio/peta-core:latest --push .
+# Build the immutable release tag and update the moving latest tag together
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t petaio/peta-core:1.3.0 \
+  -t petaio/peta-core:latest \
+  --push .
 ```
 
 ## Build Details
@@ -68,17 +71,17 @@ When the container starts, it executes in the following order:
 
 ```bash
 # Build AMD64 only
-docker buildx build --platform linux/amd64 -t petaio/peta-core:latest --push .
+docker buildx build --platform linux/amd64 -t petaio/peta-core:1.3.0 --push .
 
 # Build ARM64 only
-docker buildx build --platform linux/arm64 -t petaio/peta-core:latest --push .
+docker buildx build --platform linux/arm64 -t petaio/peta-core:1.3.0 --push .
 ```
 
 ### Local Build (No Push)
 
 ```bash
 # Build to local Docker
-docker buildx build --platform linux/amd64 -t petaio/peta-core:latest --load .
+docker buildx build --platform linux/amd64 -t petaio/peta-core:1.3.0 --load .
 
 # View local images
 docker images | grep peta-core
@@ -88,7 +91,7 @@ docker images | grep peta-core
 
 ```bash
 # Start background build
-nohup docker buildx build --platform linux/amd64,linux/arm64 -t petaio/peta-core:latest --push . > /tmp/build-core-$(date +%s).log 2>&1 &
+nohup docker buildx build --platform linux/amd64,linux/arm64 -t petaio/peta-core:1.3.0 --push . > /tmp/build-core-$(date +%s).log 2>&1 &
 
 # View build progress
 tail -f /tmp/build-core-*.log
@@ -97,9 +100,9 @@ tail -f /tmp/build-core-*.log
 ### Use Custom Tags
 
 ```bash
-# Build image with version number
+# Build the release tag and update latest
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t petaio/peta-core:v1.0.0 \
+  -t petaio/peta-core:1.3.0 \
   -t petaio/peta-core:latest \
   --push .
 ```
@@ -109,29 +112,29 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 ### Check Image Details
 
 ```bash
-# View architectures supported by the image
-docker buildx imagetools inspect petaio/peta-core:latest
+# View architectures supported by the immutable release image
+docker buildx imagetools inspect petaio/peta-core:1.3.0
 ```
 
 Example output:
 ```
-Name:      docker.io/petaio/peta-core:latest
+Name:      docker.io/petaio/peta-core:1.3.0
 MediaType: application/vnd.oci.image.index.v1+json
 Digest:    sha256:da979aad645340c4d1e24d718ea6a50cf32a196c2978f5ea60b71f581896d8f6
 
 Manifests:
-  Name:      docker.io/petaio/peta-core:latest@sha256:3aabc6a...
+  Name:      docker.io/petaio/peta-core:1.3.0@sha256:3aabc6a...
   Platform:  linux/amd64
 
-  Name:      docker.io/petaio/peta-core:latest@sha256:645402d...
+  Name:      docker.io/petaio/peta-core:1.3.0@sha256:645402d...
   Platform:  linux/arm64
 ```
 
 ### Local Test Run
 
 ```bash
-# Pull image
-docker pull petaio/peta-core:latest
+# Pull the release image
+docker pull petaio/peta-core:1.3.0
 
 # Run container (requires environment variable configuration)
 docker run -d \
@@ -139,7 +142,7 @@ docker run -d \
   -p 3002:3002 \
   -e DATABASE_URL="postgresql://user:password@host:5432/dbname" \
   -e PROXY_KEY="your-proxy-key" \
-  petaio/peta-core:latest
+  petaio/peta-core:1.3.0
 
 # View logs
 docker logs -f peta-core-test
@@ -259,10 +262,10 @@ Docker automatically caches each build layer. If source code hasn't changed, sub
 
 ```bash
 # First build: 5-10 minutes
-docker buildx build --platform linux/amd64,linux/arm64 -t petaio/peta-core:latest --push .
+docker buildx build --platform linux/amd64,linux/arm64 -t petaio/peta-core:1.3.0 --push .
 
 # Subsequent builds (code changes only): 2-3 minutes
-docker buildx build --platform linux/amd64,linux/arm64 -t petaio/peta-core:latest --push .
+docker buildx build --platform linux/amd64,linux/arm64 -t petaio/peta-core:1.3.0 --push .
 ```
 
 ### Reducing Image Size

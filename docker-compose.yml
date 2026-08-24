@@ -20,7 +20,7 @@ services:
       - peta-core-network
 
   peta-auth:
-    image: petaio/peta-auth:latest
+    image: petaio/peta-auth:${PETA_VERSION:-1.3.0}
     container_name: peta-auth
     restart: unless-stopped
     ports:
@@ -32,7 +32,7 @@ services:
 
   # Peta Core service (uncomment when deploying)
   # peta-core:
-  #   image: petaio/peta-core:latest
+  #   image: petaio/peta-core:${PETA_VERSION:-1.3.0}
   #   container_name: peta-core
   #   restart: unless-stopped
   #   ports:
