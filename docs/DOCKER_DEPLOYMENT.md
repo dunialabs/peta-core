@@ -610,7 +610,9 @@ publishes only `petaio/peta-core:<version>`, requires
 `PETA_RELEASE_PUSH=1`, `DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled`, and a
 lowercase 40-character `PETA_RELEASE_GIT_SHA` equal to `HEAD`. It rejects
 tracked changes and builds only the `git archive` tar stream for that commit.
-It fails closed when the target tag exists or registry state is unreadable, then
+It requires `timeout`, `gtimeout`, or Perl alarm support and limits Docker
+Buildx publication to 15 minutes. It fails closed when no timeout runner is
+available, the build times out, the target tag exists, or registry state is unreadable, then
 verifies the post-push digest plus `linux/amd64` and `linux/arm64` before
 reporting success. It never publishes `latest`, date tags, or mutable aliases. The GHCR
 script is intentionally disabled for this release boundary.

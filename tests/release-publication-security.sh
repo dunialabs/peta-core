@@ -6,6 +6,7 @@ TEST_ROOT="$(mktemp -d)"
 FAKE_BIN="$TEST_ROOT/bin"
 DOCKER_CONFIG_DIR="$TEST_ROOT/docker-config"
 DOCKER_LOG="$TEST_ROOT/docker.log"
+TIMEOUT_LOG="$TEST_ROOT/timeout.log"
 VALID_SHA='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 OTHER_SHA='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 FOREIGN_REPO="$TEST_ROOT/foreign-repo"
@@ -49,6 +50,18 @@ esac
 EOF
 chmod +x "$FAKE_BIN/docker"
 
+cat > "$FAKE_BIN/timeout" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" > "$TIMEOUT_LOG"
+if [[ "${SYNTHETIC_TIMEOUT_STATUS:-0}" != "0" ]]; then
+  exit "$SYNTHETIC_TIMEOUT_STATUS"
+fi
+shift
+exec "$@"
+EOF
+chmod +x "$FAKE_BIN/timeout"
+
 cat > "$FAKE_BIN/git" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -86,6 +99,7 @@ chmod +x "$FAKE_BIN/git"
 
 run_docker_release() {
   : > "$DOCKER_LOG"
+  : > "$TIMEOUT_LOG"
   rm -f "${DOCKER_LOG}.pushed"
   local release_cwd="${7:-$ROOT}"
   set +e
@@ -94,6 +108,7 @@ run_docker_release() {
     env \
       PATH="$FAKE_BIN:$PATH" \
       DOCKER_LOG="$DOCKER_LOG" \
+      TIMEOUT_LOG="$TIMEOUT_LOG" \
       DOCKER_CONFIG="$DOCKER_CONFIG_DIR" \
       IMAGE_NAME="example.invalid/other" \
       PLATFORMS="linux/amd64,linux/arm64,linux/s390x" \
@@ -109,6 +124,7 @@ run_docker_release() {
       PETA_FAKE_GIT_FOREIGN_SHA="$OTHER_SHA" \
       PETA_FAKE_GIT_FOREIGN_HEAD="$OTHER_SHA" \
       PETA_FAKE_GIT_FOREIGN_ARCHIVE_DIR="$FOREIGN_REPO" \
+      SYNTHETIC_TIMEOUT_STATUS="${8:-0}" \
       MANIFEST_VERIFY_ATTEMPTS=1 \
       MANIFEST_VERIFY_DELAY_SECONDS=0 \
       "$ROOT/docker-build-push.sh" --non-interactive 2>&1
@@ -197,10 +213,44 @@ grep -q 'manifest is missing linux/arm64' <<< "$RELEASE_OUTPUT"
 run_docker_release 1 enabled missing
 [[ $RELEASE_STATUS -eq 0 ]]
 grep -Fxq 'buildx build --platform linux/amd64,linux/arm64 --file ./Dockerfile --tag petaio/peta-core:1.3.0 --push -' "$DOCKER_LOG"
+grep -Fxq '900 docker buildx build --platform linux/amd64,linux/arm64 --file ./Dockerfile --tag petaio/peta-core:1.3.0 --push -' "$TIMEOUT_LOG"
 grep -Fxq '.archive-sentinel' "$DOCKER_LOG"
 ! grep -Eq 'latest|[0-9]{8}' "$DOCKER_LOG"
 ! grep -Eq 'example\.invalid|linux/s390x' "$DOCKER_LOG"
 grep -q 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' <<< "$RELEASE_OUTPUT"
+
+for timeout_status in 124 142 143; do
+  run_docker_release 1 enabled missing "$VALID_SHA" "$VALID_SHA" 0 "$ROOT" "$timeout_status"
+  [[ $RELEASE_STATUS -eq $timeout_status ]]
+  [[ ! -f "${DOCKER_LOG}.pushed" ]]
+  ! grep -q '^buildx build ' "$DOCKER_LOG"
+  grep -q "Docker Buildx publication timed out after 15 minutes (exit ${timeout_status})" <<< "$RELEASE_OUTPUT"
+done
+
+NO_TIMEOUT_BIN="$TEST_ROOT/no-timeout-bin"
+mkdir -p "$NO_TIMEOUT_BIN"
+for command_name in bash dirname node; do
+  ln -s "$(command -v "$command_name")" "$NO_TIMEOUT_BIN/$command_name"
+done
+cp "$FAKE_BIN/git" "$NO_TIMEOUT_BIN/git"
+set +e
+NO_TIMEOUT_OUTPUT="$(
+  cd "$ROOT"
+  env \
+    PATH="$NO_TIMEOUT_BIN" \
+    PETA_RELEASE_PUSH=1 \
+    DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled \
+    PETA_RELEASE_GIT_SHA="$VALID_SHA" \
+    PETA_FAKE_GIT_VALID_SHA="$VALID_SHA" \
+    PETA_FAKE_GIT_HEAD="$VALID_SHA" \
+    PETA_FAKE_GIT_DIRTY=0 \
+    PETA_FAKE_GIT_ARCHIVE_DIR="$TEST_ROOT" \
+    "$ROOT/docker-build-push.sh" --non-interactive 2>&1
+)"
+NO_TIMEOUT_STATUS=$?
+set -e
+[[ $NO_TIMEOUT_STATUS -ne 0 ]]
+grep -q 'No supported timeout implementation is available' <<< "$NO_TIMEOUT_OUTPUT"
 
 set +e
 GHCR_OUTPUT="$(cd "$ROOT" && PATH="$FAKE_BIN:$PATH" DOCKER_LOG="$DOCKER_LOG" ./docker-build-push-ghcr.sh 2>&1)"

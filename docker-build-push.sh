@@ -7,6 +7,7 @@ readonly VERSION_TAG="$(node -e "const p=require(process.argv[1]); process.stdou
 readonly PUBLISH_TAG="${PUBLISH_TAG:-$VERSION_TAG}"
 readonly RELEASE_GIT_SHA="${PETA_RELEASE_GIT_SHA:-}"
 readonly PLATFORMS="linux/amd64,linux/arm64"
+readonly PUBLISH_TIMEOUT_SECONDS=900
 readonly MANIFEST_VERIFY_ATTEMPTS="${MANIFEST_VERIFY_ATTEMPTS:-12}"
 readonly MANIFEST_VERIFY_DELAY_SECONDS="${MANIFEST_VERIFY_DELAY_SECONDS:-5}"
 VERBOSE=false
@@ -17,6 +18,7 @@ Usage: PETA_RELEASE_PUSH=1 DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled PETA_RELEASE_
 
 Publishes only ${IMAGE_NAME}:${VERSION_TAG} for linux/amd64 and linux/arm64.
 The semantic-version tag must be protected by Docker Hub's server-side immutable-tag policy.
+Docker Buildx publication is limited to 15 minutes and fails closed on timeout.
 EOF
 }
 
@@ -73,6 +75,18 @@ if [[ ! "$MANIFEST_VERIFY_ATTEMPTS" =~ ^[1-9][0-9]*$ || ! "$MANIFEST_VERIFY_DELA
   exit 1
 fi
 
+timeout_command=()
+if command -v timeout >/dev/null 2>&1; then
+  timeout_command=(timeout "$PUBLISH_TIMEOUT_SECONDS")
+elif command -v gtimeout >/dev/null 2>&1; then
+  timeout_command=(gtimeout "$PUBLISH_TIMEOUT_SECONDS")
+elif command -v perl >/dev/null 2>&1; then
+  timeout_command=(perl -e 'alarm shift; exec @ARGV' "$PUBLISH_TIMEOUT_SECONDS")
+else
+  echo "No supported timeout implementation is available; install timeout, gtimeout, or Perl before publishing." >&2
+  exit 1
+fi
+
 command -v docker >/dev/null || { echo "Docker is required" >&2; exit 1; }
 docker_config="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
 if [[ ! -r "$docker_config" ]] || ! grep -Eq '"(https://index\.docker\.io/v1/|docker\.io|registry-1\.docker\.io)"|"credsStore"|"credHelpers"' "$docker_config"; then
@@ -94,7 +108,24 @@ fi
 
 build_args=(buildx build --platform "$PLATFORMS" --file ./Dockerfile --tag "$IMAGE_REF" --push)
 [[ "$VERBOSE" == true ]] && build_args+=(--progress=plain)
-git archive --format=tar "$RELEASE_GIT_SHA" | docker "${build_args[@]}" -
+set +e
+git archive --format=tar "$RELEASE_GIT_SHA" | "${timeout_command[@]}" docker "${build_args[@]}" -
+pipeline_statuses=("${PIPESTATUS[@]}")
+set -e
+archive_status="${pipeline_statuses[0]}"
+publish_status="${pipeline_statuses[1]}"
+case "$publish_status" in
+  124|142|143)
+    echo "Docker Buildx publication timed out after 15 minutes (exit ${publish_status})." >&2
+    exit "$publish_status"
+    ;;
+esac
+if [[ "$publish_status" -ne 0 ]]; then
+  exit "$publish_status"
+fi
+if [[ "$archive_status" -ne 0 ]]; then
+  exit "$archive_status"
+fi
 
 verified_digest=""
 failure_reason="manifest is unreadable"
