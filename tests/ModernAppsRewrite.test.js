@@ -159,8 +159,8 @@ describe('ModernAppsRewrite', () => {
       uniformRequestId: 'request-1',
       protocolVersion: '2026-07-28',
       authContext: { userId: 'user-1', permissions: {}, userPreferences: {} },
-      req: { on: (_event, handler) => { closeHandler = handler; } },
-      res: { status: jest.fn(), setHeader: jest.fn(), write: jest.fn((chunk) => { chunks.push(chunk); return true; }), end: jest.fn() },
+      req: {},
+      res: { status: jest.fn(), setHeader: jest.fn(), write: jest.fn((chunk) => { chunks.push(chunk); return true; }), end: jest.fn(), on: (_event, handler) => { closeHandler = handler; } },
     };
 
     await controller.handleSubscriptionListen(context, {
@@ -190,8 +190,8 @@ describe('ModernAppsRewrite', () => {
         permissions: {},
         userPreferences: {},
       },
-      req: { on: (_event, handler) => { closeHandler = handler; } },
-      res: { status: jest.fn(), setHeader: jest.fn(), write: jest.fn((chunk) => { chunks.push(chunk); return true; }), end: jest.fn() },
+      req: {},
+      res: { status: jest.fn(), setHeader: jest.fn(), write: jest.fn((chunk) => { chunks.push(chunk); return true; }), end: jest.fn(), on: (_event, handler) => { closeHandler = handler; } },
     };
     const controller = new ModernMcpController();
     const offEvent = jest.spyOn(modernSubscriptionBus, 'offEvent');
@@ -252,8 +252,8 @@ describe('ModernAppsRewrite', () => {
           uniformRequestId,
           protocolVersion: '2026-07-28',
           authContext: { userId: 'user-1', oauthScopes: ['mcp:resources'], permissions: {}, userPreferences: {} },
-          req: { headers: {}, on: (_event, handler) => { closeHandler = handler; } },
-          res: { status: jest.fn(), setHeader: jest.fn(), write: jest.fn(() => true), end: jest.fn() },
+          req: { headers: {} },
+          res: { status: jest.fn(), setHeader: jest.fn(), write: jest.fn(() => true), end: jest.fn(), on: (_event, handler) => { closeHandler = handler; } },
         },
         close: () => closeHandler?.(),
       };

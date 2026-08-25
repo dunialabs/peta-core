@@ -773,7 +773,7 @@ export class ModernMcpController {
     authExpiryTimer = authExpiry === null ? null : setTimeout(() => closeSubscription('auth_expired'), authExpiry);
 
     modernSubscriptionBus.onEvent(listener);
-    context.req.on('close', () => closeSubscription('client_closed'));
+    res.on('close', () => closeSubscription('client_closed'));
   }
 
   private async handleNotification(context: ModernRequestContext, request: ModernJsonRpcRequest): Promise<void> {

@@ -199,12 +199,13 @@ describe('ModernHttpValidation', () => {
       uniformRequestId: 'request-1',
       protocolVersion: '2026-07-28',
       authContext: { userId: 'user-1', oauthScopes: ['mcp:tools', 'mcp:resources', 'mcp:prompts'], permissions: {}, userPreferences: {} },
-      req: { on: (_event, handler) => { closeHandler = handler; } },
+      req: {},
       res: {
         status: jest.fn(),
         setHeader: jest.fn(),
         write: jest.fn((chunk) => { chunks.push(chunk); return true; }),
         end: jest.fn(),
+        on: (_event, handler) => { closeHandler = handler; },
       },
     };
 
@@ -241,8 +242,8 @@ describe('ModernHttpValidation', () => {
       uniformRequestId: 'request-1',
       protocolVersion: '2026-07-28',
       authContext: { userId: 'user-1', oauthScopes: ['mcp:tools', 'mcp:resources', 'mcp:prompts'], permissions: {}, userPreferences: {} },
-      req: { on: (_event, handler) => { closeHandler = handler; } },
-      res: { status: jest.fn(), setHeader: jest.fn(), write: jest.fn((chunk) => { chunks.push(chunk); return true; }), end: jest.fn() },
+      req: {},
+      res: { status: jest.fn(), setHeader: jest.fn(), write: jest.fn((chunk) => { chunks.push(chunk); return true; }), end: jest.fn(), on: (_event, handler) => { closeHandler = handler; } },
     };
 
     await new ModernMcpController().handleSubscriptionListen(context, {
