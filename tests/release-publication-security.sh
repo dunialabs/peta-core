@@ -123,7 +123,8 @@ PUBLISH_OUTPUT="$(cd "$ROOT" && env \
 PUBLISH_STATUS=$?
 set -e
 [[ $PUBLISH_STATUS -ne 0 ]]
-grep -q 'PETA_CONSOLE_TLS_REVOCATION_EVIDENCE' <<< "$PUBLISH_OUTPUT"
+grep -q 'Public Git tag and GitHub Release publication is disabled' <<< "$PUBLISH_OUTPUT"
+! grep -q 'Manifest not found' <<< "$PUBLISH_OUTPUT"
 
 for evidence in revocation rotation deployment; do
   printf 'verified %s evidence\n' "$evidence" > "$TEST_ROOT/$evidence.txt"
@@ -137,7 +138,7 @@ PUBLISH_OUTPUT="$(cd "$ROOT" && env \
 PUBLISH_STATUS=$?
 set -e
 [[ $PUBLISH_STATUS -ne 0 ]]
-grep -q 'Manifest not found' <<< "$PUBLISH_OUTPUT"
-! grep -q 'PETA_CONSOLE_TLS_REVOCATION_EVIDENCE' <<< "$PUBLISH_OUTPUT"
+grep -q 'Public Git tag and GitHub Release publication is disabled' <<< "$PUBLISH_OUTPUT"
+! grep -q 'Manifest not found' <<< "$PUBLISH_OUTPUT"
 
-echo 'PASS: Core publication paths are immutable and public release creation is evidence-gated'
+echo 'PASS: Core publication paths are immutable and automated public Git releases are disabled'

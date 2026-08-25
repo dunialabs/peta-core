@@ -98,8 +98,8 @@ prepare
   bump version with npm, and create the local release commit. No remote side effects.
 
 publish
-  Push the prepared release commit to origin/main, run docker-build-push.sh in
-  non-interactive mode, create/push the release tag, and publish the GitHub release.
+  Disabled. This command never pushes source, Docker images, Git tags, or
+  GitHub Releases. Use the separately reviewed source and Docker release paths.
 
 cleanup
   Remove the temporary worktree and its manifest directory.`);
@@ -225,64 +225,10 @@ function prepareRelease(options) {
   }
 }
 
-function publishRelease(options) {
-  assertPublicReleaseEvidence();
-  ensureCommand('git');
-  ensureCommand('gh');
-
-  const manifest = readManifest(options.manifest);
-  const notesPath = path.resolve(options.notesFile || manifest.notesPath);
-  assertFileExists(manifest.worktreePath, 'Prepared worktree');
-  assertFileExists(notesPath, 'Release notes file');
-
-  const notes = trim(fs.readFileSync(notesPath, 'utf8'));
-
-  if (!notes) {
-    throw new Error(`Release notes file is empty: ${notesPath}`);
-  }
-
-  const currentHead = trim(run('git', ['rev-parse', 'HEAD'], { cwd: manifest.worktreePath }).stdout);
-
-  if (currentHead !== manifest.releaseCommitSha) {
-    throw new Error(
-      `Prepared worktree HEAD ${currentHead} does not match manifest commit ${manifest.releaseCommitSha}`
-    );
-  }
-
-  refreshRemoteState();
-
-  const remoteMainSha = trim(run('git', ['rev-parse', '--verify', baseRef], { cwd: repoRoot }).stdout);
-
-  if (remoteMainSha !== manifest.baseSha && remoteMainSha !== manifest.releaseCommitSha) {
-    throw new Error(
-      `${baseRef} moved from ${manifest.baseSha} to ${remoteMainSha}. Aborting publish to avoid releasing the wrong code.`
-    );
-  }
-
-  if (remoteMainSha === manifest.baseSha) {
-    run('git', ['push', remoteName, `HEAD:main`], { cwd: manifest.worktreePath, stdio: 'inherit' });
-  }
-
-  run('./docker-build-push.sh', ['--non-interactive'], {
-    cwd: manifest.worktreePath,
-    env: {
-      ...process.env,
-      PUBLISH_TAG: manifest.targetVersion
-    },
-    stdio: 'inherit'
-  });
-
-  ensureTagOnRemote(manifest);
-  ensureGitHubRelease(manifest, notesPath);
-
-  safeCleanup(manifest.worktreePath, path.dirname(options.manifest || manifest.notesPath));
-
-  return {
-    action: 'publish',
-    notesPath,
-    targetTag: manifest.targetTag,
-    targetVersion: manifest.targetVersion
-  };
+function publishRelease() {
+  throw new Error(
+    'Public Git tag and GitHub Release publication is disabled. Push reviewed source commits and publish the immutable semver Docker image through their dedicated release paths.'
+  );
 }
 
 function cleanupRelease(options) {
@@ -551,64 +497,6 @@ function resolvePrDetails(repoInfo, prNumber) {
   };
 }
 
-function ensureTagOnRemote(manifest) {
-  const remoteTagSha = trim(
-    runMaybe('git', ['ls-remote', '--tags', remoteName, `refs/tags/${manifest.targetTag}^{}`], {
-      cwd: repoRoot
-    }).stdout
-  );
-
-  if (remoteTagSha) {
-    const [existingSha] = remoteTagSha.split('\t');
-
-    if (existingSha !== manifest.releaseCommitSha) {
-      throw new Error(
-        `Remote tag ${manifest.targetTag} already exists on ${existingSha}, expected ${manifest.releaseCommitSha}`
-      );
-    }
-
-    return;
-  }
-
-  run('git', ['tag', '-a', manifest.targetTag, '-m', `Release ${manifest.targetTag}`], {
-    cwd: manifest.worktreePath
-  });
-  run('git', ['push', remoteName, `refs/tags/${manifest.targetTag}`], {
-    cwd: manifest.worktreePath,
-    stdio: 'inherit'
-  });
-}
-
-function ensureGitHubRelease(manifest, notesPath) {
-  const existing = runMaybe(
-    'gh',
-    ['release', 'view', manifest.targetTag, '--repo', `${manifest.repoInfo.owner}/${manifest.repoInfo.repo}`],
-    { cwd: repoRoot }
-  );
-
-  if (existing.ok) {
-    return;
-  }
-
-  run(
-    'gh',
-    [
-      'release',
-      'create',
-      manifest.targetTag,
-      '--repo',
-      `${manifest.repoInfo.owner}/${manifest.repoInfo.repo}`,
-      '--title',
-      manifest.targetTag,
-      '--notes-file',
-      notesPath,
-      '--latest=false',
-      '--verify-tag'
-    ],
-    { cwd: repoRoot, stdio: 'inherit' }
-  );
-}
-
 function refreshRemoteState() {
   run('git', ['fetch', remoteName, 'main', '--tags', '--prune'], { cwd: repoRoot, stdio: 'inherit' });
 }
@@ -725,23 +613,6 @@ function assertFileExists(targetPath, label) {
   }
 }
 
-function assertPublicReleaseEvidence() {
-  const evidence = [
-    ['PETA_CONSOLE_TLS_REVOCATION_EVIDENCE', process.env.PETA_CONSOLE_TLS_REVOCATION_EVIDENCE],
-    ['PETA_CONSOLE_TLS_ROTATION_EVIDENCE', process.env.PETA_CONSOLE_TLS_ROTATION_EVIDENCE],
-    ['PETA_CONSOLE_REPLACEMENT_DEPLOYMENT_EVIDENCE', process.env.PETA_CONSOLE_REPLACEMENT_DEPLOYMENT_EVIDENCE]
-  ];
-
-  for (const [name, evidencePath] of evidence) {
-    if (!evidencePath || !fs.existsSync(evidencePath) || !fs.statSync(evidencePath).isFile()) {
-      throw new Error(`${name} must point to a readable evidence file before creating a public Git tag or GitHub Release`);
-    }
-    if (!trim(fs.readFileSync(evidencePath, 'utf8'))) {
-      throw new Error(`${name} evidence file is empty: ${evidencePath}`);
-    }
-  }
-}
-
 function assertBump(value) {
   if (!['patch', 'minor', 'major'].includes(value)) {
     throw new Error(`Unsupported bump type: ${value}`);
@@ -774,13 +645,8 @@ function printResult(result, asJson) {
     console.log(`Context:  ${result.contextPath}`);
     console.log(`Notes:    ${result.notesPath}`);
     console.log(`Worktree: ${result.worktreePath}`);
-    console.log(`Publish:  node scripts/release-main.js publish --manifest ${result.manifestPath}`);
+    console.log('Publish:  disabled; use the reviewed source and immutable Docker release paths');
     console.log(`Cleanup:  node scripts/release-main.js cleanup --manifest ${result.manifestPath}`);
-    return;
-  }
-
-  if (result.action === 'publish') {
-    console.log(`Published ${result.targetTag}`);
     return;
   }
 

@@ -106,22 +106,13 @@ The command succeeds only after the pushed manifest has a `sha256` digest and
 contains both `linux/amd64` and `linux/arm64`. GHCR publication is disabled for
 this coordinated release because it is outside that Docker Hub policy boundary.
 
-Public Git tags and GitHub Releases have an additional fail-closed gate. Do not
-set these variables until each referenced file contains independently verified
-evidence for the exposed Console TLS credential:
-
-```bash
-PETA_CONSOLE_TLS_REVOCATION_EVIDENCE=/protected/evidence/revocation.txt \
-PETA_CONSOLE_TLS_ROTATION_EVIDENCE=/protected/evidence/rotation.txt \
-PETA_CONSOLE_REPLACEMENT_DEPLOYMENT_EVIDENCE=/protected/evidence/deployment.txt \
-PETA_RELEASE_PUSH=1 \
-DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled \
-node scripts/release-main.js publish --manifest /tmp/peta-core-release-*/manifest.json
-```
-
-Until revocation, replacement credentials, and their deployed replacement are
-verified, source commits may be pushed through the normal reviewed Git flow,
-but the public tag and GitHub Release must remain absent.
+`scripts/release-main.js publish` is unconditionally disabled and performs no
+source push, Docker push, Git tag creation, or GitHub Release creation. Push
+reviewed source commits through the normal Git flow and publish the immutable
+semver Docker image with the command above. Public tags and GitHub Releases
+require a separately approved operator process after the exposed Console TLS
+credential is revoked, replaced, and the replacement deployment is verified;
+repository-local evidence files are not accepted as authorization.
 
 #### Peta Auth runtime secrets (Docker)
 

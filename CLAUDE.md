@@ -314,9 +314,6 @@ node scripts/release-main.js prepare
 # Prepare a specific version
 node scripts/release-main.js prepare --version 1.2.3
 
-# Publish a prepared release after writing notes to the generated notes file
-node scripts/release-main.js publish --manifest /tmp/.../manifest.json
-
 # Clean up a prepared release workspace
 node scripts/release-main.js cleanup --manifest /tmp/.../manifest.json
 ```
@@ -325,6 +322,11 @@ node scripts/release-main.js cleanup --manifest /tmp/.../manifest.json
 - `manifest.json` - release metadata and paths needed for publish/cleanup
 - `release-context.md` - structured commit/PR context for English release notes
 - `release-notes.md` - target file for the final GitHub release notes
+
+The `publish` subcommand is deliberately disabled. It never pushes source,
+Docker images, Git tags, or GitHub Releases. Use the reviewed Git flow and
+immutable semver Docker publication command separately; public tags and GitHub
+Releases require an independently approved operator process.
 
 **Quick Docker Operations:**
 ```bash

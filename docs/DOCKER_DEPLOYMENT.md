@@ -613,13 +613,13 @@ the post-push digest plus `linux/amd64` and `linux/arm64` before reporting
 success. It never publishes `latest`, date tags, or mutable aliases. The GHCR
 script is intentionally disabled for this release boundary.
 
-Git tag and GitHub Release creation through `scripts/release-main.js publish`
-also requires non-empty evidence files named by
-`PETA_CONSOLE_TLS_REVOCATION_EVIDENCE`,
-`PETA_CONSOLE_TLS_ROTATION_EVIDENCE`, and
-`PETA_CONSOLE_REPLACEMENT_DEPLOYMENT_EVIDENCE`. Leave those variables unset
-until the leaked Console TLS credential is revoked, replaced, and the
-replacement deployment is verified.
+`scripts/release-main.js publish` is unconditionally disabled and never pushes
+source, Docker images, Git tags, or GitHub Releases. Use the normal reviewed Git
+flow for source and the Docker command above for the immutable semver image.
+Public tags and GitHub Releases require a separately approved operator process
+after the exposed Console TLS credential is revoked, replaced, and the
+replacement deployment is verified; repository-local evidence files are not
+accepted as authorization.
 
 ### Q3: Database connection failed?
 
