@@ -56,7 +56,7 @@ Mcp-Method: <json-rpc-method>
 Accept: application/json, text/event-stream
 ```
 
-When present, `Origin` is validated before authentication to prevent DNS rebinding. The origin must be `http` or `https` and use the canonical public hostname, an exact hostname from `MCP_2026_ALLOWED_ORIGIN_HOSTNAMES`, or `localhost`, `127.0.0.1`, or `[::1]`; scheme and port are ignored. Allowlist entries are hostnames only, without a scheme, port, or path. Missing `Origin` is accepted for non-browser clients, while malformed, `null`, or non-allowlisted origins receive HTTP 403.
+When present, `Origin` is validated before authentication to prevent DNS rebinding. It must be an `http` or `https` origin that exactly matches the canonical `PETA_PUBLIC_URL` origin or an entry in `MCP_2026_ALLOWED_ORIGINS`, including scheme, host, and effective port. Allowlist entries are comma-separated `http(s)://host[:port]` origins with no path, query, fragment, or credentials; malformed entries are ignored. `localhost`, `127.0.0.1`, and `[::1]` remain allowed on any HTTP(S) port. Missing `Origin` is accepted for non-browser clients, while malformed, `null`, or non-allowlisted origins receive HTTP 403.
 
 For `tools/call`, `prompts/get`, and `resources/read`, include `Mcp-Name` matching `params.name` or `params.uri`. Send an ordinary printable ASCII value unchanged; values with non-printable characters, leading/trailing whitespace, non-ASCII text, or the sentinel-shaped form are encoded as `=?base64?<UTF-8 base64>?=`. Peta Core decodes that sentinel before comparing it to the request parameter.
 

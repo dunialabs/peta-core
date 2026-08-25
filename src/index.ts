@@ -210,6 +210,8 @@ export async function startApplication() {
         'Content-Type, Authorization, Mcp-Session-Id, mcp-session-id, MCP-Protocol-Version, mcp-protocol-version, Mcp-Method, mcp-method, Mcp-Name, mcp-name, Mcp-Param, mcp-param, Accept, last-event-id',
       MAX_AGE: '86400', // Preflight cache time: 24 hours
     };
+    const mcpRouter = new MCPRouter();
+    mcpRouter.registerModernOriginGuard(app);
     // ==================== Special request handlers - must be before all middleware ====================
 
     app.put(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], (req, res) => {
@@ -514,7 +516,6 @@ export async function startApplication() {
     // ==================== MCP route registration ====================
 
     // Create and register MCP routes
-    const mcpRouter = new MCPRouter();
     mcpRouter.registerRoutes(app, {
       ipWhitelistMiddleware: authModule.ipWhitelistMiddleware,
       authMiddleware: authModule.authMiddleware,

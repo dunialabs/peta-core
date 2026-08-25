@@ -26,10 +26,11 @@ const { MCPRouter } = await import('../dist/mcp/MCPRouter.js');
 const { SessionStore } = await import('../dist/mcp/core/SessionStore.js');
 
 describe('ModernRouterFailClosed', () => {
-  test('rejects an invalid Origin before modern authentication while allowing absent and canonical Origins', async () => {
+  test('allows only exact configured and canonical modern Origins while retaining loopback exceptions', async () => {
     const originalPublicUrl = process.env.PETA_PUBLIC_URL;
-    const originalAllowedOrigins = process.env.MCP_2026_ALLOWED_ORIGIN_HOSTNAMES;
-    delete process.env.PETA_PUBLIC_URL;
+    const originalAllowedOrigins = process.env.MCP_2026_ALLOWED_ORIGINS;
+    process.env.PETA_PUBLIC_URL = 'https://gateway.example.test:7443';
+    delete process.env.MCP_2026_ALLOWED_ORIGINS;
     const app = express();
     app.use(express.json());
     new MCPRouter().registerRoutes(app, {
@@ -58,14 +59,17 @@ describe('ModernRouterFailClosed', () => {
       });
       expect((await postModern()).status).toBe(401);
       expect((await postModern(`http://127.0.0.1:${port}`)).status).toBe(401);
-      expect((await postModern('http://[::1]')).status).toBe(401);
-      process.env.MCP_2026_ALLOWED_ORIGIN_HOSTNAMES = 'console.example.test';
-      expect((await postModern('https://console.example.test')).status).toBe(401);
-      expect((await postModern('http://console.example.test:8443')).status).toBe(401);
-      process.env.MCP_2026_ALLOWED_ORIGIN_HOSTNAMES = 'https://console.example.test';
+      expect((await postModern('https://localhost:8443')).status).toBe(401);
+      expect((await postModern('https://[::1]:8443')).status).toBe(401);
+      process.env.MCP_2026_ALLOWED_ORIGINS = 'https://console.example.test:8443,console.example.test,https://ignored.example.test/path';
+      expect((await postModern('https://console.example.test:8443')).status).toBe(401);
       expect((await postModern('https://console.example.test')).status).toBe(403);
-      process.env.PETA_PUBLIC_URL = 'https://gateway.example.test';
-      expect((await postModern('https://gateway.example.test')).status).toBe(401);
+      expect((await postModern('http://console.example.test:8443')).status).toBe(403);
+      expect((await postModern('https://ignored.example.test')).status).toBe(403);
+      expect((await postModern('https://gateway.example.test:7443')).status).toBe(401);
+      expect((await postModern('https://gateway.example.test')).status).toBe(403);
+      expect((await postModern('http://gateway.example.test:7443')).status).toBe(403);
+      expect((await postModern('https://gateway.example.test:7444')).status).toBe(403);
       expect((await postModern('not an origin')).status).toBe(403);
       expect((await postModern('null')).status).toBe(403);
       expect((await postModern('http://127.0.0.1?')).status).toBe(403);
@@ -78,9 +82,9 @@ describe('ModernRouterFailClosed', () => {
         process.env.PETA_PUBLIC_URL = originalPublicUrl;
       }
       if (originalAllowedOrigins === undefined) {
-        delete process.env.MCP_2026_ALLOWED_ORIGIN_HOSTNAMES;
+        delete process.env.MCP_2026_ALLOWED_ORIGINS;
       } else {
-        process.env.MCP_2026_ALLOWED_ORIGIN_HOSTNAMES = originalAllowedOrigins;
+        process.env.MCP_2026_ALLOWED_ORIGINS = originalAllowedOrigins;
       }
       await new Promise((resolve) => server.close(resolve));
     }
@@ -176,6 +180,15 @@ describe('ModernRouterFailClosed', () => {
     await new Promise((resolve) => server.listen(0, resolve));
     try {
       const { port } = server.address();
+      const invalidOrigin = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'DELETE',
+        headers: {
+          'MCP-Protocol-Version': '2026-07-28',
+          Origin: 'https://attacker.example.test',
+        },
+      });
+      expect(invalidOrigin.status).toBe(403);
+
       const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
         method: 'DELETE',
         headers: { 'MCP-Protocol-Version': '2026-07-28' },
@@ -187,6 +200,61 @@ describe('ModernRouterFailClosed', () => {
         error: { code: -32600, message: 'Modern MCP uses POST-only Streamable HTTP' },
         id: null,
       });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test('rejects modern invalid Origins before PUT, PATCH, HEAD, and OPTIONS special handlers', async () => {
+    const app = express();
+    const router = new MCPRouter();
+    router.registerModernOriginGuard(app);
+    for (const method of ['put', 'patch', 'head', 'options']) {
+      app[method](['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], (_req, res) => res.status(599).end());
+    }
+    app.use(express.json());
+    router.registerRoutes(app, {
+      ipWhitelistMiddleware: { checkIpWhitelist: (_req, _res, next) => next() },
+      authMiddleware: { authenticate: (_req, res) => res.status(598).end() },
+      rateLimitMiddleware: { checkRateLimit: (_req, _res, next) => next() },
+    });
+    const server = http.createServer(app);
+    await new Promise((resolve) => server.listen(0, resolve));
+    try {
+      const { port } = server.address();
+      for (const method of ['PUT', 'PATCH', 'HEAD', 'OPTIONS']) {
+        const blocked = await fetch(`http://127.0.0.1:${port}/mcp`, {
+          method,
+          headers: {
+            'MCP-Protocol-Version': '2026-07-28',
+            Origin: 'https://attacker.example.test',
+          },
+        });
+        expect(blocked.status).toBe(403);
+
+        const legacy = await fetch(`http://127.0.0.1:${port}/mcp`, { method });
+        expect(legacy.status).toBe(599);
+      }
+
+      const bodySignaled = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'https://attacker.example.test',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'server/discover',
+          params: {
+            _meta: {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': {},
+            },
+          },
+        }),
+      });
+      expect(bodySignaled.status).toBe(403);
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }

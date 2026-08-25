@@ -296,8 +296,8 @@ MCP_2026_ENABLED=false
 # Defaults to MCP_2026_ENABLED. Enables modern probing for HTTP downstream servers.
 MCP_2026_DOWNSTREAM_ENABLED=false
 MCP_2026_SUPPORTED_VERSIONS=2026-07-28
-# Optional exact hostnames allowed in a present modern browser Origin header.
-# MCP_2026_ALLOWED_ORIGIN_HOSTNAMES=
+# Optional exact http(s) origins allowed in a present modern browser Origin header.
+# MCP_2026_ALLOWED_ORIGINS=
 # Optional canary allowlists; leave empty to allow all modern OAuth clients/tenants.
 # MCP_2026_ALLOWED_CLIENT_IDS=
 # MCP_2026_ALLOWED_TENANT_IDS=

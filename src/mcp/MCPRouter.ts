@@ -39,6 +39,10 @@ export class MCPRouter {
     this.modernMcpAuthMiddleware = new ModernMcpAuthMiddleware(new TokenValidator());
   }
 
+  registerModernOriginGuard(app: Express): void {
+    app.use(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], this.rejectInvalidModernOrigin);
+  }
+
   /**
    * Register MCP routes and middleware
    * @param app Express application instance
@@ -52,7 +56,7 @@ export class MCPRouter {
     // IP whitelist middleware - applied before authentication
     app.use(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], ipWhitelistMiddleware.checkIpWhitelist);
 
-    app.use(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], this.rejectInvalidModernOrigin);
+    this.registerModernOriginGuard(app);
 
     app.use(['/mcp', '/mcp/', '/mcp/public', '/mcp/public/'], this.modernMcpController.rejectMixedEra);
 
@@ -114,7 +118,7 @@ export class MCPRouter {
   }
 
   private rejectInvalidModernOrigin = (req: Request, res: Response, next: NextFunction): void => {
-    if (req.method !== 'POST' || !this.modernMcpController.shouldHandle(req) || this.isAllowedModernOrigin(req)) {
+    if (!this.modernMcpController.shouldHandle(req) || this.isAllowedModernOrigin(req)) {
       return next();
     }
     res.status(403).json(modernErrorResponse(undefined, new ModernMcpError(403, ModernErrorCodes.InvalidRequest, 'Invalid Origin header')));
@@ -129,35 +133,35 @@ export class MCPRouter {
       return false;
     }
 
-    let origin: URL;
-    try {
-      origin = new URL(rawOrigin);
-    } catch {
+    const origin = this.getExactOrigin(rawOrigin);
+    if (!origin) {
       return false;
     }
-    const isHttpOrigin = origin.protocol === 'http:' || origin.protocol === 'https:';
-    const hasOriginPath = origin.pathname !== '/' || rawOrigin.endsWith('/') || rawOrigin.includes('?') || rawOrigin.includes('#');
-    if (!isHttpOrigin || hasOriginPath || origin.username || origin.password) {
-      return false;
+    if (origin.hostname === 'localhost' || origin.hostname === '127.0.0.1' || origin.hostname === '[::1]') {
+      return true;
     }
-
-    const allowedHostnames = new Set(['localhost', '127.0.0.1', '[::1]']);
-    for (const hostname of (process.env.MCP_2026_ALLOWED_ORIGIN_HOSTNAMES ?? '').split(',')) {
-      const trimmedHostname = hostname.trim().toLowerCase();
-      if (trimmedHostname) {
-        allowedHostnames.add(trimmedHostname);
+    for (const allowedOrigin of (process.env.MCP_2026_ALLOWED_ORIGINS ?? '').split(',')) {
+      if (this.getExactOrigin(allowedOrigin.trim())?.origin === origin.origin) {
+        return true;
       }
     }
-    const canonicalHostname = this.getCanonicalHostname(req);
-    if (canonicalHostname) {
-      allowedHostnames.add(canonicalHostname);
-    }
-    return allowedHostnames.has(origin.hostname);
+    return this.getCanonicalOrigin(req) === origin.origin;
   }
 
-  private getCanonicalHostname(req: Request): string | undefined {
+  private getExactOrigin(rawOrigin: string): URL | undefined {
     try {
-      return new URL(getPublicUrl(req)).hostname;
+      const origin = new URL(rawOrigin);
+      const isHttpOrigin = origin.protocol === 'http:' || origin.protocol === 'https:';
+      const hasOriginPath = origin.pathname !== '/' || rawOrigin.endsWith('/') || rawOrigin.includes('?') || rawOrigin.includes('#');
+      return isHttpOrigin && !hasOriginPath && !origin.username && !origin.password ? origin : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private getCanonicalOrigin(req: Request): string | undefined {
+    try {
+      return new URL(getPublicUrl(req)).origin;
     } catch {
       return undefined;
     }
