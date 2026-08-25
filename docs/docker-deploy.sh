@@ -3,7 +3,6 @@
 # ====================================
 # Peta-Core One-Click Deployment Script
 # ====================================
-# This script deploys Peta-Core service from Docker image petaio/peta-core:1.3.0
 # Including PostgreSQL, peta-core, optional peta-auth, and Cloudflared services
 
 set -e
@@ -20,7 +19,20 @@ NC='\033[0m' # No Color
 BACKEND_PORT=${BACKEND_PORT:-3002}
 DB_PORT=${DB_PORT:-5434}
 DEPLOY_DIR=${DEPLOY_DIR:-./peta-core-deployment}
-PETA_AUTH_AUTOSTART=${PETA_AUTH_AUTOSTART:-true}
+PETA_VERSION=${PETA_VERSION:-1.3.0}
+PETA_AUTH_VERSION=${PETA_AUTH_VERSION:-1.3.0}
+PETA_AUTH_AUTOSTART=${PETA_AUTH_AUTOSTART:-false}
+PETA_AUTH_MASTER_KEY_SOURCE=${PETA_AUTH_MASTER_KEY_SOURCE:-./secrets/peta_auth_master_key}
+PETA_AUTH_CLIENT_SECRETS_SOURCE=${PETA_AUTH_CLIENT_SECRETS_SOURCE:-./secrets/peta_auth_client_secrets.json}
+
+case "$PETA_AUTH_MASTER_KEY_SOURCE" in
+    /*) ;;
+    *) PETA_AUTH_MASTER_KEY_SOURCE="$(pwd -P)/${PETA_AUTH_MASTER_KEY_SOURCE#./}" ;;
+esac
+case "$PETA_AUTH_CLIENT_SECRETS_SOURCE" in
+    /*) ;;
+    *) PETA_AUTH_CLIENT_SECRETS_SOURCE="$(pwd -P)/${PETA_AUTH_CLIENT_SECRETS_SOURCE#./}" ;;
+esac
 
 # Logging functions
 log_info() {
@@ -90,6 +102,29 @@ wait_for_health() {
     return 1
 }
 
+auth_secret_stat() {
+    local field=$1
+    local path=$2
+
+    case "$(uname -s)" in
+        Darwin)
+            case "$field" in
+                owner) stat -f '%Su' "$path" ;;
+                mode) stat -f '%Lp' "$path" ;;
+            esac
+            ;;
+        Linux)
+            case "$field" in
+                owner) stat -c '%U' "$path" ;;
+                mode) stat -c '%a' "$path" ;;
+            esac
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 # Main function
 main() {
     log_step "Peta-Core One-Click Deployment Script"
@@ -136,12 +171,12 @@ main() {
     if [ -d "$DEPLOY_DIR" ]; then
         log_error "Deployment directory already exists: $DEPLOY_DIR"
         echo ""
-        log_info "If you need to redeploy, please delete the directory first: rm -rf $DEPLOY_DIR"
-        log_info "Or enter the directory to start services directly: cd $DEPLOY_DIR && docker compose up -d"
+        log_info "If you need to redeploy, remove the directory using a literal-path-safe command for your shell"
+        log_info "Or enter the directory using a literal-path-safe command, then run docker compose up -d"
         exit 1
     fi
-    mkdir -p $DEPLOY_DIR
-    cd $DEPLOY_DIR
+    mkdir -p -- "$DEPLOY_DIR"
+    cd -- "$DEPLOY_DIR"
     log_success "Deployment directory: $(pwd)"
     
     # Fixed database configuration
@@ -190,7 +225,7 @@ services:
 
   # Peta Core Service (MCP Gateway)
   peta-core:
-    image: petaio/peta-core:1.3.0
+    image: petaio/peta-core:${PETA_VERSION}
     container_name: peta-core
     restart: unless-stopped
     user: root  # Root permission required to access Docker socket
@@ -228,17 +263,29 @@ services:
 EOF
 
     if [ "$PETA_AUTH_AUTOSTART" != "false" ]; then
-        cat >> docker-compose.yml <<EOF
+        cat >> docker-compose.yml <<'EOF'
 
   # Peta Auth Service
   peta-auth:
-    image: petaio/peta-auth:1.3.0
+    image: petaio/peta-auth:${PETA_AUTH_VERSION}
     container_name: peta-auth
     restart: unless-stopped
+    environment:
+      PETA_AUTH_MASTER_KEY_FILE: /run/secrets/peta_auth_master_key
+      PETA_AUTH_CLIENT_SECRETS_FILE: /run/secrets/peta_auth_client_secrets_json
+    secrets:
+      - peta_auth_master_key
+      - peta_auth_client_secrets_json
     networks:
       - peta-network
     volumes:
       - peta-auth-data:/data
+    healthcheck:
+      test: ['CMD', '/usr/bin/bash', '-c', 'exec 3<>/dev/tcp/localhost/7788 || exit 1; printf "GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; response=""; while IFS= read -r -t 2 line <&3; do response+="$$line"; done; [[ "$$response" == *"\"ok\":true"* ]]']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 EOF
     fi
 
@@ -268,6 +315,17 @@ EOF
         cat >> docker-compose.yml <<EOF
   peta-auth-data:
     driver: local
+EOF
+    fi
+
+    if [ "$PETA_AUTH_AUTOSTART" != "false" ]; then
+        cat >> docker-compose.yml <<EOF
+
+secrets:
+  peta_auth_master_key:
+    file: ${PETA_AUTH_MASTER_KEY_SOURCE:-./secrets/peta_auth_master_key}
+  peta_auth_client_secrets_json:
+    file: ${PETA_AUTH_CLIENT_SECRETS_SOURCE:-./secrets/peta_auth_client_secrets.json}
 EOF
     fi
 
@@ -322,6 +380,10 @@ LAZY_START_ENABLED=true
 # -------------------- Peta Auth Configuration (Optional) --------------------
 # Auto-start peta-auth for Peta-managed OAuth credentials
 PETA_AUTH_AUTOSTART=${PETA_AUTH_AUTOSTART}
+PETA_VERSION=${PETA_VERSION}
+PETA_AUTH_VERSION=${PETA_AUTH_VERSION}
+PETA_AUTH_MASTER_KEY_SOURCE=${PETA_AUTH_MASTER_KEY_SOURCE}
+PETA_AUTH_CLIENT_SECRETS_SOURCE=${PETA_AUTH_CLIENT_SECRETS_SOURCE}
 
 # -------------------- Cloudflared Configuration --------------------
 CLOUDFLARED_CONTAINER_NAME=peta-core-cloudflared
@@ -338,6 +400,44 @@ EOF
     log_step "Creating Cloudflared configuration directory"
     mkdir -p cloudflared
     log_success "Cloudflared configuration directory created"
+
+    if [ "$PETA_AUTH_AUTOSTART" != "false" ]; then
+        log_step "Checking protected Peta Auth runtime secrets"
+        if [ -L "$PETA_AUTH_MASTER_KEY_SOURCE" ] || [ -L "$PETA_AUTH_CLIENT_SECRETS_SOURCE" ]; then
+            log_error "Peta Auth runtime secret files must not be symbolic links"
+            exit 1
+        fi
+        if [ ! -f "$PETA_AUTH_MASTER_KEY_SOURCE" ] || [ ! -f "$PETA_AUTH_CLIENT_SECRETS_SOURCE" ] || [ ! -s "$PETA_AUTH_CLIENT_SECRETS_SOURCE" ]; then
+            log_error "Peta Auth runtime secrets are missing"
+            log_info "Provision the protected files at $PETA_AUTH_MASTER_KEY_SOURCE and $PETA_AUTH_CLIENT_SECRETS_SOURCE, then run docker compose up -d"
+            exit 1
+        fi
+        current_user=$(id -un)
+        for secret_file in "$PETA_AUTH_MASTER_KEY_SOURCE" "$PETA_AUTH_CLIENT_SECRETS_SOURCE"; do
+            secret_parent=$(dirname "$secret_file")
+            if [ -L "$secret_parent" ]; then
+                log_error "Peta Auth runtime secret parent directories must be current-user owned, non-symlinked, and not group/other-writable"
+                exit 1
+            fi
+            if ! secret_owner=$(auth_secret_stat owner "$secret_file") || ! secret_mode=$(auth_secret_stat mode "$secret_file") || ! secret_parent_owner=$(auth_secret_stat owner "$secret_parent") || ! secret_parent_mode=$(auth_secret_stat mode "$secret_parent"); then
+                log_error "Unable to inspect Peta Auth runtime secret ownership and permissions on this operating system"
+                exit 1
+            fi
+            if [ "$secret_owner" != "$current_user" ] || [ "${secret_mode: -2}" != "00" ]; then
+                log_error "Peta Auth runtime secret files must be current-user owned with owner-only permissions (for example, 0400 or 0600)"
+                exit 1
+            fi
+            if [ "$secret_parent_owner" != "$current_user" ] || (( (8#$secret_parent_mode & 8#022) != 0 )); then
+                log_error "Peta Auth runtime secret parent directories must be current-user owned, non-symlinked, and not group/other-writable"
+                exit 1
+            fi
+        done
+        if [ "$(wc -c < "$PETA_AUTH_MASTER_KEY_SOURCE")" -ne 32 ]; then
+            log_error "Peta Auth master key must be exactly 32 raw bytes"
+            exit 1
+        fi
+        log_success "Protected Peta Auth runtime secrets found"
+    fi
     
     # If existing database detected, stop script execution
     if [ "$EXISTING_DB" = true ]; then

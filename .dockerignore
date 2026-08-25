@@ -14,6 +14,9 @@ dist/
 .env.*
 !.env.example
 
+# Deployment runtime secrets (provided through Compose secrets)
+secrets/
+
 # IDE
 .vscode/
 .idea/

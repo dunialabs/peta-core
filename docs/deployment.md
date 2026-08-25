@@ -22,6 +22,9 @@ Start the full development environment (gateway + local database):
 npm run dev
 ```
 
+`.env.example` defaults `PETA_AUTH_AUTOSTART=false`, so local setup does not
+start Auth until its separate runtime secrets have been provisioned.
+
 Start only the backend (if you already have PostgreSQL running):
 
 ```bash
@@ -63,14 +66,43 @@ chmod +x docker-deploy.sh
 The script will:
 
 1. Validate your Docker environment.
-2. Generate random secrets (for example `JWT_SECRET` and a database password).
+2. Generate deployment secrets such as `JWT_SECRET` and a database password; Peta Auth runtime secrets are provisioned separately and are never generated or printed by this script.
 3. Create a `docker-compose.yml` and `.env` file.
-4. Start all services (PostgreSQL, Peta Core, and optional Cloudflared DDNS).
-5. Wait for basic health checks.
-6. Print connection information and next steps.
+4. Validate separately provisioned Peta Auth runtime-secret files when Auth is enabled.
+5. Start PostgreSQL, Peta Core, optional Peta Auth, and optional Cloudflared DDNS.
+6. Wait for basic health checks.
+7. Print connection information and next steps.
+
+The default deployment starts Core without Peta Auth and does not require Auth
+secret files. Enable it only after provisioning the protected files:
+
+```bash
+PETA_AUTH_AUTOSTART=true ./docker-deploy.sh
+```
 
 You can also adapt the generated files to your own Docker or orchestration setup.
-For repeatable production deployments of this release, pin Peta Core to `petaio/peta-core:1.3.0` rather than the moving `latest` tag; the complete Compose example and rollback steps are in [DOCKER_DEPLOYMENT.md](./DOCKER_DEPLOYMENT.md).
+The coordinated `1.3.0` images are still in pre-publication preparation. Do not
+install or update to that version until the Core, Console, and Auth manifests
+are available for both `linux/amd64` and `linux/arm64`. After publication, pin
+Peta Core with `PETA_VERSION=1.3.0` rather than the moving `latest` tag. Auth
+remains independently pinned with `PETA_AUTH_VERSION=1.3.0`, so a Core rollback
+does not change Auth; the complete Compose example and rollback steps are in
+[DOCKER_DEPLOYMENT.md](./DOCKER_DEPLOYMENT.md).
+
+#### Peta Auth runtime secrets (Docker)
+
+The coordinated `1.3.0` Docker contract keeps Peta Auth on the private Compose network. Do not publish host port `7788`. When Peta-managed OAuth credentials are enabled, Compose must provide exactly these secrets to `peta-auth` and to no other service:
+
+- `peta_auth_master_key`: raw 32-byte key.
+- `peta_auth_client_secrets_json`: encrypted JSON produced by the Peta Auth provisioning flow.
+
+The service receives them read-only at `/run/secrets/peta_auth_master_key` and `/run/secrets/peta_auth_client_secrets_json`, with `PETA_AUTH_MASTER_KEY_FILE` and `PETA_AUTH_CLIENT_SECRETS_FILE` set to those paths. Provision the source files separately under a protected directory (default `./secrets/`, resolved from the directory where `docker-deploy.sh` is run), using `PETA_AUTH_MASTER_KEY_SOURCE` and `PETA_AUTH_CLIENT_SECRETS_SOURCE`; the JSON file defaults to `peta_auth_client_secrets.json`. Both sources must be regular, current-user-owned files (not symbolic links) with owner-only permissions, such as mode `0400` or `0600`; the JSON file must be non-empty. Each source file's immediate parent must be a current-user-owned, non-symlink directory without group/other write permission; the installer does not constrain higher ancestors, so separately provisioned absolute paths remain supported. Never put their contents in `.env`, source control, logs, or command output. The installer and `.env.example` default `PETA_AUTH_AUTOSTART=false`; set it to `true` only after these files are valid.
+
+Rotate or roll back these files separately from the deployment config: retain a protected previous pair, replace both files atomically, recreate only `peta-auth`, and verify Core-to-Auth connectivity on the Compose network. On rollback, restore the previous pair and recreate only `peta-auth`; do not remove `peta-auth-data`, the database volume, or expose `7788`.
+
+Use `PETA_VERSION` for a Core-only image rollback and keep
+`PETA_AUTH_VERSION=1.3.0`; changing Auth requires an explicit
+`PETA_AUTH_VERSION` override.
 
 ### Production with Node.js/PM2
 

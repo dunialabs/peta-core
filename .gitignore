@@ -66,6 +66,9 @@ Thumbs.db
 .env.production
 .env.ports
 
+# Deployment runtime secrets (provisioned outside source control)
+secrets/
+
 .claude/
 .codex/
 .github/

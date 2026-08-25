@@ -50,15 +50,38 @@ The script will automatically:
 1. Check Docker environment
 2. Generate random passwords (JWT_SECRET, database password)
 3. Create docker-compose.yml and .env files
-4. Start all services (PostgreSQL + peta-core + optional peta-auth + Cloudflared)
-5. Wait for health checks to pass
-6. Display access information
+4. Validate separately provisioned Peta Auth runtime-secret files when Peta Auth is enabled
+5. Start all services (PostgreSQL + peta-core + optional peta-auth + Cloudflared)
+6. Wait for health checks to pass
+7. Display access information
 
-If you are certain you will not use Peta-managed OAuth credentials, you can skip installing and starting `peta-auth`:
+The installer defaults to Core without `peta-auth`, so it does not require Auth
+secret files. Enable Auth only after provisioning them:
 
 ```bash
-PETA_AUTH_AUTOSTART=false ./docker-deploy.sh
+PETA_AUTH_AUTOSTART=true ./docker-deploy.sh
 ```
+
+When Peta Auth is enabled, provision its runtime secrets separately before the
+script starts services. Do not generate, paste, or print these values through
+`.env`, shell history, logs, or source control:
+
+- `peta_auth_master_key`: raw 32-byte key.
+- `peta_auth_client_secrets_json`: encrypted JSON from the Peta Auth provisioning flow.
+
+Store them at the protected paths configured by
+`PETA_AUTH_MASTER_KEY_SOURCE` and `PETA_AUTH_CLIENT_SECRETS_SOURCE`
+(defaults: `./secrets/peta_auth_master_key` and
+`./secrets/peta_auth_client_secrets.json`, resolved from the directory where
+you run `docker-deploy.sh`). Both sources must be regular, current-user-owned
+files (not symbolic links) with owner-only permissions, such as mode `0400` or
+`0600`; the JSON file must be non-empty. Each source file's immediate parent must be a
+current-user-owned, non-symlink directory without group/other write permission;
+higher ancestors are not constrained, so separately provisioned absolute paths
+remain supported. The files
+are mounted only into `peta-auth` as read-only Compose
+secrets at `/run/secrets/peta_auth_master_key` and
+`/run/secrets/peta_auth_client_secrets_json`.
 
 ### Manual Deployment
 
@@ -136,21 +159,32 @@ services:
 
   # Peta Auth Service (used by peta-core)
   peta-auth:
-    image: petaio/peta-auth:1.3.0
+    image: petaio/peta-auth:${PETA_AUTH_VERSION:-1.3.0}
     container_name: peta-auth
     restart: unless-stopped
+    profiles: [auth]
     # Optional: required only when using Peta-managed OAuth credentials
-    # Expose this port only when running peta-core on the host machine
-    # ports:
-    #   - '7788:7788'
+    # Keep Auth private on the Compose network; do not publish host port 7788.
+    environment:
+      PETA_AUTH_MASTER_KEY_FILE: /run/secrets/peta_auth_master_key
+      PETA_AUTH_CLIENT_SECRETS_FILE: /run/secrets/peta_auth_client_secrets_json
+    secrets:
+      - peta_auth_master_key
+      - peta_auth_client_secrets_json
     networks:
       - peta-network
     volumes:
       - peta-auth-data:/data
+    healthcheck:
+      test: ['CMD', '/usr/bin/bash', '-c', 'exec 3<>/dev/tcp/localhost/7788 || exit 1; printf "GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; response=""; while IFS= read -r -t 2 line <&3; do response+="$$line"; done; [[ "$$response" == *"\"ok\":true"* ]]']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # Peta Core Service (MCP Gateway)
   peta-core:
-    image: petaio/peta-core:1.3.0
+    image: petaio/peta-core:${PETA_VERSION:-1.3.0}
     container_name: peta-core
     restart: unless-stopped
     user: root  # Root permission required to access Docker socket
@@ -206,6 +240,12 @@ volumes:
   peta-auth-data:
     driver: local
 
+secrets:
+  peta_auth_master_key:
+    file: ${PETA_AUTH_MASTER_KEY_SOURCE:-./secrets/peta_auth_master_key}
+  peta_auth_client_secrets_json:
+    file: ${PETA_AUTH_CLIENT_SECRETS_SOURCE:-./secrets/peta_auth_client_secrets.json}
+
 networks:
   peta-network:
     driver: bridge
@@ -240,8 +280,14 @@ DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?sc
 JWT_SECRET=your-jwt-secret-change-in-production-min-32-chars
 
 # -------------------- Peta Auth Configuration (Optional) --------------------
-# Auto-start peta-auth for Peta-managed OAuth credentials
-PETA_AUTH_AUTOSTART=true
+# Enable the optional peta-auth Compose profile only after provisioning its secrets.
+PETA_AUTH_AUTOSTART=false
+# Core and Auth images are independently pinned for rollback safety.
+PETA_VERSION=1.3.0
+PETA_AUTH_VERSION=1.3.0
+# Protected host paths for the two Peta Auth Compose secrets.
+PETA_AUTH_MASTER_KEY_SOURCE=./secrets/peta_auth_master_key
+PETA_AUTH_CLIENT_SECRETS_SOURCE=./secrets/peta_auth_client_secrets.json
 
 # -------------------- Modern MCP 2026-07-28 Rollout (Optional) --------------------
 # Leave disabled until modern MCP clients and operators are ready.
@@ -316,7 +362,27 @@ Peta Core supports OAuth-based integrations (for example Google, Notion, GitHub,
 1. Use **Peta-managed OAuth credentials** — requires the `peta-auth` service so Peta secrets remain isolated.
 2. Use **your own OAuth credentials** — `peta-auth` is not required.
 
-If you are certain you will not use Peta-managed credentials, set `PETA_AUTH_AUTOSTART=false` in `.env` to skip installing and starting `peta-auth`.
+The default deployment leaves `PETA_AUTH_AUTOSTART=false` and skips
+`peta-auth`. After provisioning its secrets, set it to `true` and start the
+Compose profile with `docker compose --profile auth up -d`.
+
+#### Protected provisioning and rollback
+
+Provision and rotate the two Auth secret files outside this deployment script.
+Replace both files as one protected change, then recreate only `peta-auth`:
+
+```bash
+docker compose up -d --no-deps --force-recreate peta-auth
+```
+
+Verify the Core-to-Auth flow from the private Compose network. For rollback,
+restore the previous protected pair and run the same command. Do not run
+`docker compose down -v`, remove `peta-auth-data`, remove the database volume,
+or publish port `7788` as part of secret rotation or rollback.
+
+For a Core-only rollback, change `PETA_VERSION` while retaining
+`PETA_AUTH_VERSION=1.3.0`; Auth image changes require an explicit
+`PETA_AUTH_VERSION` change.
 
 #### Port Changes
 
@@ -517,7 +583,12 @@ kill -9 <PID>
 
 ### Q2: How do I update or roll back Peta Core?
 
-**A**: Use a versioned image tag for a repeatable deployment. This release is `petaio/peta-core:1.3.0`; update the `peta-core.image` value in `docker-compose.yml`, then pull and recreate only that service:
+**A**: Use a versioned image tag for a repeatable deployment. The coordinated
+`1.3.0` images are still in pre-publication preparation; do not run these steps
+until the Core, Console, and Auth manifests are available for both
+`linux/amd64` and `linux/arm64`. After publication, set the `peta-core.image`
+value in `docker-compose.yml` to `petaio/peta-core:1.3.0`, then pull and recreate
+only that service:
 
 ```bash
 # Pull the pinned Peta Core release

@@ -20,15 +20,26 @@ services:
       - peta-core-network
 
   peta-auth:
-    image: petaio/peta-auth:${PETA_VERSION:-1.3.0}
+    image: petaio/peta-auth:${PETA_AUTH_VERSION:-1.3.0}
     container_name: peta-auth
     restart: unless-stopped
-    ports:
-      - '7788:7788'
+    profiles: [auth]
+    environment:
+      PETA_AUTH_MASTER_KEY_FILE: /run/secrets/peta_auth_master_key
+      PETA_AUTH_CLIENT_SECRETS_FILE: /run/secrets/peta_auth_client_secrets_json
+    secrets:
+      - peta_auth_master_key
+      - peta_auth_client_secrets_json
     networks:
       - peta-core-network
     volumes:
       - peta-auth-data:/data
+    healthcheck:
+      test: ['CMD', '/usr/bin/bash', '-c', 'exec 3<>/dev/tcp/localhost/7788 || exit 1; printf "GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; response=""; while IFS= read -r -t 2 line <&3; do response+="$$line"; done; [[ "$$response" == *"\"ok\":true"* ]]']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # Peta Core service (uncomment when deploying)
   # peta-core:
@@ -77,6 +88,12 @@ volumes:
     driver: local
   peta-auth-data:
     driver: local
+
+secrets:
+  peta_auth_master_key:
+    file: ${PETA_AUTH_MASTER_KEY_SOURCE:-./secrets/peta_auth_master_key}
+  peta_auth_client_secrets_json:
+    file: ${PETA_AUTH_CLIENT_SECRETS_SOURCE:-./secrets/peta_auth_client_secrets.json}
 
 networks:
   peta-core-network:
