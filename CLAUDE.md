@@ -291,23 +291,12 @@ npm start
 
 ### Docker
 ```bash
-# Build and push to Docker Hub
-./docker-build-push.sh
-
-# Build and push non-interactively (fails instead of prompting)
-./docker-build-push.sh --non-interactive
+# Publish the package.json semver to Docker Hub after enabling server-side
+# immutable semantic-version tags
+PETA_RELEASE_PUSH=1 DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled ./docker-build-push.sh --non-interactive
 
 # With verbose output
 ./docker-build-push.sh -v
-
-# Clean old images/cache before building
-./docker-build-push.sh -c
-
-# Clean with force mode (no confirmation)
-./docker-build-push.sh -c -f
-
-# Combined: clean + force + verbose
-./docker-build-push.sh -c -f -v
 
 # Show help
 ./docker-build-push.sh -h
@@ -315,7 +304,7 @@ npm start
 
 **Docker Hub Images:**
 - Repository: https://hub.docker.com/r/petaio/peta-core
-- Tags: `latest` (latest build), `YYYYMMDD` (dated builds), and the current `package.json` semver
+- Tags: only the immutable current `package.json` semver; `latest`, date, and custom aliases are rejected
 
 ### Release Automation
 ```bash

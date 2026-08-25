@@ -89,6 +89,40 @@ remains independently pinned with `PETA_AUTH_VERSION=1.3.0`, so a Core rollback
 does not change Auth; the complete Compose example and rollback steps are in
 [DOCKER_DEPLOYMENT.md](./DOCKER_DEPLOYMENT.md).
 
+#### Release publication controls
+
+Core publishes exactly the semantic version in `package.json`; the release
+script refuses `latest`, date tags, custom aliases, an existing tag, or a tag
+whose registry state cannot be read. Before an operator runs it, Docker Hub
+must enforce server-side immutability for semantic-version tags:
+
+```bash
+PETA_RELEASE_PUSH=1 \
+DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled \
+./docker-build-push.sh --non-interactive
+```
+
+The command succeeds only after the pushed manifest has a `sha256` digest and
+contains both `linux/amd64` and `linux/arm64`. GHCR publication is disabled for
+this coordinated release because it is outside that Docker Hub policy boundary.
+
+Public Git tags and GitHub Releases have an additional fail-closed gate. Do not
+set these variables until each referenced file contains independently verified
+evidence for the exposed Console TLS credential:
+
+```bash
+PETA_CONSOLE_TLS_REVOCATION_EVIDENCE=/protected/evidence/revocation.txt \
+PETA_CONSOLE_TLS_ROTATION_EVIDENCE=/protected/evidence/rotation.txt \
+PETA_CONSOLE_REPLACEMENT_DEPLOYMENT_EVIDENCE=/protected/evidence/deployment.txt \
+PETA_RELEASE_PUSH=1 \
+DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled \
+node scripts/release-main.js publish --manifest /tmp/peta-core-release-*/manifest.json
+```
+
+Until revocation, replacement credentials, and their deployed replacement are
+verified, source commits may be pushed through the normal reviewed Git flow,
+but the public tag and GitHub Release must remain absent.
+
 #### Peta Auth runtime secrets (Docker)
 
 The coordinated `1.3.0` Docker contract keeps Peta Auth on the private Compose network. Do not publish host port `7788`. When Peta-managed OAuth credentials are enabled, Compose must provide exactly these secrets to `peta-auth` and to no other service:

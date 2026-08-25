@@ -603,6 +603,24 @@ docker compose ps peta-core
 
 To roll back, replace `1.3.0` with the previously deployed version tag and run the same commands. Reserve `latest` for non-production evaluation because it can move between pulls.
 
+### Publishing the Core image
+
+Release publication is semver-only. `docker-build-push.sh` reads `package.json`,
+publishes only `petaio/peta-core:<version>`, requires
+`PETA_RELEASE_PUSH=1` and `DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled`, and fails
+closed when the target tag exists or registry state is unreadable. It verifies
+the post-push digest plus `linux/amd64` and `linux/arm64` before reporting
+success. It never publishes `latest`, date tags, or mutable aliases. The GHCR
+script is intentionally disabled for this release boundary.
+
+Git tag and GitHub Release creation through `scripts/release-main.js publish`
+also requires non-empty evidence files named by
+`PETA_CONSOLE_TLS_REVOCATION_EVIDENCE`,
+`PETA_CONSOLE_TLS_ROTATION_EVIDENCE`, and
+`PETA_CONSOLE_REPLACEMENT_DEPLOYMENT_EVIDENCE`. Leave those variables unset
+until the leaked Console TLS credential is revoked, replaced, and the
+replacement deployment is verified.
+
 ### Q3: Database connection failed?
 
 **A**: Check database container status:

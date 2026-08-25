@@ -28,11 +28,11 @@ docker login
 ```bash
 cd /path/to/peta-core
 
-# Build the immutable release tag and update the moving latest tag together
-docker buildx build --platform linux/amd64,linux/arm64 \
-  -t petaio/peta-core:1.3.0 \
-  -t petaio/peta-core:latest \
-  --push .
+# Publish only the package.json semantic version after enabling Docker Hub's
+# server-side immutable-tag policy for semantic versions.
+PETA_RELEASE_PUSH=1 \
+DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled \
+./docker-build-push.sh --non-interactive
 ```
 
 ## Build Details
@@ -67,14 +67,14 @@ When the container starts, it executes in the following order:
 
 ## Advanced Usage
 
-### Build Specific Architecture
+### Build Specific Architecture Locally
 
 ```bash
-# Build AMD64 only
-docker buildx build --platform linux/amd64 -t petaio/peta-core:1.3.0 --push .
+# Build AMD64 only without publishing
+docker buildx build --platform linux/amd64 -t petaio/peta-core:1.3.0 --load .
 
-# Build ARM64 only
-docker buildx build --platform linux/arm64 -t petaio/peta-core:1.3.0 --push .
+# Build ARM64 only without publishing
+docker buildx build --platform linux/arm64 -t petaio/peta-core:1.3.0 --load .
 ```
 
 ### Local Build (No Push)
@@ -91,20 +91,18 @@ docker images | grep peta-core
 
 ```bash
 # Start background build
-nohup docker buildx build --platform linux/amd64,linux/arm64 -t petaio/peta-core:1.3.0 --push . > /tmp/build-core-$(date +%s).log 2>&1 &
+nohup env PETA_RELEASE_PUSH=1 DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled ./docker-build-push.sh --non-interactive > /tmp/build-core-$(date +%s).log 2>&1 &
 
 # View build progress
 tail -f /tmp/build-core-*.log
 ```
 
-### Use Custom Tags
+### Tag Policy
 
 ```bash
-# Build the release tag and update latest
-docker buildx build --platform linux/amd64,linux/arm64 \
-  -t petaio/peta-core:1.3.0 \
-  -t petaio/peta-core:latest \
-  --push .
+The publication script rejects `latest`, date tags, custom aliases, existing
+tags, and unreadable registry state. Change `package.json` through the reviewed
+release preparation flow instead of passing a custom tag.
 ```
 
 ## Verify Build
@@ -261,11 +259,8 @@ docker buildx inspect --bootstrap
 Docker automatically caches each build layer. If source code hasn't changed, subsequent builds will be fast:
 
 ```bash
-# First build: 5-10 minutes
-docker buildx build --platform linux/amd64,linux/arm64 -t petaio/peta-core:1.3.0 --push .
-
-# Subsequent builds (code changes only): 2-3 minutes
-docker buildx build --platform linux/amd64,linux/arm64 -t petaio/peta-core:1.3.0 --push .
+# Local cache warm-up without publishing
+docker buildx build --platform linux/amd64 -t petaio/peta-core:1.3.0 --load .
 ```
 
 ### Reducing Image Size

@@ -226,6 +226,7 @@ function prepareRelease(options) {
 }
 
 function publishRelease(options) {
+  assertPublicReleaseEvidence();
   ensureCommand('git');
   ensureCommand('gh');
 
@@ -264,6 +265,10 @@ function publishRelease(options) {
 
   run('./docker-build-push.sh', ['--non-interactive'], {
     cwd: manifest.worktreePath,
+    env: {
+      ...process.env,
+      PUBLISH_TAG: manifest.targetVersion
+    },
     stdio: 'inherit'
   });
 
@@ -597,7 +602,7 @@ function ensureGitHubRelease(manifest, notesPath) {
       manifest.targetTag,
       '--notes-file',
       notesPath,
-      '--latest',
+      '--latest=false',
       '--verify-tag'
     ],
     { cwd: repoRoot, stdio: 'inherit' }
@@ -717,6 +722,23 @@ function ensureCommand(command) {
 function assertFileExists(targetPath, label) {
   if (!targetPath || !fs.existsSync(targetPath)) {
     throw new Error(`${label} not found: ${targetPath}`);
+  }
+}
+
+function assertPublicReleaseEvidence() {
+  const evidence = [
+    ['PETA_CONSOLE_TLS_REVOCATION_EVIDENCE', process.env.PETA_CONSOLE_TLS_REVOCATION_EVIDENCE],
+    ['PETA_CONSOLE_TLS_ROTATION_EVIDENCE', process.env.PETA_CONSOLE_TLS_ROTATION_EVIDENCE],
+    ['PETA_CONSOLE_REPLACEMENT_DEPLOYMENT_EVIDENCE', process.env.PETA_CONSOLE_REPLACEMENT_DEPLOYMENT_EVIDENCE]
+  ];
+
+  for (const [name, evidencePath] of evidence) {
+    if (!evidencePath || !fs.existsSync(evidencePath) || !fs.statSync(evidencePath).isFile()) {
+      throw new Error(`${name} must point to a readable evidence file before creating a public Git tag or GitHub Release`);
+    }
+    if (!trim(fs.readFileSync(evidencePath, 'utf8'))) {
+      throw new Error(`${name} evidence file is empty: ${evidencePath}`);
+    }
   }
 }
 
