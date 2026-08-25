@@ -6,10 +6,17 @@ TEST_ROOT="$(mktemp -d)"
 FAKE_BIN="$TEST_ROOT/bin"
 DOCKER_CONFIG_DIR="$TEST_ROOT/docker-config"
 DOCKER_LOG="$TEST_ROOT/docker.log"
+VALID_SHA='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+OTHER_SHA='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+FOREIGN_REPO="$TEST_ROOT/foreign-repo"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 mkdir -p "$FAKE_BIN"
 mkdir -p "$DOCKER_CONFIG_DIR"
+mkdir -p "$FOREIGN_REPO"
+git -C "$FOREIGN_REPO" init -q
 printf '{"auths":{"https://index.docker.io/v1/":{"auth":"synthetic"}}}\n' > "$DOCKER_CONFIG_DIR/config.json"
+printf 'source archive sentinel\n' > "$TEST_ROOT/.archive-sentinel"
+printf 'foreign archive sentinel\n' > "$FOREIGN_REPO/.foreign-archive-sentinel"
 
 cat > "$FAKE_BIN/docker" <<'EOF'
 #!/usr/bin/env bash
@@ -33,18 +40,57 @@ Platform: linux/amd64
 $(if [[ "${SYNTHETIC_MANIFEST_STATE}" != "missing-arm64" ]]; then echo 'Platform: linux/arm64'; fi)
 MANIFEST
     ;;
-  "buildx build "*) touch "${DOCKER_LOG}.pushed" ;;
+  "buildx build "*)
+    tar -tf - >> "$DOCKER_LOG"
+    touch "${DOCKER_LOG}.pushed"
+    ;;
   *) exit 0 ;;
 esac
 EOF
 chmod +x "$FAKE_BIN/docker"
 
+cat > "$FAKE_BIN/git" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${PETA_FAKE_GIT_ROOT:-}" && "$PWD" != "$PETA_FAKE_GIT_ROOT" ]]; then
+  case "$1 $2" in
+    "rev-parse --verify")
+      [[ "${3:-}" == "${PETA_FAKE_GIT_FOREIGN_SHA}^{commit}" ]] || exit 1
+      printf '%s\n' "$PETA_FAKE_GIT_FOREIGN_SHA"
+      ;;
+    "rev-parse HEAD") printf '%s\n' "$PETA_FAKE_GIT_FOREIGN_HEAD" ;;
+    "diff --quiet") [[ "${PETA_FAKE_GIT_DIRTY:-0}" == 0 ]] ;;
+    "archive --format=tar")
+      [[ "${3:-}" == "$PETA_FAKE_GIT_FOREIGN_SHA" ]] || exit 1
+      tar -cf - -C "${PETA_FAKE_GIT_FOREIGN_ARCHIVE_DIR}" .foreign-archive-sentinel
+      ;;
+    *) exit 1 ;;
+  esac
+  exit 0
+fi
+case "$1 $2" in
+  "rev-parse --verify")
+    [[ "${3:-}" == "${PETA_FAKE_GIT_VALID_SHA}^{commit}" ]] || exit 1
+    printf '%s\n' "$PETA_FAKE_GIT_VALID_SHA"
+    ;;
+  "rev-parse HEAD") printf '%s\n' "$PETA_FAKE_GIT_HEAD" ;;
+  "diff --quiet") [[ "${PETA_FAKE_GIT_DIRTY:-0}" == 0 ]] ;;
+  "archive --format=tar")
+    [[ "${3:-}" == "$PETA_FAKE_GIT_VALID_SHA" ]] || exit 1
+    tar -cf - -C "${PETA_FAKE_GIT_ARCHIVE_DIR}" .archive-sentinel
+    ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod +x "$FAKE_BIN/git"
+
 run_docker_release() {
   : > "$DOCKER_LOG"
   rm -f "${DOCKER_LOG}.pushed"
+  local release_cwd="${7:-$ROOT}"
   set +e
   RELEASE_OUTPUT="$(
-    cd "$ROOT"
+    cd "$release_cwd"
     env \
       PATH="$FAKE_BIN:$PATH" \
       DOCKER_LOG="$DOCKER_LOG" \
@@ -54,9 +100,18 @@ run_docker_release() {
       PETA_RELEASE_PUSH="${1:-}" \
       DOCKER_HUB_IMMUTABLE_TAG_POLICY="${2:-}" \
       SYNTHETIC_MANIFEST_STATE="${3:-missing}" \
+      PETA_RELEASE_GIT_SHA="${4-$VALID_SHA}" \
+      PETA_FAKE_GIT_VALID_SHA="$VALID_SHA" \
+      PETA_FAKE_GIT_HEAD="${5:-$VALID_SHA}" \
+      PETA_FAKE_GIT_DIRTY="${6:-0}" \
+      PETA_FAKE_GIT_ARCHIVE_DIR="$TEST_ROOT" \
+      PETA_FAKE_GIT_ROOT="$ROOT" \
+      PETA_FAKE_GIT_FOREIGN_SHA="$OTHER_SHA" \
+      PETA_FAKE_GIT_FOREIGN_HEAD="$OTHER_SHA" \
+      PETA_FAKE_GIT_FOREIGN_ARCHIVE_DIR="$FOREIGN_REPO" \
       MANIFEST_VERIFY_ATTEMPTS=1 \
       MANIFEST_VERIFY_DELAY_SECONDS=0 \
-      ./docker-build-push.sh --non-interactive 2>&1
+      "$ROOT/docker-build-push.sh" --non-interactive 2>&1
   )"
   RELEASE_STATUS=$?
   set -e
@@ -79,6 +134,36 @@ run_docker_release 1 '' missing
 [[ ! -s "$DOCKER_LOG" ]]
 grep -q 'DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled is required' <<< "$RELEASE_OUTPUT"
 
+run_docker_release 1 enabled missing ''
+[[ $RELEASE_STATUS -ne 0 ]]
+[[ ! -s "$DOCKER_LOG" ]]
+grep -q 'PETA_RELEASE_GIT_SHA must be a lowercase 40-character commit SHA' <<< "$RELEASE_OUTPUT"
+
+run_docker_release 1 enabled missing 'ABCDEF'
+[[ $RELEASE_STATUS -ne 0 ]]
+[[ ! -s "$DOCKER_LOG" ]]
+grep -q 'PETA_RELEASE_GIT_SHA must be a lowercase 40-character commit SHA' <<< "$RELEASE_OUTPUT"
+
+run_docker_release 1 enabled missing "$OTHER_SHA"
+[[ $RELEASE_STATUS -ne 0 ]]
+[[ ! -s "$DOCKER_LOG" ]]
+grep -q 'PETA_RELEASE_GIT_SHA must name an existing commit' <<< "$RELEASE_OUTPUT"
+
+run_docker_release 1 enabled missing "$VALID_SHA" "$OTHER_SHA"
+[[ $RELEASE_STATUS -ne 0 ]]
+[[ ! -s "$DOCKER_LOG" ]]
+grep -q 'PETA_RELEASE_GIT_SHA must equal HEAD' <<< "$RELEASE_OUTPUT"
+
+run_docker_release 1 enabled missing "$VALID_SHA" "$VALID_SHA" 1
+[[ $RELEASE_STATUS -ne 0 ]]
+[[ ! -s "$DOCKER_LOG" ]]
+grep -q 'tracked changes' <<< "$RELEASE_OUTPUT"
+
+run_docker_release 1 enabled missing "$VALID_SHA" "$VALID_SHA" 0 "$FOREIGN_REPO"
+[[ $RELEASE_STATUS -eq 0 ]]
+grep -Fxq '.archive-sentinel' "$DOCKER_LOG"
+! grep -Fxq '.foreign-archive-sentinel' "$DOCKER_LOG"
+
 run_docker_release 1 enabled unreadable
 [[ $RELEASE_STATUS -ne 0 ]]
 ! grep -q '^buildx build ' "$DOCKER_LOG"
@@ -90,7 +175,16 @@ run_docker_release 1 enabled existing
 grep -q 'Refusing to overwrite existing release tag' <<< "$RELEASE_OUTPUT"
 
 set +e
-CUSTOM_TAG_OUTPUT="$(cd "$ROOT" && env PETA_RELEASE_PUSH=1 DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled PUBLISH_TAG=latest ./docker-build-push.sh --non-interactive 2>&1)"
+CUSTOM_TAG_OUTPUT="$(cd "$ROOT" && env \
+  PATH="$FAKE_BIN:$PATH" \
+  PETA_RELEASE_PUSH=1 \
+  DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled \
+  PETA_RELEASE_GIT_SHA="$VALID_SHA" \
+  PETA_FAKE_GIT_VALID_SHA="$VALID_SHA" \
+  PETA_FAKE_GIT_HEAD="$VALID_SHA" \
+  PETA_FAKE_GIT_ARCHIVE_DIR="$TEST_ROOT" \
+  PUBLISH_TAG=latest \
+  ./docker-build-push.sh --non-interactive 2>&1)"
 CUSTOM_TAG_STATUS=$?
 set -e
 [[ $CUSTOM_TAG_STATUS -ne 0 ]]
@@ -102,7 +196,8 @@ grep -q 'manifest is missing linux/arm64' <<< "$RELEASE_OUTPUT"
 
 run_docker_release 1 enabled missing
 [[ $RELEASE_STATUS -eq 0 ]]
-grep -Fxq 'buildx build --platform linux/amd64,linux/arm64 --file ./Dockerfile --tag petaio/peta-core:1.3.0 --push .' "$DOCKER_LOG"
+grep -Fxq 'buildx build --platform linux/amd64,linux/arm64 --file ./Dockerfile --tag petaio/peta-core:1.3.0 --push -' "$DOCKER_LOG"
+grep -Fxq '.archive-sentinel' "$DOCKER_LOG"
 ! grep -Eq 'latest|[0-9]{8}' "$DOCKER_LOG"
 ! grep -Eq 'example\.invalid|linux/s390x' "$DOCKER_LOG"
 grep -q 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' <<< "$RELEASE_OUTPUT"

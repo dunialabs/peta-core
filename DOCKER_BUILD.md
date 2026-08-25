@@ -32,6 +32,7 @@ cd /path/to/peta-core
 # server-side immutable-tag policy for semantic versions.
 PETA_RELEASE_PUSH=1 \
 DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled \
+PETA_RELEASE_GIT_SHA="$(git rev-parse HEAD)" \
 ./docker-build-push.sh --non-interactive
 ```
 
@@ -91,7 +92,7 @@ docker images | grep peta-core
 
 ```bash
 # Start background build
-nohup env PETA_RELEASE_PUSH=1 DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled ./docker-build-push.sh --non-interactive > /tmp/build-core-$(date +%s).log 2>&1 &
+nohup env PETA_RELEASE_PUSH=1 DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled PETA_RELEASE_GIT_SHA="$(git rev-parse HEAD)" ./docker-build-push.sh --non-interactive > /tmp/build-core-$(date +%s).log 2>&1 &
 
 # View build progress
 tail -f /tmp/build-core-*.log
@@ -99,11 +100,11 @@ tail -f /tmp/build-core-*.log
 
 ### Tag Policy
 
-```bash
 The publication script rejects `latest`, date tags, custom aliases, existing
-tags, and unreadable registry state. Change `package.json` through the reviewed
-release preparation flow instead of passing a custom tag.
-```
+tags, unreadable registry state, non-`HEAD` SHAs, and tracked changes. It builds
+only the committed `git archive` tar stream, so untracked and ignored files are
+not publication input. Change `package.json` through the reviewed release
+preparation flow instead of passing a custom tag.
 
 ## Verify Build
 

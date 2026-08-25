@@ -607,10 +607,12 @@ To roll back, replace `1.3.0` with the previously deployed version tag and run t
 
 Release publication is semver-only. `docker-build-push.sh` reads `package.json`,
 publishes only `petaio/peta-core:<version>`, requires
-`PETA_RELEASE_PUSH=1` and `DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled`, and fails
-closed when the target tag exists or registry state is unreadable. It verifies
-the post-push digest plus `linux/amd64` and `linux/arm64` before reporting
-success. It never publishes `latest`, date tags, or mutable aliases. The GHCR
+`PETA_RELEASE_PUSH=1`, `DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled`, and a
+lowercase 40-character `PETA_RELEASE_GIT_SHA` equal to `HEAD`. It rejects
+tracked changes and builds only the `git archive` tar stream for that commit.
+It fails closed when the target tag exists or registry state is unreadable, then
+verifies the post-push digest plus `linux/amd64` and `linux/arm64` before
+reporting success. It never publishes `latest`, date tags, or mutable aliases. The GHCR
 script is intentionally disabled for this release boundary.
 
 `scripts/release-main.js publish` is unconditionally disabled and never pushes

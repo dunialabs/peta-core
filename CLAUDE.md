@@ -293,7 +293,9 @@ npm start
 ```bash
 # Publish the package.json semver to Docker Hub after enabling server-side
 # immutable semantic-version tags
-PETA_RELEASE_PUSH=1 DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled ./docker-build-push.sh --non-interactive
+PETA_RELEASE_PUSH=1 DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled \\
+PETA_RELEASE_GIT_SHA="$(git rev-parse HEAD)" \\
+./docker-build-push.sh --non-interactive
 
 # With verbose output
 ./docker-build-push.sh -v

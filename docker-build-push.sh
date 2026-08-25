@@ -5,6 +5,7 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly IMAGE_NAME="petaio/peta-core"
 readonly VERSION_TAG="$(node -e "const p=require(process.argv[1]); process.stdout.write(p.version || '')" "$SCRIPT_DIR/package.json")"
 readonly PUBLISH_TAG="${PUBLISH_TAG:-$VERSION_TAG}"
+readonly RELEASE_GIT_SHA="${PETA_RELEASE_GIT_SHA:-}"
 readonly PLATFORMS="linux/amd64,linux/arm64"
 readonly MANIFEST_VERIFY_ATTEMPTS="${MANIFEST_VERIFY_ATTEMPTS:-12}"
 readonly MANIFEST_VERIFY_DELAY_SECONDS="${MANIFEST_VERIFY_DELAY_SECONDS:-5}"
@@ -12,7 +13,7 @@ VERBOSE=false
 
 usage() {
   cat <<EOF
-Usage: PETA_RELEASE_PUSH=1 DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled ./docker-build-push.sh [--verbose] [--non-interactive]
+Usage: PETA_RELEASE_PUSH=1 DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled PETA_RELEASE_GIT_SHA=<40-char-sha> ./docker-build-push.sh [--verbose] [--non-interactive]
 
 Publishes only ${IMAGE_NAME}:${VERSION_TAG} for linux/amd64 and linux/arm64.
 The semantic-version tag must be protected by Docker Hub's server-side immutable-tag policy.
@@ -29,12 +30,30 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+cd "$SCRIPT_DIR"
+
 if [[ "${PETA_RELEASE_PUSH:-}" != "1" ]]; then
   echo "PETA_RELEASE_PUSH=1 is required for external publication" >&2
   exit 1
 fi
 if [[ "${DOCKER_HUB_IMMUTABLE_TAG_POLICY:-}" != "enabled" ]]; then
   echo "DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled is required after enabling Docker Hub's server-side semantic-version tag immutability policy" >&2
+  exit 1
+fi
+if [[ ! "$RELEASE_GIT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "PETA_RELEASE_GIT_SHA must be a lowercase 40-character commit SHA" >&2
+  exit 1
+fi
+if ! git rev-parse --verify "${RELEASE_GIT_SHA}^{commit}" >/dev/null; then
+  echo "PETA_RELEASE_GIT_SHA must name an existing commit" >&2
+  exit 1
+fi
+if [[ "$(git rev-parse HEAD)" != "$RELEASE_GIT_SHA" ]]; then
+  echo "PETA_RELEASE_GIT_SHA must equal HEAD" >&2
+  exit 1
+fi
+if ! git diff --quiet "$RELEASE_GIT_SHA" --; then
+  echo "Refusing to publish tracked changes; commit or discard them first" >&2
   exit 1
 fi
 if [[ ! "$VERSION_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -75,8 +94,7 @@ fi
 
 build_args=(buildx build --platform "$PLATFORMS" --file ./Dockerfile --tag "$IMAGE_REF" --push)
 [[ "$VERBOSE" == true ]] && build_args+=(--progress=plain)
-build_args+=(.)
-docker "${build_args[@]}"
+git archive --format=tar "$RELEASE_GIT_SHA" | docker "${build_args[@]}" -
 
 verified_digest=""
 failure_reason="manifest is unreadable"
@@ -105,4 +123,4 @@ if [[ -z "$verified_digest" ]]; then
   exit 1
 fi
 
-printf 'Published %s\nDigest: %s\nPlatforms: linux/amd64, linux/arm64\n' "$IMAGE_REF" "$verified_digest"
+printf 'Published %s\nSource commit: %s\nDigest: %s\nPlatforms: linux/amd64, linux/arm64\n' "$IMAGE_REF" "$RELEASE_GIT_SHA" "$verified_digest"

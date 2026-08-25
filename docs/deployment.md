@@ -99,11 +99,14 @@ must enforce server-side immutability for semantic-version tags:
 ```bash
 PETA_RELEASE_PUSH=1 \
 DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled \
+PETA_RELEASE_GIT_SHA="$(git rev-parse HEAD)" \
 ./docker-build-push.sh --non-interactive
 ```
 
-The command succeeds only after the pushed manifest has a `sha256` digest and
-contains both `linux/amd64` and `linux/arm64`. GHCR publication is disabled for
+The command requires the lowercase 40-character SHA of `HEAD`, rejects tracked
+changes, and sends only `git archive` output for that commit to Docker. It
+succeeds only after the pushed manifest has a `sha256` digest and contains both
+`linux/amd64` and `linux/arm64`. GHCR publication is disabled for
 this coordinated release because it is outside that Docker Hub policy boundary.
 
 `scripts/release-main.js publish` is unconditionally disabled and performs no
