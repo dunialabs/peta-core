@@ -159,7 +159,7 @@ services:
 
   # Peta Auth Service (used by peta-core)
   peta-auth:
-    image: petaio/peta-auth:${PETA_AUTH_VERSION:-1.3.0}
+    image: bcdunia/peta-auth:${PETA_AUTH_VERSION:-1.3.0}
     container_name: peta-auth
     restart: unless-stopped
     profiles: [auth]
@@ -184,7 +184,7 @@ services:
 
   # Peta Core Service (MCP Gateway)
   peta-core:
-    image: petaio/peta-core:${PETA_VERSION:-1.3.0}
+    image: bcdunia/peta-core:${PETA_VERSION:-1.3.0}
     container_name: peta-core
     restart: unless-stopped
     user: root  # Root permission required to access Docker socket
@@ -583,11 +583,10 @@ kill -9 <PID>
 
 ### Q2: How do I update or roll back Peta Core?
 
-**A**: Use a versioned image tag for a repeatable deployment. The coordinated
-`1.3.0` images are still in pre-publication preparation; do not run these steps
-until the Core, Console, and Auth manifests are available for both
-`linux/amd64` and `linux/arm64`. After publication, set the `peta-core.image`
-value in `docker-compose.yml` to `petaio/peta-core:1.3.0`, then pull and recreate
+**A**: Use a versioned image tag for a repeatable deployment. Before running
+these steps, confirm that the Core, Console, and Auth `1.3.0` manifests are
+available for both `linux/amd64` and `linux/arm64`. Set the `peta-core.image`
+value in `docker-compose.yml` to `bcdunia/peta-core:1.3.0`, then pull and recreate
 only that service:
 
 ```bash
@@ -606,7 +605,7 @@ To roll back, replace `1.3.0` with the previously deployed version tag and run t
 ### Publishing the Core image
 
 Release publication is semver-only. `docker-build-push.sh` reads `package.json`,
-publishes only `petaio/peta-core:<version>`, requires
+publishes only `bcdunia/peta-core:<version>`, requires
 `PETA_RELEASE_PUSH=1`, `DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled`, and a
 lowercase 40-character `PETA_RELEASE_GIT_SHA` equal to `HEAD`. It rejects
 tracked changes and builds only the `git archive` tar stream for that commit.
@@ -620,10 +619,12 @@ script is intentionally disabled for this release boundary.
 `scripts/release-main.js publish` is unconditionally disabled and never pushes
 source, Docker images, Git tags, or GitHub Releases. Use the normal reviewed Git
 flow for source and the Docker command above for the immutable semver image.
-Public tags and GitHub Releases require a separately approved operator process
-after the exposed Console TLS credential is revoked, replaced, and the
-replacement deployment is verified; repository-local evidence files are not
-accepted as authorization.
+The historical Console Origin certificate was revoked on 2026-08-30, removed
+from the Cloudflare inventory, and recorded in Cloudflare's signed CRL without
+regressing the active public sites. Public tags and GitHub Releases therefore
+use a separately approved operator process after the exact image and
+release-note gates pass; repository-local evidence files are not accepted as
+authorization.
 
 ### Q3: Database connection failed?
 

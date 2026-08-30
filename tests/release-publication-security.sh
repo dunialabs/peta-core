@@ -35,7 +35,7 @@ case "$*" in
       exit 1
     fi
     cat <<MANIFEST
-Name: petaio/peta-core:1.3.0
+Name: bcdunia/peta-core:1.3.0
 Digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 Platform: linux/amd64
 $(if [[ "${SYNTHETIC_MANIFEST_STATE}" != "missing-arm64" ]]; then echo 'Platform: linux/arm64'; fi)
@@ -212,8 +212,8 @@ grep -q 'manifest is missing linux/arm64' <<< "$RELEASE_OUTPUT"
 
 run_docker_release 1 enabled missing
 [[ $RELEASE_STATUS -eq 0 ]]
-grep -Fxq 'buildx build --platform linux/amd64,linux/arm64 --file ./Dockerfile --tag petaio/peta-core:1.3.0 --push -' "$DOCKER_LOG"
-grep -Fxq '900 docker buildx build --platform linux/amd64,linux/arm64 --file ./Dockerfile --tag petaio/peta-core:1.3.0 --push -' "$TIMEOUT_LOG"
+grep -Fxq 'buildx build --platform linux/amd64,linux/arm64 --file ./Dockerfile --tag bcdunia/peta-core:1.3.0 --push -' "$DOCKER_LOG"
+grep -Fxq '900 docker buildx build --platform linux/amd64,linux/arm64 --file ./Dockerfile --tag bcdunia/peta-core:1.3.0 --push -' "$TIMEOUT_LOG"
 grep -Fxq '.archive-sentinel' "$DOCKER_LOG"
 ! grep -Eq 'latest|[0-9]{8}' "$DOCKER_LOG"
 ! grep -Eq 'example\.invalid|linux/s390x' "$DOCKER_LOG"

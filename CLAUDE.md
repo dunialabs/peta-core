@@ -305,7 +305,7 @@ PETA_RELEASE_GIT_SHA="$(git rev-parse HEAD)" \\
 ```
 
 **Docker Hub Images:**
-- Repository: https://hub.docker.com/r/petaio/peta-core
+- Repository: https://hub.docker.com/r/bcdunia/peta-core
 - Tags: only the immutable current `package.json` semver; `latest`, date, and custom aliases are rejected
 - Publication requires `timeout`, `gtimeout`, or Perl alarm support and fails closed after a 15-minute Buildx timeout
 
@@ -334,12 +334,12 @@ Releases require an independently approved operator process.
 **Quick Docker Operations:**
 ```bash
 # Pull the current immutable release
-docker pull petaio/peta-core:1.3.0
+docker pull bcdunia/peta-core:1.3.0
 
 # Run container
 docker run -d -p 3002:3002 \
   -e DATABASE_URL="postgresql://user:pass@host:5432/db" \
-  petaio/peta-core:1.3.0
+  bcdunia/peta-core:1.3.0
 
 # Check health
 curl http://localhost:3002/health

@@ -72,17 +72,17 @@ When the container starts, it executes in the following order:
 
 ```bash
 # Build AMD64 only without publishing
-docker buildx build --platform linux/amd64 -t petaio/peta-core:1.3.0 --load .
+docker buildx build --platform linux/amd64 -t bcdunia/peta-core:1.3.0 --load .
 
 # Build ARM64 only without publishing
-docker buildx build --platform linux/arm64 -t petaio/peta-core:1.3.0 --load .
+docker buildx build --platform linux/arm64 -t bcdunia/peta-core:1.3.0 --load .
 ```
 
 ### Local Build (No Push)
 
 ```bash
 # Build to local Docker
-docker buildx build --platform linux/amd64 -t petaio/peta-core:1.3.0 --load .
+docker buildx build --platform linux/amd64 -t bcdunia/peta-core:1.3.0 --load .
 
 # View local images
 docker images | grep peta-core
@@ -112,20 +112,20 @@ preparation flow instead of passing a custom tag.
 
 ```bash
 # View architectures supported by the immutable release image
-docker buildx imagetools inspect petaio/peta-core:1.3.0
+docker buildx imagetools inspect bcdunia/peta-core:1.3.0
 ```
 
 Example output:
 ```
-Name:      docker.io/petaio/peta-core:1.3.0
+Name:      docker.io/bcdunia/peta-core:1.3.0
 MediaType: application/vnd.oci.image.index.v1+json
 Digest:    sha256:da979aad645340c4d1e24d718ea6a50cf32a196c2978f5ea60b71f581896d8f6
 
 Manifests:
-  Name:      docker.io/petaio/peta-core:1.3.0@sha256:3aabc6a...
+  Name:      docker.io/bcdunia/peta-core:1.3.0@sha256:3aabc6a...
   Platform:  linux/amd64
 
-  Name:      docker.io/petaio/peta-core:1.3.0@sha256:645402d...
+  Name:      docker.io/bcdunia/peta-core:1.3.0@sha256:645402d...
   Platform:  linux/arm64
 ```
 
@@ -133,7 +133,7 @@ Manifests:
 
 ```bash
 # Pull the release image
-docker pull petaio/peta-core:1.3.0
+docker pull bcdunia/peta-core:1.3.0
 
 # Run container (requires environment variable configuration)
 docker run -d \
@@ -141,7 +141,7 @@ docker run -d \
   -p 3002:3002 \
   -e DATABASE_URL="postgresql://user:password@host:5432/dbname" \
   -e PROXY_KEY="your-proxy-key" \
-  petaio/peta-core:1.3.0
+  bcdunia/peta-core:1.3.0
 
 # View logs
 docker logs -f peta-core-test
@@ -261,7 +261,7 @@ Docker automatically caches each build layer. If source code hasn't changed, sub
 
 ```bash
 # Local cache warm-up without publishing
-docker buildx build --platform linux/amd64 -t petaio/peta-core:1.3.0 --load .
+docker buildx build --platform linux/amd64 -t bcdunia/peta-core:1.3.0 --load .
 ```
 
 ### Reducing Image Size

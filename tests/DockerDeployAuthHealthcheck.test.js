@@ -387,14 +387,14 @@ test('generated Peta Auth Compose keeps Auth private, scoped, and independently 
       compose.indexOf('  # Peta Auth Service'),
     );
 
-    expect(authService).toContain('image: petaio/peta-auth:${PETA_AUTH_VERSION}');
+    expect(authService).toContain('image: bcdunia/peta-auth:${PETA_AUTH_VERSION}');
     expect(authService).not.toContain('ports:');
     expect(authService).toContain('PETA_AUTH_MASTER_KEY_FILE: /run/secrets/peta_auth_master_key');
     expect(authService).toContain('PETA_AUTH_CLIENT_SECRETS_FILE: /run/secrets/peta_auth_client_secrets_json');
     expect(authService).toContain('- peta_auth_master_key');
     expect(authService).toContain('- peta_auth_client_secrets_json');
     expect(coreService).not.toContain('peta_auth_');
-    expect(coreService).toContain('image: petaio/peta-core:9.9.9-core-test');
+    expect(coreService).toContain('image: bcdunia/peta-core:9.9.9-core-test');
     expect(compose).toContain(`file: ${masterKey}`);
     expect(compose).toContain(`file: ${clientSecrets}`);
     expect(compose).toContain('response+="$$line"');

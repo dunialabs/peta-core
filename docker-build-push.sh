@@ -2,7 +2,7 @@
 set -euo pipefail
 
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly IMAGE_NAME="petaio/peta-core"
+readonly IMAGE_NAME="bcdunia/peta-core"
 readonly VERSION_TAG="$(node -e "const p=require(process.argv[1]); process.stdout.write(p.version || '')" "$SCRIPT_DIR/package.json")"
 readonly PUBLISH_TAG="${PUBLISH_TAG:-$VERSION_TAG}"
 readonly RELEASE_GIT_SHA="${PETA_RELEASE_GIT_SHA:-}"

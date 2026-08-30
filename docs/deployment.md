@@ -81,10 +81,9 @@ PETA_AUTH_AUTOSTART=true ./docker-deploy.sh
 ```
 
 You can also adapt the generated files to your own Docker or orchestration setup.
-The coordinated `1.3.0` images are still in pre-publication preparation. Do not
-install or update to that version until the Core, Console, and Auth manifests
-are available for both `linux/amd64` and `linux/arm64`. After publication, pin
-Peta Core with `PETA_VERSION=1.3.0` rather than the moving `latest` tag. Auth
+Before installing `1.3.0`, confirm that the Core, Console, and Auth manifests
+are available for both `linux/amd64` and `linux/arm64`. Pin Peta Core with
+`PETA_VERSION=1.3.0` rather than the moving `latest` tag. Auth
 remains independently pinned with `PETA_AUTH_VERSION=1.3.0`, so a Core rollback
 does not change Auth; the complete Compose example and rollback steps are in
 [DOCKER_DEPLOYMENT.md](./DOCKER_DEPLOYMENT.md).
@@ -112,9 +111,11 @@ this coordinated release because it is outside that Docker Hub policy boundary.
 `scripts/release-main.js publish` is unconditionally disabled and performs no
 source push, Docker push, Git tag creation, or GitHub Release creation. Push
 reviewed source commits through the normal Git flow and publish the immutable
-semver Docker image with the command above. Public tags and GitHub Releases
-require a separately approved operator process after the exposed Console TLS
-credential is revoked, replaced, and the replacement deployment is verified;
+semver Docker image with the command above. The historical Console Origin
+certificate was revoked on 2026-08-30, removed from the Cloudflare inventory,
+and recorded in Cloudflare's signed CRL without regressing the active public
+sites. Public tags and GitHub Releases therefore use a separately approved
+operator process after the exact image and release-note gates pass;
 repository-local evidence files are not accepted as authorization.
 
 #### Peta Auth runtime secrets (Docker)

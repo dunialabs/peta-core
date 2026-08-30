@@ -225,7 +225,7 @@ services:
 
   # Peta Core Service (MCP Gateway)
   peta-core:
-    image: petaio/peta-core:${PETA_VERSION}
+    image: bcdunia/peta-core:${PETA_VERSION}
     container_name: peta-core
     restart: unless-stopped
     user: root  # Root permission required to access Docker socket
@@ -267,7 +267,7 @@ EOF
 
   # Peta Auth Service
   peta-auth:
-    image: petaio/peta-auth:${PETA_AUTH_VERSION}
+    image: bcdunia/peta-auth:${PETA_AUTH_VERSION}
     container_name: peta-auth
     restart: unless-stopped
     environment:
