@@ -544,7 +544,9 @@ export class ServerHandler {
     }
 
     const configTemplateInvalid =
-      !configTemplate || configTemplate.trim() === '' || configTemplate.trim() === '{}';
+      typeof configTemplate !== 'string' ||
+      configTemplate.trim() === '' ||
+      configTemplate.trim() === '{}';
     if (
       (allowUserInputValue === true ||
         category === ServerCategory.Template ||
@@ -556,6 +558,9 @@ export class ServerHandler {
         'configTemplate is required for this server',
         AdminErrorCode.INVALID_REQUEST,
       );
+    }
+    if (category === ServerCategory.RestApi) {
+      this.validateRestApiConfigTemplate(configTemplate);
     }
     let usePetaOauthConfigValue = true;
     let configTemplateStr = configTemplate ?? null;
@@ -957,6 +962,9 @@ export class ServerHandler {
         'configTemplate field is immutable after server creation',
         AdminErrorCode.INVALID_REQUEST,
       );
+    }
+    if (existingServer.category === ServerCategory.RestApi && configTemplate !== undefined) {
+      this.validateRestApiConfigTemplate(configTemplate);
     }
 
     // Prepare update data
@@ -1584,6 +1592,31 @@ export class ServerHandler {
 
   private containsOAuthPlaceholder(value: string): boolean {
     return /YOUR_[A-Z0-9_]+/.test(value);
+  }
+
+  private validateRestApiConfigTemplate(configTemplate: unknown): void {
+    try {
+      if (typeof configTemplate !== 'string') {
+        throw new Error('configTemplate must be a string');
+      }
+      const template: unknown = JSON.parse(configTemplate);
+      if (!template || typeof template !== 'object' || Array.isArray(template)) {
+        throw new Error('invalid RestApi template');
+      }
+      const apis = (template as Record<string, unknown>).apis;
+      if (!Array.isArray(apis) || apis.length === 0) {
+        throw new Error('invalid RestApi template');
+      }
+      const firstApi = apis[0];
+      if (!firstApi || typeof firstApi !== 'object' || Array.isArray(firstApi)) {
+        throw new Error('invalid RestApi template');
+      }
+    } catch {
+      throw new AdminError(
+        'Invalid RestApi configTemplate: expected a JSON object with a non-empty apis array whose first item is an object',
+        AdminErrorCode.INVALID_REQUEST,
+      );
+    }
   }
 
   private async updateLazyStartEnabled(

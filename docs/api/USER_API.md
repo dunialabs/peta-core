@@ -480,9 +480,11 @@ _Example 4: CustomStdio Server (category=5) — user provides env overrides_
   - `params` (object, optional): Key-value pairs to append as URL query parameters
     - Example: `{"api_key": "abc123", "user_id": "456"}` → `?api_key=abc123&user_id=456`
     - At least one of `params` or `headers` must be non-empty
+    - Existing template query parameters and URL fragments are preserved. A user-supplied key replaces a same-name template query parameter.
   - `headers` (object, optional): Key-value pairs to add as HTTP request headers
     - Example: `{"Authorization": "Bearer token", "X-Custom": "value"}`
     - At least one of `params` or `headers` must be non-empty
+  - `params` and `headers`, when present, must be JSON objects with string values. Arrays, scalar values, and `Map` instances are invalid.
 
 **For RestApi Servers (category=3)**:
 
@@ -497,8 +499,8 @@ _Example 4: CustomStdio Server (category=5) — user provides env overrides_
   - `param` (string, conditional): Query parameter name - required for `query_param` type
   - `username` (string, conditional): Username - required for `basic` type
   - `password` (string, conditional): Password - required for `basic` type
-  - **Implementation detail**: The backend forwards `restfulApiAuth` as-is into the REST gateway config. Client must ensure structure is correct.
-  - **ConfigTemplate requirement**: RestApi servers must have a `configTemplate` with `apis[0].auth` (the backend injects `restfulApiAuth` into that field).
+  - The backend validates this JSON object and forwards only the fields for the declared `type`. Arrays, scalar values, `Map` instances, missing required fields, and unsupported fields return `SERVER_CONFIG_INVALID`.
+  - **ConfigTemplate requirement**: RestApi servers must have a JSON object with a non-empty `apis` array and an object at `apis[0]`. At startup, the REST gateway assigns the saved launch-config auth object to `apis[0].auth`.
 
 **For CustomStdio Servers (category=5)**:
 
@@ -525,7 +527,7 @@ _Example 4: CustomStdio Server (category=5) — user provides env overrides_
    - Check server exists in database
    - Verify `server.allowUserInput === true`
    - Verify `server.enabled === true`
-   - Verify `server.configTemplate` exists (or `launchConfig` for RestApi)
+   - Verify `server.configTemplate` exists
 2. **Configuration Assembly** (branched by server.category):
 
    **For Template Servers (category=1)**:
@@ -542,7 +544,7 @@ _Example 4: CustomStdio Server (category=5) — user provides env overrides_
    **For CustomRemote Servers (category=2)**:
    - Requires `remoteAuth` parameter with at least params or headers
    - Parse server's `configTemplate` to get base URL
-   - Append `remoteAuth.params` as query string to URL (if provided)
+   - Merge `remoteAuth.params` into URL query parameters (if provided); template parameters and URL fragment are retained, and user values replace same-name template parameters
    - Merge `remoteAuth.headers` into request headers (if provided)
    - Create launchConfig: `{ url: "...", headers: {...} }`
 
@@ -576,12 +578,13 @@ _Example 4: CustomStdio Server (category=5) — user provides env overrides_
 - `SERVER_NOT_FOUND (2001)`: Specified serverId doesn't exist
 - `SERVER_DISABLED (2002)`: Server is disabled by admin
 - `SERVER_NOT_ALLOW_USER_INPUT (2004)`: Server doesn't allow user configuration
-- `SERVER_NO_CONFIG_TEMPLATE (2005)`: Server missing configTemplate (or launchConfig for RestApi)
+- `SERVER_NO_CONFIG_TEMPLATE (2005)`: Server missing configTemplate
 - `SERVER_CONFIG_INVALID (2003)`: Invalid configuration - specific causes:
   - **Template servers**: `authConf` is required but missing/empty
   - **CustomRemote servers**:
     - `remoteAuth` is required but missing
     - Both `params` and `headers` are empty (at least one required)
+    - `remoteAuth`, `params`, or `headers` is not the required JSON-object/string-record shape
     - `configTemplate` is missing or empty
   - **CustomStdio servers**:
     - `configTemplate` is missing or empty
@@ -589,6 +592,8 @@ _Example 4: CustomStdio Server (category=5) — user provides env overrides_
   - **RestApi servers**:
     - `restfulApiAuth` is required but missing/empty
     - Missing required fields for auth type (e.g., `value` for bearer, `username`/`password` for basic)
+    - The auth object is an array, scalar, `Map`, has unsupported fields, or declares an unsupported `type`
+    - `configTemplate` is not a JSON object with a non-empty `apis` array and an object at `apis[0]`
   - **General**: Wrong auth parameter for server category (e.g., sending `authConf` to RestApi server)
   - Invalid configTemplate JSON or credential replacement resulted in invalid JSON
 

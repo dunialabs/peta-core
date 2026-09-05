@@ -53,12 +53,6 @@ export class ProxyHandler {
       proxyKey
     } = request.data;
 
-    // Only one proxy allowed
-    const proxies = await ProxyRepository.findAll();
-    if (proxies.length > 0) {
-      throw new AdminError('Only one proxy is allowed', AdminErrorCode.PROXY_ALREADY_EXISTS);
-    }
-
     // Validate required fields
     if (!name) {
       throw new AdminError('Missing required field: name', AdminErrorCode.INVALID_REQUEST);
@@ -69,12 +63,19 @@ export class ProxyHandler {
 
     const startPort = parseInt(process.env.BACKEND_PORT ?? '3002');
 
-    // Create proxy
-    const proxy = await ProxyRepository.create({
-      name,
-      proxyKey,
-      startPort,
-      addtime: Math.floor(Date.now() / 1000)
+    const proxy = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`LOCK TABLE "proxy" IN SHARE ROW EXCLUSIVE MODE`;
+      if (await tx.proxy.count() > 0) {
+        throw new AdminError('Only one proxy is allowed', AdminErrorCode.PROXY_ALREADY_EXISTS);
+      }
+      return tx.proxy.create({
+        data: {
+          name,
+          proxyKey,
+          startPort,
+          addtime: Math.floor(Date.now() / 1000)
+        }
+      });
     });
 
     // Update server information

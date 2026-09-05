@@ -1,3 +1,8 @@
+import type { Proxy, User } from '@prisma/client';
+
+export type PublicOwnerLookup = Pick<User, 'userId' | 'encryptedToken' | 'role' | 'status' | 'expiresAt' | 'createdAt'>;
+export type PublicProxyLookup = Pick<Proxy, 'id' | 'name' | 'proxyKey' | 'startPort' | 'addtime'>;
+
 /**
  * Admin operation type definitions
  */

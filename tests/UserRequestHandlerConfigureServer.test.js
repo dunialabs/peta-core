@@ -480,4 +480,158 @@ describe('UserRequestHandler.handleConfigureServer', () => {
         'Slack OAuth requires Token Rotation. Enable Token Rotation in Slack OAuth settings.',
     });
   });
+  test('configures a CustomRemote server with headers only', async () => {
+    findByServerId.mockResolvedValue(
+      makeServer({
+        serverId: 'remote-server',
+        category: ServerCategory.CustomRemote,
+        configTemplate: JSON.stringify({
+          url: 'https://example.com/mcp',
+          headers: { 'X-Template': 'template-value' },
+        }),
+      }),
+    );
+
+    await expect(
+      UserRequestHandler.instance.handleConfigureServer('user-1', 'user-token', {
+        serverId: 'remote-server',
+        remoteAuth: { headers: { Authorization: 'Bearer user-token' } },
+      }),
+    ).resolves.toMatchObject({ serverId: 'remote-server' });
+
+    expect(JSON.parse(encryptData.mock.calls[0][0])).toEqual({
+      url: 'https://example.com/mcp',
+      headers: {
+        'X-Template': 'template-value',
+        Authorization: 'Bearer user-token',
+      },
+    });
+  });
+
+  test('preserves CustomRemote template query parameters and fragments while user parameters override matching keys', async () => {
+    findByServerId.mockResolvedValue(
+      makeServer({
+        serverId: 'remote-server',
+        category: ServerCategory.CustomRemote,
+        configTemplate: JSON.stringify({
+          url: 'https://example.com/mcp?tenant=template&keep=value#connection',
+        }),
+      }),
+    );
+
+    await UserRequestHandler.instance.handleConfigureServer('user-1', 'user-token', {
+      serverId: 'remote-server',
+      remoteAuth: { params: { tenant: 'user', api_key: 'secret' } },
+    });
+
+    expect(JSON.parse(encryptData.mock.calls[0][0])).toEqual({
+      url: 'https://example.com/mcp?tenant=user&keep=value&api_key=secret#connection',
+      headers: {},
+    });
+  });
+
+  test.each([
+    { remoteAuth: [] },
+    { remoteAuth: { params: [] } },
+    { remoteAuth: { headers: 'Authorization: token' } },
+    { remoteAuth: new Map([['headers', { Authorization: 'Bearer token' }]]) },
+  ])('rejects malformed CustomRemote authentication: %#', async ({ remoteAuth }) => {
+    findByServerId.mockResolvedValue(
+      makeServer({
+        serverId: 'remote-server',
+        category: ServerCategory.CustomRemote,
+        configTemplate: JSON.stringify({ url: 'https://example.com/mcp' }),
+      }),
+    );
+
+    await expect(
+      UserRequestHandler.instance.handleConfigureServer('user-1', 'user-token', {
+        serverId: 'remote-server',
+        remoteAuth,
+      }),
+    ).rejects.toMatchObject({ name: 'UserError', code: UserErrorCode.SERVER_CONFIG_INVALID });
+
+    expect(encryptData).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    { configTemplate: JSON.stringify({ baseUrl: 'https://api.example.com', apis: [{ auth: {} }] }) },
+    { configTemplate: JSON.stringify({ baseUrl: 'https://api.example.com', apis: [{}] }) },
+  ])('configures a RestApi server with documented bearer authentication: %#', async ({ configTemplate }) => {
+    findByServerId.mockResolvedValue(
+      makeServer({
+        serverId: 'rest-server',
+        category: ServerCategory.RestApi,
+        configTemplate,
+        launchConfig: JSON.stringify({ command: 'rest-gateway' }),
+      }),
+    );
+
+    await expect(
+      UserRequestHandler.instance.handleConfigureServer('user-1', 'user-token', {
+        serverId: 'rest-server',
+        restfulApiAuth: { type: 'bearer', value: 'bearer-token' },
+      }),
+    ).resolves.toMatchObject({ serverId: 'rest-server' });
+
+    expect(JSON.parse(encryptData.mock.calls[0][0])).toEqual({
+      command: 'rest-gateway',
+      auth: { type: 'bearer', value: 'bearer-token' },
+    });
+  });
+
+  test.each([
+    { configTemplate: JSON.stringify({ baseUrl: 'https://api.example.com' }) },
+    { configTemplate: JSON.stringify({ baseUrl: 'https://api.example.com', apis: [] }) },
+    { configTemplate: JSON.stringify({ baseUrl: 'https://api.example.com', apis: [null] }) },
+  ])('rejects a RestApi template that startup cannot inject authentication into: %#', async ({ configTemplate }) => {
+    findByServerId.mockResolvedValue(
+      makeServer({
+        serverId: 'rest-server',
+        category: ServerCategory.RestApi,
+        configTemplate,
+        launchConfig: JSON.stringify({ command: 'rest-gateway' }),
+      }),
+    );
+
+    await expect(
+      UserRequestHandler.instance.handleConfigureServer('user-1', 'user-token', {
+        serverId: 'rest-server',
+        restfulApiAuth: { type: 'bearer', value: 'bearer-token' },
+      }),
+    ).rejects.toMatchObject({ name: 'UserError', code: UserErrorCode.SERVER_CONFIG_INVALID });
+
+    expect(encryptData).not.toHaveBeenCalled();
+    expect(updateLaunchConfigs).not.toHaveBeenCalled();
+    expect(createTemporaryServer).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    {},
+    [],
+    'bearer-token',
+    new Map([['type', 'bearer'], ['value', 'bearer-token']]),
+    { type: 'bearer' },
+    { type: 'basic', username: 'user' },
+    { type: 'header', header: 'X-API-Key' },
+    { type: 'query_param', param: 'api_key' },
+  ])('rejects malformed RestApi authentication: %#', async (restfulApiAuth) => {
+    findByServerId.mockResolvedValue(
+      makeServer({
+        serverId: 'rest-server',
+        category: ServerCategory.RestApi,
+        configTemplate: JSON.stringify({ baseUrl: 'https://api.example.com', apis: [{ auth: {} }] }),
+        launchConfig: JSON.stringify({ command: 'rest-gateway' }),
+      }),
+    );
+
+    await expect(
+      UserRequestHandler.instance.handleConfigureServer('user-1', 'user-token', {
+        serverId: 'rest-server',
+        restfulApiAuth,
+      }),
+    ).rejects.toMatchObject({ name: 'UserError', code: UserErrorCode.SERVER_CONFIG_INVALID });
+
+    expect(encryptData).not.toHaveBeenCalled();
+  });
 });

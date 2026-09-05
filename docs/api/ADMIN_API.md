@@ -389,6 +389,16 @@ Admin API supports two role permissions:
 
 Permission verification is performed in ConfigController. Requests that do not meet permission requirements will return `FORBIDDEN (1003)` error.
 
+All Admin API requests that are not listed below require a valid `Authorization: Bearer <Peta access token>` for an Owner or Admin. A present malformed or invalid Authorization header is rejected, including on the no-header actions. The following no-header actions are retained for initial setup and Console login:
+
+- `GET_OWNER (1016)` and `GET_PROXY (5001)` support the Console login/setup flow.
+- `CREATE_PROXY (5002)` is available only while no proxy exists; `RESTORE_DATABASE (6002)` is available only while the proxy, users, and servers are empty.
+- `CREATE_USER (1010)` is available without a header only when `data.role` is `Owner`; the handler permits exactly one Owner and only as the first user.
+
+Bootstrap eligibility and creation are serialized by the database, so concurrent first-owner and first-proxy requests cannot both succeed. Restore rechecks all three empty-state tables under the same database lock after shutdown completes; a bootstrap write that arrives during shutdown is preserved and causes restore to fail.
+
+`COUNT_USERS (1015)` and `COUNT_SERVERS (2015)` require Owner or Admin authorization.
+
 **publicAccess and permissions merge logic**:
 
 - If `permissions` does not include a `serverId`, availability falls back to `server.publicAccess` (true allows access)
@@ -473,7 +483,7 @@ null
 
 #### 1010 CREATE_USER
 
-**Permission**: **Owner only** No verification when creating owner for the first time, database is empty at this time
+**Permission**: **Owner only**. The first Owner may be created without an Authorization header only when `role` is `UserRole.Owner` and the database is empty.
 **Function**: Create new user
 
 **Request Parameters** (data):
@@ -651,8 +661,8 @@ null
 
 #### 1016 GET_OWNER
 
-**Permission**: Public (no authentication required)
-**Function**: Get complete information of system Owner user
+**Permission**: Public without an Authorization header for Console login/bootstrap. A supplied Authorization header must be valid.
+**Function**: Get the system Owner information needed for Console login
 
 **Request Parameters** (data):
 
@@ -668,26 +678,18 @@ null
     "userId": "owner123",
     "status": 1,
     "role": 1,
-    "permissions": "{}",
-    "serverApiKeys": "[]",
     "expiresAt": 0,
     "createdAt": 1729431234,
-    "updatedAt": 1729431234,
-    "ratelimit": 100,
-    "name": "System Owner",
-    "encryptedToken": "...",
-    "proxyId": 0,
-    "notes": null
+    "encryptedToken": "..."
   }
 }
 ```
 
 **Function Description**:
 
-- Returns complete information of the unique Owner role user in the system
+- Without an Authorization header, returns only `userId`, `encryptedToken`, `role`, `status`, `expiresAt`, and `createdAt`. The encrypted token envelope is required for Console master-password login; it is not the plaintext access token.
+- Authenticated Owner/Admin requests receive the full Owner record. Anonymous responses omit permissions, preferences, launch configurations, notes, and other unrelated account fields.
 - If no Owner user exists in the system, returns error (code: 2001, USER_NOT_FOUND)
-- This endpoint requires no authentication and is publicly accessible
-- Returns all user fields, including sensitive information
 
 ---
 
@@ -867,7 +869,7 @@ null
 
 - **Template (1)**: must include `mcpJsonConf` and `credentials`, optional `oAuthConfig`
 - **CustomRemote (2)**: must include base URL info (used to assemble launchConfig for user config)
-- **RestApi (3)**: must include `apis[0].auth`; system injects `launchConfig.auth`
+- **RestApi (3)**: must include a non-empty `apis` array with an object at `apis[0]`; the system injects `launchConfig.auth` into `apis[0].auth` when the server starts. Create and template-update requests reject malformed JSON or an invalid shape with `INVALID_REQUEST (1001)` before saving the server.
 - **Skills (4)**: must include `type` and `serverName`
 - **CustomStdio (5)**: must include `command`; optional `args` (array) and `env` (object). When `allowUserInput=true`, users override env via `stdioEnv` in User API
   - Docker deployment behavior: if `PETA_CORE_IN_DOCKER=true` and `command` is not `docker`, peta-core wraps execution into `docker run ... petaio/mcp-runner:latest ...` internally. Stored configuration format remains unchanged.
@@ -1559,6 +1561,7 @@ null
 
 #### 5001 GET_PROXY
 
+**Permission**: Public without an Authorization header for Console setup/login. A supplied Authorization header must be valid.
 **Function**: Query proxy information (system only supports single proxy)
 
 **Request Parameters** (data):
@@ -1584,11 +1587,14 @@ null
 **Function Description**:
 
 - If no proxy exists, returns `proxy: null`
+- Without an Authorization header, returns only `id`, `name`, `proxyKey`, `startPort`, and `addtime`. `proxyKey` is the public proxy identifier used by Console setup/login.
+- Authenticated Owner/Admin requests receive the full proxy record. Anonymous responses omit `logWebhookUrl` and `lastSyncedLogId`.
 
 ---
 
 #### 5002 CREATE_PROXY
 
+**Permission**: Public without an Authorization header during empty-system setup. A supplied Authorization header must be valid.
 **Function**: Create proxy (system only allows one proxy)
 
 **Request Parameters** (data):
@@ -1750,7 +1756,7 @@ null
 
 #### 6002 RESTORE_DATABASE
 
-**Permission**: Owner + Admin
+**Permission**: Owner + Admin, or without an Authorization header when the proxy, users, and servers are all empty. A supplied Authorization header must be valid.
 **Function**: Full database restore
 
 **Request Parameters** (data):

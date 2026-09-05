@@ -196,6 +196,8 @@ Explicit `DELETE /mcp` termination records a short-lived in-memory reconnect tom
 
 ### Core Design Patterns
 
+Result-cache request identity includes every business argument by default, including `timestamp`, `requestId`, `nonce`, and tool-owned `_meta`. An operator may explicitly exclude fields through an entity's `cache.key.denyFields` or select fields through `cache.key.allowFields`; these settings must only ignore values that cannot affect the result. Result and admission keys use the `rc:v2` and `rcadm:v2` namespaces, so older entries are not reused after upgrade and expire under their original TTLs. No database migration is required. A rolling deployment must drain old workers to remove the old cache and approval identity behavior completely.
+
 1. **Multi-Role Proxy Pattern**
    - ProxySession acts as both MCP Server (upstream) and MCP Client (downstream)
    - Transparently forwards MCP protocol without client awareness of the middleware
