@@ -4,8 +4,6 @@ import { CacheScope, type CacheOperationType } from './types.js';
 type JsonLike = null | boolean | number | string | JsonLike[] | { [key: string]: JsonLike };
 
 export class CacheKeyBuilder {
-  static readonly DEFAULT_DENY_FIELDS = ['_meta', 'requestId', 'timestamp', 'nonce'];
-
   canonicalizeParams(params: unknown, denyFields: string[], allowFields?: string[]): string {
     const denySet = new Set(denyFields);
     const prepared = this.applyFieldPolicies(params, denySet, allowFields);
@@ -33,7 +31,7 @@ export class CacheKeyBuilder {
     entityVersion: number,
     requestHash: string,
   ): string {
-    return `${prefix}:rc:v1:${operation}:${serverId}:${entityHash}:${scopeType}:${scopeHash}:gv${globalVersion}:sv${serverVersion}:ev${entityVersion}:${requestHash}`;
+    return `${prefix}:rc:v2:${operation}:${serverId}:${entityHash}:${scopeType}:${scopeHash}:gv${globalVersion}:sv${serverVersion}:ev${entityVersion}:${requestHash}`;
   }
 
   buildAdmissionKey(
@@ -48,7 +46,7 @@ export class CacheKeyBuilder {
     entityVersion: number,
     requestHash: string,
   ): string {
-    return `${prefix}:rcadm:v1:${operation}:${serverId}:${entityHash}:${scopeType}:${scopeHash}:gv${globalVersion}:sv${serverVersion}:ev${entityVersion}:${requestHash}`;
+    return `${prefix}:rcadm:v2:${operation}:${serverId}:${entityHash}:${scopeType}:${scopeHash}:gv${globalVersion}:sv${serverVersion}:ev${entityVersion}:${requestHash}`;
   }
 
   buildNamespaceKey(prefix: string, ...parts: string[]): string {
@@ -66,12 +64,9 @@ export class CacheKeyBuilder {
   ): unknown {
     if (allowFields && this.isRecord(value)) {
       const allowed = new Set(allowFields);
-      const filtered: Record<string, unknown> = {};
-      for (const key of Object.keys(value)) {
-        if (allowed.has(key)) {
-          filtered[key] = value[key];
-        }
-      }
+      const filtered = Object.fromEntries(
+        Object.entries(value).filter(([key]) => allowed.has(key)),
+      );
       return this.stripDeniedFields(filtered, denySet);
     }
     return this.stripDeniedFields(value, denySet);
@@ -86,14 +81,11 @@ export class CacheKeyBuilder {
       return value;
     }
 
-    const output: Record<string, unknown> = {};
-    for (const [key, nested] of Object.entries(value)) {
-      if (denySet.has(key)) {
-        continue;
-      }
-      output[key] = this.stripDeniedFields(nested, denySet);
-    }
-    return output;
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => !denySet.has(key))
+        .map(([key, nested]) => [key, this.stripDeniedFields(nested, denySet)]),
+    );
   }
 
   private normalizeValue(value: unknown): JsonLike {
@@ -133,12 +125,10 @@ export class CacheKeyBuilder {
       return { __type: 'unsupported', value: Object.prototype.toString.call(value) };
     }
 
-    const normalized: { [key: string]: JsonLike } = {};
     const keys = Object.keys(value).sort();
-    for (const key of keys) {
-      normalized[key] = this.normalizeValue(value[key]);
-    }
-    return normalized;
+    return Object.fromEntries(
+      keys.map((key) => [key, this.normalizeValue(value[key])]),
+    );
   }
 
   private stableStringify(value: JsonLike): string {

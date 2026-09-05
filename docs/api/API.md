@@ -64,6 +64,8 @@ When a tool input-schema property has an `x-mcp-header` annotation, mirror its s
 
 Every modern JSON-RPC request must include `params._meta.io.modelcontextprotocol/protocolVersion` and `params._meta.io.modelcontextprotocol/clientCapabilities`. `params._meta.io.modelcontextprotocol/clientInfo` is optional; when present, it must contain non-empty `name` and `version`. A request id, when supplied, must be a string or finite number; `null`, booleans, arrays, objects, and non-finite numbers are rejected.
 
+For `tools/call`, `params.arguments` must be a JSON object when supplied. If omitted, Peta Core normalizes it to `{}` before policy evaluation, approval checks, caching, and downstream forwarding. Object contents, including an `_meta` business key inside `arguments`, are preserved unchanged.
+
 Modern methods currently implemented by the gateway:
 
 - `server/discover`

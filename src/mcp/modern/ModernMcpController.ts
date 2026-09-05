@@ -213,12 +213,20 @@ export class ModernMcpController {
     }
 
     const id = 'id' in body && this.isJsonRpcId(body.id) ? body.id : undefined;
-    const params = this.isJsonObject(body.params) ? body.params : undefined;
+    const normalizedParams = this.isJsonObject(body.params) ? { ...body.params } : undefined;
+    if (body.method === 'tools/call' && normalizedParams) {
+      const argumentsValue = normalizedParams.arguments;
+      if ('arguments' in normalizedParams && !this.isJsonObject(argumentsValue)) {
+        throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, 'params.arguments must be an object when present');
+      }
+      normalizedParams.arguments = this.isJsonObject(argumentsValue) ? argumentsValue : {};
+    }
+
     const request: ModernJsonRpcRequest = {
       jsonrpc: '2.0',
       method: body.method,
       ...(id !== undefined ? { id } : {}),
-      ...(params ? { params } : {}),
+      ...(normalizedParams ? { params: normalizedParams } : {}),
     };
 
     const accept = this.getHeader(req, 'accept') ?? '';

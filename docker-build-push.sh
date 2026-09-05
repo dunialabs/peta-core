@@ -8,6 +8,7 @@ readonly PUBLISH_TAG="${PUBLISH_TAG:-$VERSION_TAG}"
 readonly RELEASE_GIT_SHA="${PETA_RELEASE_GIT_SHA:-}"
 readonly PLATFORMS="linux/amd64,linux/arm64"
 readonly PUBLISH_TIMEOUT_SECONDS=900
+readonly PUBLISH_TIMEOUT_KILL_GRACE_SECONDS=30
 readonly MANIFEST_VERIFY_ATTEMPTS="${MANIFEST_VERIFY_ATTEMPTS:-12}"
 readonly MANIFEST_VERIFY_DELAY_SECONDS="${MANIFEST_VERIFY_DELAY_SECONDS:-5}"
 VERBOSE=false
@@ -18,7 +19,7 @@ Usage: PETA_RELEASE_PUSH=1 DOCKER_HUB_IMMUTABLE_TAG_POLICY=enabled PETA_RELEASE_
 
 Publishes only ${IMAGE_NAME}:${VERSION_TAG} for linux/amd64 and linux/arm64.
 The semantic-version tag must be protected by Docker Hub's server-side immutable-tag policy.
-Docker Buildx publication is limited to 15 minutes and fails closed on timeout.
+Docker Buildx publication is limited to 15 minutes, sends TERM on timeout, then KILL after 30 seconds, and fails closed.
 EOF
 }
 
@@ -76,14 +77,14 @@ if [[ ! "$MANIFEST_VERIFY_ATTEMPTS" =~ ^[1-9][0-9]*$ || ! "$MANIFEST_VERIFY_DELA
 fi
 
 timeout_command=()
-if command -v timeout >/dev/null 2>&1; then
-  timeout_command=(timeout "$PUBLISH_TIMEOUT_SECONDS")
-elif command -v gtimeout >/dev/null 2>&1; then
-  timeout_command=(gtimeout "$PUBLISH_TIMEOUT_SECONDS")
+if command -v timeout >/dev/null 2>&1 && timeout --help 2>&1 | grep -q -- '--kill-after'; then
+  timeout_command=(timeout "--kill-after=${PUBLISH_TIMEOUT_KILL_GRACE_SECONDS}s" "$PUBLISH_TIMEOUT_SECONDS")
+elif command -v gtimeout >/dev/null 2>&1 && gtimeout --help 2>&1 | grep -q -- '--kill-after'; then
+  timeout_command=(gtimeout "--kill-after=${PUBLISH_TIMEOUT_KILL_GRACE_SECONDS}s" "$PUBLISH_TIMEOUT_SECONDS")
 elif command -v perl >/dev/null 2>&1; then
-  timeout_command=(perl -e 'alarm shift; exec @ARGV' "$PUBLISH_TIMEOUT_SECONDS")
+  timeout_command=(perl "$SCRIPT_DIR/scripts/hard-timeout.pl" "$PUBLISH_TIMEOUT_SECONDS" "$PUBLISH_TIMEOUT_KILL_GRACE_SECONDS")
 else
-  echo "No supported timeout implementation is available; install timeout, gtimeout, or Perl before publishing." >&2
+  echo "No supported hard-timeout implementation is available; install GNU timeout, gtimeout, or Perl before publishing." >&2
   exit 1
 fi
 

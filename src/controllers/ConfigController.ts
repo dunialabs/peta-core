@@ -7,6 +7,8 @@ import {
   AdminResponse,
   AdminErrorCode,
   AdminError,
+  type PublicOwnerLookup,
+  type PublicProxyLookup,
 } from '../types/admin.types.js';
 import { IpWhitelistService } from '../security/IpWhitelistService.js';
 import { UserHandler } from './handlers/UserHandler.js';
@@ -112,19 +114,12 @@ export class ConfigController {
         return;
       }
 
-      const token = req.headers['authorization']?.substring(7);
+      const authorization = req.headers.authorization;
+      const token = typeof authorization === 'string' && authorization.startsWith('Bearer ')
+        ? authorization.substring(7)
+        : undefined;
 
-      if (
-        ![
-          AdminActionType.GET_PROXY,
-          AdminActionType.CREATE_PROXY,
-          AdminActionType.CREATE_USER,
-          AdminActionType.GET_OWNER,
-          AdminActionType.RESTORE_DATABASE,
-          AdminActionType.COUNT_USERS,
-          AdminActionType.COUNT_SERVERS,
-        ].includes(adminRequest.action)
-      ) {
+      if (!this.isUnauthenticatedBootstrapAction(adminRequest, authorization, req.authContext)) {
         if (!token) {
           throw new AdminError('Token is required', AdminErrorCode.FORBIDDEN);
         }
@@ -174,6 +169,12 @@ export class ConfigController {
           break;
         case AdminActionType.GET_OWNER:
           result = await this.userHandler.handleGetOwner(adminRequest);
+          if (!req.authContext && result.owner) {
+            const { userId, encryptedToken, role, status, expiresAt, createdAt } = result.owner;
+            result = {
+              owner: { userId, encryptedToken, role, status, expiresAt, createdAt } satisfies PublicOwnerLookup,
+            };
+          }
           break;
 
         // ==================== Server Operations (2000-2999) ====================
@@ -294,6 +295,12 @@ export class ConfigController {
         // ==================== Proxy Operations (5000-5099) ====================
         case AdminActionType.GET_PROXY:
           result = await this.proxyHandler.handleGetProxy(adminRequest);
+          if (!req.authContext && result.proxy) {
+            const { id, name, proxyKey, startPort, addtime } = result.proxy;
+            result = {
+              proxy: { id, name, proxyKey, startPort, addtime } satisfies PublicProxyLookup,
+            };
+          }
           break;
         case AdminActionType.CREATE_PROXY:
           result = await this.proxyHandler.handleCreateProxy(adminRequest);
@@ -531,6 +538,28 @@ export class ConfigController {
     }
 
     return true;
+  }
+
+  private isUnauthenticatedBootstrapAction(
+    request: AdminRequest<any>,
+    authorization: string | undefined,
+    authContext: Request['authContext'],
+  ): boolean {
+    if (authorization !== undefined || authContext) {
+      return false;
+    }
+
+    switch (request.action) {
+      case AdminActionType.GET_OWNER:
+      case AdminActionType.GET_PROXY:
+      case AdminActionType.CREATE_PROXY:
+      case AdminActionType.RESTORE_DATABASE:
+        return true;
+      case AdminActionType.CREATE_USER:
+        return request.data?.role === UserRole.Owner;
+      default:
+        return false;
+    }
   }
 
   /**

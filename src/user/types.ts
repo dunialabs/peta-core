@@ -98,10 +98,21 @@ export interface ConfigureServerRequest {
     value: string;
     dataType: number;
   }>;
-  restfulApiAuth?: Map<any, any>;
-  remoteAuth?: { params: Record<string, any>; headers: Record<string, any> };
+  restfulApiAuth?: RestfulApiAuth;
+  remoteAuth?: RemoteAuth;
   stdioEnv?: Record<string, string>; // env overrides for CustomStdio (user credentials)
 }
+
+export type RemoteAuth = {
+  readonly params?: Record<string, string>;
+  readonly headers?: Record<string, string>;
+};
+
+export type RestfulApiAuth =
+  | { readonly type: 'bearer'; readonly value: string }
+  | { readonly type: 'basic'; readonly username: string; readonly password: string }
+  | { readonly type: 'header'; readonly header: string; readonly value: string }
+  | { readonly type: 'query_param'; readonly param: string; readonly value: string };
 
 /**
  * User configure server response data

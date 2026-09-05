@@ -117,6 +117,17 @@ export class BackupHandler {
       // 3. Restore all table data in transaction
       this.logger.info('Restoring database tables...');
       await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`LOCK TABLE "user", "proxy", "server" IN SHARE ROW EXCLUSIVE MODE`;
+        if (await tx.proxy.count() > 0) {
+          throw new AdminError('Proxy is not empty', AdminErrorCode.INVALID_REQUEST);
+        }
+        if (await tx.user.count() > 0) {
+          throw new AdminError('Users are not empty', AdminErrorCode.INVALID_REQUEST);
+        }
+        if (await tx.server.count() > 0) {
+          throw new AdminError('Servers are not empty', AdminErrorCode.INVALID_REQUEST);
+        }
+
         // Delete all existing data (in dependency order)
         await tx.user.deleteMany({});
         await tx.server.deleteMany({});

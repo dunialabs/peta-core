@@ -307,7 +307,7 @@ PETA_RELEASE_GIT_SHA="$(git rev-parse HEAD)" \\
 **Docker Hub Images:**
 - Repository: https://hub.docker.com/r/bcdunia/peta-core
 - Tags: only the immutable current `package.json` semver; `latest`, date, and custom aliases are rejected
-- Publication requires `timeout`, `gtimeout`, or Perl alarm support and fails closed after a 15-minute Buildx timeout
+- Publication requires GNU `timeout`, `gtimeout`, or the Perl hard-timeout runner; it sends TERM after 15 minutes and KILL after a 30-second grace. Detached descendants outside the process group are not covered. See `docs/DOCKER_DEPLOYMENT.md` for details.
 
 ### Release Automation
 ```bash

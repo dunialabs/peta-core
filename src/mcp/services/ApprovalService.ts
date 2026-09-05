@@ -116,7 +116,7 @@ export class ApprovalService {
       policyVersion,
     );
 
-    const canonicalArgsJson = approvalRequestHasher.canonicalizeArgs(toolName, args);
+    const canonicalArgsJson = approvalRequestHasher.canonicalizeArgs(args);
     const canonicalArgs = JSON.parse(canonicalArgsJson) as Record<string, unknown>;
     const redactedArgs = this.redactArgs(args);
 

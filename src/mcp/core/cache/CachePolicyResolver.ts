@@ -1,7 +1,6 @@
 import type { ResultCacheConfig } from '../../../config/resultCacheConfig.js';
 import { DangerLevel } from '../../../types/enums.js';
 import type { ServerConfigCapabilities } from '../../types/mcp.js';
-import { CacheKeyBuilder } from './CacheKeyBuilder.js';
 import {
   AdmissionPolicy,
   CacheScope,
@@ -131,10 +130,7 @@ export class CachePolicyResolver {
       MAX_ENTRY_BYTES,
     );
 
-    const defaultDenyFields = CacheKeyBuilder.DEFAULT_DENY_FIELDS;
-    const denyFields = Array.from(
-      new Set([...(capabilityPolicy.key?.denyFields ?? []), ...defaultDenyFields]),
-    );
+    const denyFields = Array.from(new Set(capabilityPolicy.key?.denyFields ?? []));
     const allowFields = capabilityPolicy.key?.allowFields?.length
       ? capabilityPolicy.key.allowFields
       : undefined;

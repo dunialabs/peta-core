@@ -40,6 +40,12 @@ Peta Core handles two distinct OAuth-related concerns:
 
 The Admin API (`/admin`) and Socket.IO (`/socket.io`) currently authenticate using Peta access tokens (opaque bearer tokens) validated against the user database.
 
+Administrative authentication rejects missing credentials on protected operations and rejects a present malformed or invalid authorization header on every operation. OAuth client administration (`/oauth/admin/clients`, including list, read, update, and delete) requires an authenticated Owner or Admin. User and server counts also require this role check. The `/admin` exceptions are explicit: public owner/proxy lookup for Console login and discovery, first-proxy creation, first-owner creation, and restore into an empty installation. Anonymous user creation can only request the Owner role and still requires an empty user table; these exceptions never allow anonymous Admin creation. Clients using an exception must omit `Authorization`, rather than send an empty or malformed bearer value. First-owner and first-proxy eligibility plus insertion are serialized with database table locks across Core processes. Restore takes the same locks in user, proxy, server order and rechecks emptiness after shutdown before deleting rows, so a concurrent bootstrap write is preserved and makes restore fail. Upgrade and restart every Core process before relying on these guarantees; older workers can still write after stale preflight checks.
+
+Anonymous Owner lookup is limited to the login fields `userId`, `encryptedToken`, `role`, `status`, `expiresAt`, and `createdAt`; the encrypted envelope supports Console master-password login. Anonymous proxy lookup returns only `id`, `name`, `proxyKey`, `startPort`, and `addtime`; `proxyKey` is a public identifier. Private Owner metadata and proxy webhook/synchronization fields are returned only to authenticated Owner/Admin callers.
+
+Ordinary user-management actions cannot delete or deactivate the system Owner, including batch deletion by proxy. A batch containing the Owner is rejected before changing any user or disconnecting sessions. The existing Owner-only full proxy reset remains an intentional destructive reset operation.
+
 **Security properties**:
 
 - Refresh tokens and client secrets for downstream providers are never forwarded to upstream MCP clients.
@@ -177,6 +183,8 @@ Final Permission = Server-Level Enabled
 - Real-time updates: Changes at any layer immediately affect active sessions
 
 ### Human-in-the-Loop Controls
+
+Approval identity preserves all JSON tool arguments, including `null`, empty collections, array positions, and any `_meta` key inside tool-owned data. Object key order alone is normalized. Hash version 2 separates new approval requests from hashes created by the previous lossy normalization: old pending or approved requests cannot authorize a new call and expire on their existing schedule. Clients must request a fresh approval after upgrading. Complete the rollout and restart old workers before relying on this boundary; mixed versions still contain the old behavior on old workers.
 
 On top of static permissions, Peta Core supports tool-level approvals:
 

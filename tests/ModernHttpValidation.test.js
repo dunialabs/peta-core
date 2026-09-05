@@ -140,6 +140,89 @@ describe('ModernHttpValidation', () => {
     expect(() => controller.validateRequest(modernRequest({ id: null }))).toThrow('Invalid JSON-RPC id');
   });
 
+  test.each([null, [], 'scalar', 42])('rejects non-object tools/call arguments before dispatch: %p', async (argumentsValue) => {
+    const controller = new ModernMcpController();
+    const buildContext = jest.spyOn(controller, 'buildContext');
+    const dispatch = jest.spyOn(controller, 'dispatch');
+    const req = modernRequest({
+      method: 'tools/call',
+      params: {
+        name: 'tool',
+        arguments: argumentsValue,
+        _meta: {
+          'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+          'io.modelcontextprotocol/clientCapabilities': {},
+        },
+      },
+    });
+    req.method = 'POST';
+    req.headers['mcp-name'] = 'tool';
+    const res = {
+      headersSent: false,
+      status: jest.fn(function () { return this; }),
+      json: jest.fn(),
+    };
+
+    await controller.handlePost(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({
+      jsonrpc: '2.0',
+      error: {
+        code: ModernErrorCodes.InvalidParams,
+        message: 'params.arguments must be an object when present',
+      },
+      id: 1,
+    });
+    expect(buildContext).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  test('normalizes omitted tools/call arguments to an empty object', () => {
+    const controller = new ModernMcpController();
+    const req = modernRequest({
+      method: 'tools/call',
+      params: {
+        name: 'tool',
+        _meta: {
+          'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+          'io.modelcontextprotocol/clientCapabilities': {},
+        },
+      },
+    });
+    req.headers['mcp-name'] = 'tool';
+    const request = controller.validateRequest(req);
+
+    expect(request.request.params).toEqual({
+      name: 'tool',
+      arguments: {},
+      _meta: {
+        'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+        'io.modelcontextprotocol/clientCapabilities': {},
+      },
+    });
+  });
+
+  test('preserves valid tools/call argument objects including an _meta business key', () => {
+    const controller = new ModernMcpController();
+    const argumentsValue = { value: 7, _meta: { tenant: 'acme' } };
+    const req = modernRequest({
+      method: 'tools/call',
+      params: {
+        name: 'tool',
+        arguments: argumentsValue,
+        _meta: {
+          'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+          'io.modelcontextprotocol/clientCapabilities': {},
+        },
+      },
+    });
+    req.headers['mcp-name'] = 'tool';
+    const request = controller.validateRequest(req);
+
+    expect(request.request.params.arguments).toBe(argumentsValue);
+  });
+
   test('preserves a valid JSON-RPC id when request metadata validation fails', async () => {
     const controller = new ModernMcpController();
     const req = modernRequest({ params: {} });

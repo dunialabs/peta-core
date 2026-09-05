@@ -54,10 +54,16 @@ cat > "$FAKE_BIN/timeout" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" > "$TIMEOUT_LOG"
+if [[ "${1:-}" == "--help" ]]; then
+  if [[ "${SYNTHETIC_TIMEOUT_NO_KILL_AFTER:-0}" != 1 ]]; then
+    echo '--kill-after=DURATION'
+  fi
+  exit 0
+fi
 if [[ "${SYNTHETIC_TIMEOUT_STATUS:-0}" != "0" ]]; then
   exit "$SYNTHETIC_TIMEOUT_STATUS"
 fi
-shift
+shift 2
 exec "$@"
 EOF
 chmod +x "$FAKE_BIN/timeout"
@@ -213,11 +219,16 @@ grep -q 'manifest is missing linux/arm64' <<< "$RELEASE_OUTPUT"
 run_docker_release 1 enabled missing
 [[ $RELEASE_STATUS -eq 0 ]]
 grep -Fxq 'buildx build --platform linux/amd64,linux/arm64 --file ./Dockerfile --tag bcdunia/peta-core:1.3.0 --push -' "$DOCKER_LOG"
-grep -Fxq '900 docker buildx build --platform linux/amd64,linux/arm64 --file ./Dockerfile --tag bcdunia/peta-core:1.3.0 --push -' "$TIMEOUT_LOG"
+grep -Fxq -- '--kill-after=30s 900 docker buildx build --platform linux/amd64,linux/arm64 --file ./Dockerfile --tag bcdunia/peta-core:1.3.0 --push -' "$TIMEOUT_LOG"
 grep -Fxq '.archive-sentinel' "$DOCKER_LOG"
 ! grep -Eq 'latest|[0-9]{8}' "$DOCKER_LOG"
 ! grep -Eq 'example\.invalid|linux/s390x' "$DOCKER_LOG"
 grep -q 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' <<< "$RELEASE_OUTPUT"
+
+SYNTHETIC_TIMEOUT_NO_KILL_AFTER=1 run_docker_release 1 enabled missing
+[[ $RELEASE_STATUS -eq 0 ]]
+grep -Fxq -- '--help' "$TIMEOUT_LOG"
+grep -Fxq 'buildx build --platform linux/amd64,linux/arm64 --file ./Dockerfile --tag bcdunia/peta-core:1.3.0 --push -' "$DOCKER_LOG"
 
 for timeout_status in 124 142 143; do
   run_docker_release 1 enabled missing "$VALID_SHA" "$VALID_SHA" 0 "$ROOT" "$timeout_status"
@@ -226,6 +237,27 @@ for timeout_status in 124 142 143; do
   ! grep -q '^buildx build ' "$DOCKER_LOG"
   grep -q "Docker Buildx publication timed out after 15 minutes (exit ${timeout_status})" <<< "$RELEASE_OUTPUT"
 done
+
+TIMEOUT_CHILD_PID_FILE="$TEST_ROOT/term-resistant-child.pid"
+TIMEOUT_STARTED="$(perl -MTime::HiRes=time -e 'printf "%.3f", time')"
+set +e
+TIMEOUT_OUTPUT="$(
+  TIMEOUT_CHILD_PID_FILE="$TIMEOUT_CHILD_PID_FILE" \
+    perl "$ROOT/scripts/hard-timeout.pl" 1 1 bash -c 'bash -c "trap \"\" TERM; printf \"%s\" \"\$\$\" > \"$TIMEOUT_CHILD_PID_FILE\"; while :; do :; done" & trap "exit 0" TERM; wait' 2>&1
+)"
+TIMEOUT_STATUS=$?
+set -e
+TIMEOUT_FINISHED="$(perl -MTime::HiRes=time -e 'printf "%.3f", time')"
+TIMEOUT_ELAPSED="$(awk -v started="$TIMEOUT_STARTED" -v finished="$TIMEOUT_FINISHED" 'BEGIN { print finished - started }')"
+[[ $TIMEOUT_STATUS -eq 124 ]]
+[[ -s "$TIMEOUT_CHILD_PID_FILE" ]]
+for ((attempt = 1; attempt <= 20; attempt += 1)); do
+  ! kill -0 "$(<"$TIMEOUT_CHILD_PID_FILE")" 2>/dev/null && break
+  sleep 0.05
+done
+! kill -0 "$(<"$TIMEOUT_CHILD_PID_FILE")" 2>/dev/null
+awk -v elapsed="$TIMEOUT_ELAPSED" 'BEGIN { exit !(elapsed >= 1.8 && elapsed < 4) }'
+[[ -z "$TIMEOUT_OUTPUT" ]]
 
 NO_TIMEOUT_BIN="$TEST_ROOT/no-timeout-bin"
 mkdir -p "$NO_TIMEOUT_BIN"
@@ -250,7 +282,7 @@ NO_TIMEOUT_OUTPUT="$(
 NO_TIMEOUT_STATUS=$?
 set -e
 [[ $NO_TIMEOUT_STATUS -ne 0 ]]
-grep -q 'No supported timeout implementation is available' <<< "$NO_TIMEOUT_OUTPUT"
+grep -q 'No supported hard-timeout implementation is available' <<< "$NO_TIMEOUT_OUTPUT"
 
 set +e
 GHCR_OUTPUT="$(cd "$ROOT" && PATH="$FAKE_BIN:$PATH" DOCKER_LOG="$DOCKER_LOG" ./docker-build-push-ghcr.sh 2>&1)"

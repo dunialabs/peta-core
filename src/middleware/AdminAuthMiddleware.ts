@@ -1,7 +1,26 @@
 import { Request, Response, NextFunction } from 'express';
 import { TokenValidator } from '../security/TokenValidator.js';
 import { UserRole } from '../types/enums.js';
+import { AdminActionType } from '../types/admin.types.js';
 import { createLogger } from '../logger/index.js';
+
+function allowsUnauthenticatedAdminAction(req: Request): boolean {
+  if (req.baseUrl !== '/admin' || req.method !== 'POST' || !req.body || typeof req.body !== 'object') {
+    return false;
+  }
+
+  switch (req.body.action) {
+    case AdminActionType.GET_OWNER:
+    case AdminActionType.GET_PROXY:
+    case AdminActionType.CREATE_PROXY:
+    case AdminActionType.RESTORE_DATABASE:
+      return true;
+    case AdminActionType.CREATE_USER:
+      return req.body.data?.role === UserRole.Owner;
+    default:
+      return false;
+  }
+}
 
 /**
  * Admin interface permission verification middleware
@@ -19,13 +38,22 @@ export class AdminAuthMiddleware {
   authenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const authHeader = req.headers['authorization'];
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      if (authHeader === undefined && allowsUnauthenticatedAdminAction(req)) {
         next();
         return;
       }
-      
+
+      if (typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ') || authHeader.length === 'Bearer '.length) {
+        res.status(401).json({
+          success: false,
+          message: 'Bearer token is required',
+          timestamp: Math.floor(Date.now() / 1000),
+        });
+        return;
+      }
+
       const token = authHeader.substring(7);
-      
+
       try {
         const authContext = await this.tokenValidator.validateToken(token);
         

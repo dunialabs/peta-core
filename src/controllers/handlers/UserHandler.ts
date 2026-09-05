@@ -52,17 +52,7 @@ export class UserHandler {
   async handleCreateUser(request: AdminRequest<any>, token?: string): Promise<any> {
     const { userId, status, role, permissions, expiresAt, createdAt, updatedAt, ratelimit, name, encryptedToken, proxyId, notes } = request.data;
 
-    // If role is owner, need to query database, error if non-empty data, only one owner allowed, and first created must be owner
-    if (role === UserRole.Owner) {
-      const users = await UserRepository.findAll();
-      if (users.some((u: any) => u.role === UserRole.Owner)) {
-        throw new AdminError('There can only be one owner', AdminErrorCode.USER_ALREADY_EXISTS);
-      }
-      // Owner can only be created as the first user
-      if (users.length > 0) {
-        throw new AdminError('The owner must be the first user created', AdminErrorCode.INVALID_REQUEST);
-      }
-    } else if (!token) {
+    if (role !== UserRole.Owner && !token) {
       throw new AdminError('Token is required', AdminErrorCode.FORBIDDEN);
     }
 
@@ -102,8 +92,7 @@ export class UserHandler {
       }
     }
 
-    // Create user
-    const user = await UserRepository.create({
+    const userData: Prisma.UserCreateInput = {
       userId,
       status: status ?? UserStatus.Enabled,
       role: role ?? UserRole.User,
@@ -118,7 +107,21 @@ export class UserHandler {
       encryptedToken: encryptedToken,
       proxyId: proxyId ?? 0,
       notes: notes ?? null
-    });
+    };
+
+    const user = role === UserRole.Owner
+      ? await prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`LOCK TABLE "user" IN SHARE ROW EXCLUSIVE MODE`;
+          const users = await tx.user.findMany({ select: { role: true } });
+          if (users.some((candidate) => candidate.role === UserRole.Owner)) {
+            throw new AdminError('There can only be one owner', AdminErrorCode.USER_ALREADY_EXISTS);
+          }
+          if (users.length > 0) {
+            throw new AdminError('The owner must be the first user created', AdminErrorCode.INVALID_REQUEST);
+          }
+          return tx.user.create({ data: userData });
+        })
+      : await UserRepository.create(userData);
 
     // Log admin operation
     LogService.getInstance().enqueueLog({
@@ -190,6 +193,14 @@ export class UserHandler {
       throw new AdminError('User not found', AdminErrorCode.USER_NOT_FOUND);
     }
 
+    if (
+      existingUser.role === UserRole.Owner &&
+      status !== undefined &&
+      status !== UserStatus.Enabled
+    ) {
+      throw new AdminError('The system owner cannot be disabled or suspended', AdminErrorCode.FORBIDDEN);
+    }
+
     if (status != existingUser.status) {
       if (status === UserStatus.Disabled) {
         await this.disableUser(userId);
@@ -256,6 +267,10 @@ export class UserHandler {
     }
 
     const users = await UserRepository.findByProxyId(proxyId);
+    if (users.some((user) => user.role === UserRole.Owner)) {
+      throw new AdminError('The system owner cannot be deleted by proxy', AdminErrorCode.FORBIDDEN);
+    }
+
     for (const user of users) {
       await this.disableUser(user.userId);
     }
@@ -310,6 +325,10 @@ export class UserHandler {
     const user = await UserRepository.findByUserId(targetId);
     if (!user) {
       throw new AdminError(`User ${targetId} not found`, AdminErrorCode.USER_NOT_FOUND);
+    }
+
+    if (user.role === UserRole.Owner) {
+      throw new AdminError('The system owner cannot be disabled or deleted', AdminErrorCode.FORBIDDEN);
     }
 
     await UserRepository.update(targetId, { status: UserStatus.Disabled });

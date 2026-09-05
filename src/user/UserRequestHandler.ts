@@ -23,6 +23,8 @@ import {
   SessionData,
   ConfigureServerRequest,
   ConfigureServerResponseData,
+  RemoteAuth,
+  RestfulApiAuth,
   UnconfigureServerRequest,
   UnconfigureServerResponseData,
 } from './types.js';
@@ -499,16 +501,7 @@ export class UserRequestHandler {
         }
         break;
       case ServerCategory.CustomRemote: {
-        if (
-          remoteAuth === undefined ||
-          remoteAuth === null ||
-          (remoteAuth.params.length === 0 && remoteAuth.headers.length === 0)
-        ) {
-          throw new UserError(
-            `remoteAuth is required and cannot be empty and must contain either params or headers`,
-            UserErrorCode.SERVER_CONFIG_INVALID,
-          );
-        }
+        const parsedRemoteAuth = this.parseRemoteAuth(remoteAuth);
         if (server.configTemplate === '' || server.configTemplate === '{}') {
           throw new UserError(
             `Server ${serverId} does not have a configuration template`,
@@ -516,20 +509,23 @@ export class UserRequestHandler {
           );
         }
         const configTemplate = JSON.parse(server.configTemplate);
-        let url = configTemplate.url;
-        if (remoteAuth.params && Object.keys(remoteAuth.params).length > 0) {
-          if (url.includes('?')) {
-            const urlParts = url.split('?');
-            const urlParams = new URLSearchParams(remoteAuth.params);
-            url = urlParts[0];
-            url = `${url}?${urlParams.toString()}`;
-          } else {
-            url = `${url}?${new URLSearchParams(remoteAuth.params).toString()}`;
+        let url: URL;
+        try {
+          url = new URL(configTemplate.url);
+        } catch {
+          throw new UserError(
+            `Server ${serverId} has an invalid CustomRemote URL`,
+            UserErrorCode.SERVER_CONFIG_INVALID,
+          );
+        }
+        if (parsedRemoteAuth.params) {
+          for (const [key, value] of Object.entries(parsedRemoteAuth.params)) {
+            url.searchParams.set(key, value);
           }
         }
         launchConfig = {
-          url: url,
-          headers: { ...configTemplate.headers, ...remoteAuth.headers },
+          url: url.toString(),
+          headers: { ...configTemplate.headers, ...parsedRemoteAuth.headers },
         };
         break;
       }
@@ -562,16 +558,32 @@ export class UserRequestHandler {
         };
         break;
       }
-      case ServerCategory.RestApi:
-        if (restfulApiAuth === undefined || restfulApiAuth === null || restfulApiAuth.size === 0) {
+      case ServerCategory.RestApi: {
+        let configTemplate: unknown;
+        try {
+          configTemplate = JSON.parse(server.configTemplate);
+        } catch {
           throw new UserError(
-            `restfulApiAuth is required and cannot be empty`,
+            `Server ${serverId} has invalid RestApi configuration template`,
             UserErrorCode.SERVER_CONFIG_INVALID,
           );
         }
+        if (
+          !this.isPlainRecord(configTemplate) ||
+          !Array.isArray(configTemplate.apis) ||
+          configTemplate.apis.length === 0 ||
+          !this.isPlainRecord(configTemplate.apis[0])
+        ) {
+          throw new UserError(
+            `Server ${serverId} has invalid RestApi configuration template`,
+            UserErrorCode.SERVER_CONFIG_INVALID,
+          );
+        }
+        const parsedRestfulApiAuth = this.parseRestfulApiAuth(restfulApiAuth);
         launchConfig = JSON.parse(server.launchConfig);
-        launchConfig.auth = restfulApiAuth;
+        launchConfig.auth = parsedRestfulApiAuth;
         break;
+      }
       default:
         throw new UserError(
           `Invalid server category: ${server.category}`,
@@ -626,6 +638,106 @@ export class UserRequestHandler {
       serverId: serverId,
       message: 'Server configured and started successfully',
     };
+  }
+
+  private parseRemoteAuth(value: unknown): RemoteAuth {
+    if (!this.isPlainRecord(value) || !this.hasOnlyKeys(value, ['params', 'headers'])) {
+      throw new UserError(
+        'remoteAuth must be an object containing optional params and headers records',
+        UserErrorCode.SERVER_CONFIG_INVALID,
+      );
+    }
+
+    const params = this.parseStringRecord(value.params, 'remoteAuth.params');
+    const headers = this.parseStringRecord(value.headers, 'remoteAuth.headers');
+    if (Object.keys(params ?? {}).length === 0 && Object.keys(headers ?? {}).length === 0) {
+      throw new UserError(
+        'remoteAuth is required and must contain non-empty params or headers',
+        UserErrorCode.SERVER_CONFIG_INVALID,
+      );
+    }
+
+    return { ...(params ? { params } : {}), ...(headers ? { headers } : {}) };
+  }
+
+  private parseRestfulApiAuth(value: unknown): RestfulApiAuth {
+    if (!this.isPlainRecord(value) || Object.keys(value).length === 0 || typeof value.type !== 'string') {
+      throw new UserError(
+        'restfulApiAuth must be a non-empty documented authentication object',
+        UserErrorCode.SERVER_CONFIG_INVALID,
+      );
+    }
+
+    switch (value.type) {
+      case 'bearer':
+        this.requireOnlyKeys(value, ['type', 'value'], 'restfulApiAuth');
+        return { type: 'bearer', value: this.requireNonEmptyString(value.value, 'restfulApiAuth.value') };
+      case 'basic':
+        this.requireOnlyKeys(value, ['type', 'username', 'password'], 'restfulApiAuth');
+        return {
+          type: 'basic',
+          username: this.requireNonEmptyString(value.username, 'restfulApiAuth.username'),
+          password: this.requireNonEmptyString(value.password, 'restfulApiAuth.password'),
+        };
+      case 'header':
+        this.requireOnlyKeys(value, ['type', 'header', 'value'], 'restfulApiAuth');
+        return {
+          type: 'header',
+          header: this.requireNonEmptyString(value.header, 'restfulApiAuth.header'),
+          value: this.requireNonEmptyString(value.value, 'restfulApiAuth.value'),
+        };
+      case 'query_param':
+        this.requireOnlyKeys(value, ['type', 'param', 'value'], 'restfulApiAuth');
+        return {
+          type: 'query_param',
+          param: this.requireNonEmptyString(value.param, 'restfulApiAuth.param'),
+          value: this.requireNonEmptyString(value.value, 'restfulApiAuth.value'),
+        };
+      default:
+        throw new UserError('restfulApiAuth.type is invalid', UserErrorCode.SERVER_CONFIG_INVALID);
+    }
+  }
+
+  private parseStringRecord(value: unknown, field: string): Record<string, string> | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (!this.isPlainRecord(value)) {
+      throw new UserError(`${field} must be a string record`, UserErrorCode.SERVER_CONFIG_INVALID);
+    }
+    const entries = new Map<string, string>();
+    for (const [key, item] of Object.entries(value)) {
+      if (typeof item !== 'string') {
+        throw new UserError(`${field} must be a string record`, UserErrorCode.SERVER_CONFIG_INVALID);
+      }
+      entries.set(key, item);
+    }
+    return Object.fromEntries(entries);
+  }
+
+  private requireNonEmptyString(value: unknown, field: string): string {
+    if (typeof value !== 'string' || value.trim() === '') {
+      throw new UserError(`${field} must be a non-empty string`, UserErrorCode.SERVER_CONFIG_INVALID);
+    }
+    return value;
+  }
+
+  private requireOnlyKeys(value: Record<string, unknown>, keys: readonly string[], field: string): void {
+    if (!this.hasOnlyKeys(value, keys)) {
+      throw new UserError(`${field} contains unsupported fields`, UserErrorCode.SERVER_CONFIG_INVALID);
+    }
+  }
+
+  private hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+    return Object.keys(value).every((key) => keys.includes(key));
+  }
+
+  private isPlainRecord(value: unknown): value is Record<string, unknown> {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      return false;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
   }
 
   /**
