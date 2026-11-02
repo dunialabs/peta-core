@@ -52,6 +52,7 @@ describe('AdminAuthMiddleware', () => {
       expect((await post({ Authorization: 'Bearer invalid' }, { action: 1015, data: {} })).status).toBe(401);
       expect((await post({ Authorization: 'Bearer user' }, { action: 1015, data: {} })).status).toBe(403);
       expect((await post({ Authorization: 'Bearer owner' }, { action: 1015, data: {} })).status).toBe(204);
+      expect((await post({ Authorization: 'bearer owner' }, { action: 1015, data: {} })).status).toBe(204);
       expect((await post({ Authorization: 'Bearer admin' }, { action: 2015, data: {} })).status).toBe(204);
       expect((await fetch(`${url}/oauth/admin/clients`)).status).toBe(401);
       expect((await fetch(`${url}/oauth/admin/clients`, { headers: { Authorization: 'Bearer owner' } })).status).toBe(204);

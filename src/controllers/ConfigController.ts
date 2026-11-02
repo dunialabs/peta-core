@@ -115,8 +115,8 @@ export class ConfigController {
       }
 
       const authorization = req.headers.authorization;
-      const token = typeof authorization === 'string' && authorization.startsWith('Bearer ')
-        ? authorization.substring(7)
+      const token = typeof authorization === 'string' && /^Bearer\s+/i.test(authorization)
+        ? authorization.replace(/^Bearer\s+/i, '').trim()
         : undefined;
 
       if (!this.isUnauthenticatedBootstrapAction(adminRequest, authorization, req.authContext)) {

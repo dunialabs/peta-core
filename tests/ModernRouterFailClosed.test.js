@@ -122,7 +122,7 @@ describe('ModernRouterFailClosed', () => {
     }
   });
 
-  test('rejects modern-signaled initialize before legacy authentication', async () => {
+  test('routes modern-signaled initialize through the standard sessionful handshake', async () => {
     const app = express();
     app.use(express.json());
     new MCPRouter().registerRoutes(app, {
@@ -154,15 +154,7 @@ describe('ModernRouterFailClosed', () => {
         }),
       });
 
-      expect(response.status).toBe(400);
-      expect(await response.json()).toEqual({
-        jsonrpc: '2.0',
-        error: {
-          code: -32600,
-          message: 'Mixed protocol-era signals: initialize is not part of modern MCP',
-        },
-        id: 1,
-      });
+      expect(response.status).toBe(598);
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }

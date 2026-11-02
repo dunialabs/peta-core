@@ -17,7 +17,7 @@ test('does not invent resources for a tools-only modern downstream', async () =>
       res.end(JSON.stringify({
         jsonrpc: '2.0',
         id: body.id,
-        result: { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } },
+        result: { supportedVersions: ['2025-11-25'], capabilities: { tools: {} } },
       }));
     });
   });

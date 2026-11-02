@@ -107,10 +107,6 @@ export class ModernMcpController {
 
     const hasModernSignal = this.hasModernSignal(req);
 
-    if (method === 'initialize' && hasModernSignal) {
-      return this.sendModernError(res, req.body, new ModernMcpError(400, ModernErrorCodes.InvalidRequest, 'Mixed protocol-era signals: initialize is not part of modern MCP'), req);
-    }
-
     if (this.shouldPreferLegacy(req)) {
       if (hasModernSignal && sessionId) {
         this.logger.warn(
@@ -133,7 +129,7 @@ export class ModernMcpController {
   private shouldPreferLegacy(req: Request): boolean {
     const method = this.getBodyMethod(req.body);
     if (method === 'initialize') {
-      return !this.hasModernSignal(req);
+      return true;
     }
 
     const sessionId = this.getHeader(req, 'mcp-session-id');
@@ -153,7 +149,7 @@ export class ModernMcpController {
     const requestId = this.extractId(req.body);
     try {
       if (!MODERN_MCP_CONFIG.enabled) {
-        throw new ModernMcpError(400, ModernErrorCodes.UnsupportedProtocolVersion, 'MCP 2026-07-28 support is disabled', {
+        throw new ModernMcpError(400, ModernErrorCodes.UnsupportedProtocolVersion, `MCP ${MODERN_MCP_PROTOCOL_VERSION} support is disabled`, {
           supported: MODERN_MCP_CONFIG.supportedVersions,
           requested: this.getHeader(req, 'mcp-protocol-version') ?? null,
         });
@@ -234,12 +230,12 @@ export class ModernMcpController {
       throw new ModernMcpError(400, ModernErrorCodes.InvalidRequest, 'Accept must include application/json and text/event-stream');
     }
 
-    const meta = this.requireModernMeta(request);
     const protocolHeader = this.getHeader(req, 'mcp-protocol-version');
     if (!protocolHeader) {
       throw new ModernMcpError(400, ModernErrorCodes.HeaderMismatch, 'MCP-Protocol-Version header is required');
     }
-    if (protocolHeader !== meta[MODERN_META_VERSION_KEY]) {
+    const meta = this.requireModernMeta(request, protocolHeader);
+    if (meta[MODERN_META_VERSION_KEY] !== undefined && protocolHeader !== meta[MODERN_META_VERSION_KEY]) {
       throw new ModernMcpError(400, ModernErrorCodes.HeaderMismatch, 'MCP-Protocol-Version does not match request _meta protocolVersion');
     }
     if (!MODERN_MCP_CONFIG.supportedVersions.includes(protocolHeader)) {
@@ -250,10 +246,7 @@ export class ModernMcpController {
     }
 
     const methodHeader = this.getHeader(req, 'mcp-method');
-    if (!methodHeader) {
-      throw new ModernMcpError(400, ModernErrorCodes.HeaderMismatch, 'Mcp-Method header is required');
-    }
-    if (methodHeader !== request.method) {
+    if (methodHeader && methodHeader !== request.method) {
       throw new ModernMcpError(400, ModernErrorCodes.HeaderMismatch, 'Mcp-Method does not match JSON-RPC method');
     }
     this.validateNameHeader(req, request);
@@ -262,27 +255,21 @@ export class ModernMcpController {
     return { request, meta, notification: !('id' in request) };
   }
 
-  private requireModernMeta(request: ModernJsonRpcRequest): ModernRequestMeta {
+  private requireModernMeta(request: ModernJsonRpcRequest, protocolVersion: string): ModernRequestMeta {
     const meta = this.getRequestMeta(request);
-    if (!meta) {
-      throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, 'Missing required modern MCP request _meta');
-    }
-    const version = meta[MODERN_META_VERSION_KEY];
-    const clientInfo = meta[MODERN_META_CLIENT_INFO_KEY];
-    const clientCapabilities = meta[MODERN_META_CLIENT_CAPABILITIES_KEY];
-    if (typeof version !== 'string' || version.length === 0) {
-      throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, `Missing ${MODERN_META_VERSION_KEY}`);
+    const version = meta?.[MODERN_META_VERSION_KEY];
+    const clientInfo = meta?.[MODERN_META_CLIENT_INFO_KEY];
+    const clientCapabilities = meta?.[MODERN_META_CLIENT_CAPABILITIES_KEY];
+    if (version !== undefined && (typeof version !== 'string' || version.length === 0)) {
+      throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, `${MODERN_META_VERSION_KEY} must be a non-empty string`);
     }
     if (clientInfo !== undefined && !this.isModernClientInfo(clientInfo)) {
       throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, `Missing ${MODERN_META_CLIENT_INFO_KEY}`);
     }
-    if (!this.isJsonObject(clientCapabilities)) {
-      throw new ModernMcpError(400, ModernErrorCodes.InvalidParams, `Missing ${MODERN_META_CLIENT_CAPABILITIES_KEY}`);
-    }
     return {
       ...meta,
-      [MODERN_META_VERSION_KEY]: version,
-      [MODERN_META_CLIENT_CAPABILITIES_KEY]: clientCapabilities,
+      [MODERN_META_VERSION_KEY]: version ?? protocolVersion,
+      [MODERN_META_CLIENT_CAPABILITIES_KEY]: this.isJsonObject(clientCapabilities) ? clientCapabilities : {},
       ...(clientInfo === undefined ? {} : { [MODERN_META_CLIENT_INFO_KEY]: clientInfo }),
     };
   }
@@ -430,6 +417,9 @@ export class ModernMcpController {
 
   private async callTool(context: ModernRequestContext, request: ModernJsonRpcRequest, started: number): Promise<ModernCallToolResult> {
     const params = this.requireParams(request);
+    if ('task' in params) {
+      throw new ModernMcpError(400, ModernErrorCodes.InvalidRequest, 'Task-augmented tool calls are not supported by the modern gateway');
+    }
     const toolName = this.requireString(params.name, 'params.name');
     const args = this.isJsonObject(params.arguments) ? params.arguments : {};
     const route = this.resolveToolName(context.authContext, toolName);
@@ -1159,9 +1149,7 @@ export class ModernMcpController {
       return;
     }
     const header = this.getHeader(req, 'mcp-name');
-    if (!header) {
-      throw new ModernMcpError(400, ModernErrorCodes.HeaderMismatch, 'Mcp-Name header is required');
-    }
+    if (!header) return;
     const params = this.requireParams(request);
     const expected = request.method === 'resources/read' ? this.requireString(params.uri, 'params.uri') : this.requireString(params.name, 'params.name');
     if (this.decodeHeaderMirrorValue(header, 'Mcp-Name') !== expected) {

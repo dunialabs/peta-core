@@ -84,17 +84,21 @@ export class MCPController {
       this.logger.error({ error }, 'MCP request error');
       if (error instanceof AuthError) {
         res.status(403).json({
+          jsonrpc: '2.0',
           error: {
             code: ErrorCode.InternalError,
             message: error.message
-          }
+          },
+          id: req.body?.id ?? null,
         });
       } else {
         res.status(500).json({
+          jsonrpc: '2.0',
           error: {
             code: ErrorCode.InternalError,
             message: String(error)
-          }
+          },
+          id: req.body?.id ?? null,
         });
       }
     }
@@ -141,10 +145,12 @@ export class MCPController {
       const sessionId = req.headers['mcp-session-id'] as string || req.headers['Mcp-Session-Id'] as string || req.clientSession?.sessionId;
       this.logger.error({ error, sessionId }, 'MCP request error');
       res.status(500).json({
+        jsonrpc: '2.0',
         error: {
           code: ErrorCode.InternalError,
           message: String(error)
-        }
+        },
+        id: req.body?.id ?? null,
       });
     }
   };
@@ -190,14 +196,10 @@ export class MCPController {
     } catch (error) {
       this.logger.error({ error, sessionId }, 'Error handling session termination');
 
-      // According to MCP protocol, return 200 status code even if error occurs
-      res.status(200).json({
+      res.status(500).json({
         jsonrpc: '2.0',
-        result: {
-          message: 'Session termination completed',
-          warning: error instanceof Error ? error.message : 'Unknown error occurred'
-        },
-        id: null
+        error: { code: ErrorCode.InternalError, message: String(error) },
+        id: null,
       });
     }
   };

@@ -276,8 +276,8 @@ DB_PORT=5434
 DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?schema=public"
 
 # -------------------- JWT Secret Configuration --------------------
-# ⚠️ For production, be sure to change to a strong password (at least 32 characters)
-JWT_SECRET=your-jwt-secret-change-in-production-min-32-chars
+# ⚠️ Required: generate with `openssl rand -base64 32` before startup
+JWT_SECRET=
 
 # -------------------- Peta Auth Configuration (Optional) --------------------
 # Enable the optional peta-auth Compose profile only after provisioning its secrets.
@@ -289,13 +289,13 @@ PETA_AUTH_VERSION=1.3.0
 PETA_AUTH_MASTER_KEY_SOURCE=./secrets/peta_auth_master_key
 PETA_AUTH_CLIENT_SECRETS_SOURCE=./secrets/peta_auth_client_secrets.json
 
-# -------------------- Modern MCP 2026-07-28 Rollout (Optional) --------------------
+# -------------------- Modern MCP 2025-11-25 Rollout (Optional) --------------------
 # Leave disabled until modern MCP clients and operators are ready.
 # Disabled sessionless modern-looking requests are rejected fail-closed before legacy routing.
 MCP_2026_ENABLED=false
 # Defaults to MCP_2026_ENABLED. Enables modern probing for HTTP downstream servers.
 MCP_2026_DOWNSTREAM_ENABLED=false
-MCP_2026_SUPPORTED_VERSIONS=2026-07-28
+MCP_2026_SUPPORTED_VERSIONS=2025-11-25
 # Optional exact http(s) origins allowed in a present modern browser Origin header.
 # MCP_2026_ALLOWED_ORIGINS=
 # Optional canary allowlists; leave empty to allow all modern OAuth clients/tenants.
@@ -483,7 +483,7 @@ curl -X POST http://localhost:3002/token \
 
 #### Using EventSource Connection
 
-This query-token EventSource example is for the legacy sessionful MCP SSE path only. Modern MCP `2026-07-28` uses POST-based `subscriptions/listen` and rejects query bearer tokens.
+This query-token EventSource example is for the legacy sessionful MCP SSE path only. Modern MCP `2025-11-25` uses POST-based `subscriptions/listen` and rejects query bearer tokens.
 
 ```typescript
 const token = "YOUR_ACCESS_TOKEN";

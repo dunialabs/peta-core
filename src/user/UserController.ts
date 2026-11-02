@@ -60,7 +60,7 @@ export class UserController {
 
       // 2. Get userId and token from authContext (attached by UserAuthMiddleware)
       const userId = req.authContext!.userId;
-      const token = req.headers['authorization']!.substring(7); // Extract token from 'Bearer <token>'
+      const token = req.headers['authorization']!.replace(/^Bearer\s+/i, '').trim();
 
       // 3. Route to corresponding handler method based on action type
       let result: any;

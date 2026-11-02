@@ -104,7 +104,7 @@ original token before sending progress notifications back upstream. Upstream
 `notifications/cancelled` are translated to the captured `downstreamRequestId` so the
 downstream SDK cancels the real in-flight request instead of a proxy-only ID.
 
-#### 1a. Modern MCP 2026-07-28 Request Flow
+#### 1a. Modern MCP 2025-11-25 Request Flow
 
 ```text
 Modern Client POSTs to /mcp
@@ -113,7 +113,7 @@ Protocol-era classifier selects modern unless an active legacy session owns the 
   ↓
 Modern auth validates Authorization bearer without creating SessionStore entries
   ↓
-Modern HTTP validator checks _meta and MCP headers
+Modern HTTP validator checks the protocol header and optional Peta extension signals
   ↓
 Modern request context carries user, tenant, scopes, client info, and request id
   ↓
@@ -126,9 +126,9 @@ ServerManager forwards to downstream MCP clients internally
 Response returns without Mcp-Session-Id
 ```
 
-The modern adapter is side-by-side with `ProxySession`. It preserves legacy behavior while adding stateless modern requests, `server/discover`, POST-based `subscriptions/listen`, and modern OAuth enforcement. `initialize` remains legacy-only; a modern-signaled `initialize` is rejected before legacy authentication. Active legacy sessions remain on the sessionful path even if a client sends extra modern-looking headers. Before those requests are handed to the SDK-backed legacy upstream transport, `ProxySession` removes non-authoritative modern-only headers that the installed 2025-era SDK would otherwise reject, while preserving supported legacy protocol-version headers.
+The modern adapter is side-by-side with `ProxySession`. It preserves legacy behavior while adding stateless modern requests, `server/discover`, POST-based `subscriptions/listen`, and modern OAuth enforcement. `initialize` always enters the standard sessionful handshake, including when a client supplies the standard protocol header; subsequent requests use the returned session. Active legacy sessions remain on the sessionful path even if a client sends extra modern-looking headers. Before those requests are handed to the SDK-backed legacy upstream transport, `ProxySession` removes non-authoritative modern-only headers that the installed 2025-era SDK would otherwise reject, while preserving supported legacy protocol-version headers.
 
-Downstream connections remain managed by `ServerManager`; downstream session details are not exposed upstream. `ServerManager` talks to downstream servers through a `DownstreamMcpClient` abstraction. The existing SDK-backed client handles legacy stdio, SSE, and Streamable HTTP. A modern HTTP client handles stateless downstream MCP `2026-07-28` when enabled and selected by `launchConfig.mcpProtocol`. In `auto` mode, transport or legacy-compatible probe failures fall back to that SDK-backed path, but recognized modern protocol errors received from a downstream (`-32020`, `-32021`, or `-32022`) fail closed. A URL configured with `mcpProtocol: "modern"` selects Streamable HTTP regardless of its path; only an explicit `type: "sse"` takes precedence and is rejected for modern mode. Stdio and SSE downstream transports remain legacy-compatible in this phase.
+Downstream connections remain managed by `ServerManager`; downstream session details are not exposed upstream. `ServerManager` talks to downstream servers through a `DownstreamMcpClient` abstraction. The existing SDK-backed client handles legacy stdio, SSE, and Streamable HTTP. A modern HTTP client handles stateless downstream MCP `2025-11-25` when enabled and selected by `launchConfig.mcpProtocol`. In `auto` mode, transport or legacy-compatible probe failures fall back to that SDK-backed path, but recognized modern protocol errors received from a downstream (`-32020`, `-32021`, or `-32022`) fail closed. A URL configured with `mcpProtocol: "modern"` selects Streamable HTTP regardless of its path; only an explicit `type: "sse"` takes precedence and is rejected for modern mode. Stdio and SSE downstream transports remain legacy-compatible in this phase.
 
 Modern resource update subscriptions preserve downstream scope isolation. `GlobalRequestRouter` publishes resource update events with the originating server context id, and the modern subscription adapter resolves that scope before rewriting gateway URIs so temporary per-user downstream resource updates cannot be delivered through a managed-server modern subscription. Subscription filters are request-scoped rather than advertised through a custom capability field. Server-initiated teardown writes the final correlated `subscriptions/listen` result; abrupt client close only releases listeners and downstream reference counts.
 
@@ -136,9 +136,9 @@ The modern `server/discover` response puts Peta Core's `serverInfo` under `_meta
 
 Each complete or incomplete modern downstream SSE event is limited to 64 KiB so an unterminated or oversized event fails closed instead of growing the response buffer until timeout.
 
-The installed `@modelcontextprotocol/sdk` currently reports `LATEST_PROTOCOL_VERSION: 2025-11-25` and supported versions through `2025-11-25`, so Peta Core does not depend on SDK latest-version constants for MCP `2026-07-28` ingress or modern HTTP downstream calls. Local modern validation/error/request types live under `src/mcp/modern/`; SDK-backed downstream connections remain available for legacy servers.
+The installed `@modelcontextprotocol/sdk` currently reports `LATEST_PROTOCOL_VERSION: 2025-11-25` and supported versions through `2025-11-25`, so Peta Core does not depend on SDK latest-version constants for modern ingress or modern HTTP downstream calls. Local modern validation/error/request types live under `src/mcp/modern/`; SDK-backed downstream connections remain available for legacy servers.
 
-Modern downstream stdio is intentionally not supported: it needs an SDK/client-process lifecycle that can negotiate `2026-07-28`. Persistent modern downstream `subscriptions/listen`, downstream progress, and cancellation are also deferred because they require an incremental shared SSE listener, fanout, and downstream request-id lifecycle. The modern gateway does not advertise those unavailable downstream resource subscriptions.
+Modern downstream stdio is intentionally not supported: it needs an SDK/client-process lifecycle that can negotiate the stateless HTTP contract. Persistent modern downstream `subscriptions/listen`, downstream progress, and cancellation are also deferred because they require an incremental shared SSE listener, fanout, and downstream request-id lifecycle. The modern gateway does not advertise those unavailable downstream resource subscriptions.
 
 #### 2. Reverse Request Flow (Downstream → Client)
 

@@ -20,7 +20,7 @@ export class ModernMcpAuthMiddleware {
   authenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const authHeader = req.headers.authorization;
-      const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : '';
+      const bearerToken = authHeader && /^Bearer\s+/i.test(authHeader) ? authHeader.replace(/^Bearer\s+/i, '').trim() : '';
       const hasQueryToken = req.query.token !== undefined || req.query.api_key !== undefined;
 
       if (hasQueryToken) {
@@ -46,7 +46,8 @@ export class ModernMcpAuthMiddleware {
         authFailureReason: error instanceof Error ? error.message : 'Token validation failed',
       }, 'Modern MCP authentication failed');
       if (error instanceof AuthError) {
-        return this.sendAuthError(req, res, 'invalid_token', error.message);
+        const authError = error.type === AuthErrorType.PERMISSION_DENIED ? 'insufficient_scope' : 'invalid_token';
+        return this.sendAuthError(req, res, authError, error.message);
       }
       return this.sendAuthError(req, res, 'invalid_token', error instanceof Error ? error.message : 'Token validation failed');
     }
@@ -64,13 +65,13 @@ export class ModernMcpAuthMiddleware {
     if (MODERN_MCP_CONFIG.allowedClientIds.length > 0) {
       const clientId = authContext.oauthClientId;
       if (!clientId || !MODERN_MCP_CONFIG.allowedClientIds.includes(clientId)) {
-        throw new AuthError(AuthErrorType.PERMISSION_DENIED, 'OAuth client is not enabled for MCP 2026');
+        throw new AuthError(AuthErrorType.PERMISSION_DENIED, 'OAuth client is not enabled for MCP 2025-11-25');
       }
     }
     if (MODERN_MCP_CONFIG.allowedTenantIds.length > 0) {
       const tenantId = authContext.tenantId ?? '';
       if (!MODERN_MCP_CONFIG.allowedTenantIds.includes(tenantId)) {
-        throw new AuthError(AuthErrorType.PERMISSION_DENIED, 'Tenant is not enabled for MCP 2026');
+        throw new AuthError(AuthErrorType.PERMISSION_DENIED, 'Tenant is not enabled for MCP 2025-11-25');
       }
     }
   }
@@ -82,13 +83,14 @@ export class ModernMcpAuthMiddleware {
     description: string,
   ): void {
     const metadataUrl = this.getResourceMetadataUrl(req);
+    const statusCode = error === 'insufficient_scope' ? 403 : 401;
     if (metadataUrl) {
       res.setHeader(
         'WWW-Authenticate',
         `Bearer realm="peta-core", error="${error}", error_description="${description}", resource_metadata="${metadataUrl}", scope="mcp:tools mcp:resources mcp:prompts"`,
       );
     }
-    res.status(401).json({
+    res.status(statusCode).json({
       jsonrpc: '2.0',
       error: { code: -32000, message: description },
       id: null,

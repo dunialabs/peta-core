@@ -25,7 +25,7 @@ export class UserAuthMiddleware {
     try {
       // 1. Extract token from Authorization header
       const authHeader = req.headers['authorization'];
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      if (!authHeader || !/^Bearer\s+/i.test(authHeader)) {
         res.status(401).json({
           success: false,
           error: {
@@ -36,7 +36,7 @@ export class UserAuthMiddleware {
         return;
       }
 
-      const token = authHeader.substring(7);
+      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
 
       try {
         // 2. Validate token (this also checks if user is enabled)

@@ -1,7 +1,7 @@
 import { jest } from '@jest/globals';
 import http from 'node:http';
 
-process.env.MCP_2026_SUPPORTED_VERSIONS = '2026-07-28,2026-06-01';
+process.env.MCP_2026_SUPPORTED_VERSIONS = '2025-11-25,2025-06-18';
 
 jest.unstable_mockModule('../dist/logger/index.js', () => ({
   createLogger: () => ({ trace: jest.fn(), debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn(), fatal: jest.fn() }),
@@ -20,7 +20,7 @@ const toolHeaderServer = (tools, requests) => http.createServer((req, res) => {
       jsonrpc: '2.0',
       id: body.id,
       result: body.method === 'server/discover'
-        ? { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } }
+        ? { supportedVersions: ['2025-11-25'], capabilities: { tools: {} } }
         : body.method === 'tools/list' ? { tools } : { content: [] },
     }));
   });
@@ -38,7 +38,7 @@ describe('ModernHttpDownstreamClient', () => {
           jsonrpc: '2.0',
           id: body.id,
           result: {
-            supportedVersions: ['2026-07-28'],
+            supportedVersions: ['2025-11-25'],
             capabilities: { resources: { subscribe: true } },
           },
         }));
@@ -74,7 +74,7 @@ describe('ModernHttpDownstreamClient', () => {
             jsonrpc: '2.0',
             id: body.id,
             result: {
-              supportedVersions: ['2026-07-28'],
+              supportedVersions: ['2025-11-25'],
               _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'modern-fixture', version: '1.0.0' } },
               capabilities: { tools: {} },
             },
@@ -100,11 +100,11 @@ describe('ModernHttpDownstreamClient', () => {
 
       expect(client.getServerVersion()).toEqual({ name: 'modern-fixture', version: '1.0.0' });
       expect(requests).toHaveLength(2);
-      expect(requests[1].headers['mcp-protocol-version']).toBe('2026-07-28');
+      expect(requests[1].headers['mcp-protocol-version']).toBe('2025-11-25');
       expect(requests[1].headers['mcp-method']).toBe('tools/call');
       expect(requests[1].headers['mcp-name']).toBe('echo');
       expect(requests[1].headers.authorization).toBe('Bearer downstream-token');
-      expect(requests[1].body.params._meta['io.modelcontextprotocol/protocolVersion']).toBe('2026-07-28');
+      expect(requests[1].body.params._meta['io.modelcontextprotocol/protocolVersion']).toBe('2025-11-25');
       expect(requests[1].body.params._meta['io.modelcontextprotocol/clientInfo'].name).toBe('peta-core');
     } finally {
       await new Promise((resolve) => server.close(resolve));
@@ -122,7 +122,7 @@ describe('ModernHttpDownstreamClient', () => {
           res.end(JSON.stringify({
             jsonrpc: '2.0',
             id: body.id,
-            result: { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } },
+            result: { supportedVersions: ['2025-11-25'], capabilities: { tools: {} } },
           }));
           return;
         }
@@ -157,7 +157,7 @@ describe('ModernHttpDownstreamClient', () => {
         const body = JSON.parse(raw);
         res.setHeader('Content-Type', body.method === 'server/discover' ? 'application/json' : 'text/event-stream');
         if (body.method === 'server/discover') {
-          res.end(JSON.stringify({ jsonrpc: '2.0', id: body.id, result: { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } } }));
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: body.id, result: { supportedVersions: ['2025-11-25'], capabilities: { tools: {} } } }));
           return;
         }
         openResponse = res;
@@ -188,7 +188,7 @@ describe('ModernHttpDownstreamClient', () => {
         const body = JSON.parse(raw);
         res.setHeader('Content-Type', body.method === 'server/discover' ? 'application/json' : 'text/event-stream');
         if (body.method === 'server/discover') {
-          res.end(JSON.stringify({ jsonrpc: '2.0', id: body.id, result: { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } } }));
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: body.id, result: { supportedVersions: ['2025-11-25'], capabilities: { tools: {} } } }));
           return;
         }
         openResponse = res;
@@ -221,7 +221,7 @@ describe('ModernHttpDownstreamClient', () => {
           res.end(JSON.stringify({
             jsonrpc: '2.0',
             id: body.id,
-            result: { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } },
+            result: { supportedVersions: ['2025-11-25'], capabilities: { tools: {} } },
           }));
           return;
         }
@@ -253,7 +253,7 @@ describe('ModernHttpDownstreamClient', () => {
         const body = JSON.parse(raw);
         res.setHeader('Content-Type', body.method === 'server/discover' ? 'application/json' : 'text/event-stream');
         res.end(body.method === 'server/discover'
-          ? JSON.stringify({ jsonrpc: '2.0', id: body.id, result: { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } } })
+          ? JSON.stringify({ jsonrpc: '2.0', id: body.id, result: { supportedVersions: ['2025-11-25'], capabilities: { tools: {} } } })
           : `data: ${JSON.stringify({ jsonrpc: '2.0', id: body.id, result: { tools: [{ name: 'lone-cr' }] } })}\r\r`);
       });
     });
@@ -283,7 +283,7 @@ describe('ModernHttpDownstreamClient', () => {
           res.end(JSON.stringify({
             jsonrpc: '2.0',
             id: body.id,
-            result: { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } },
+            result: { supportedVersions: ['2025-11-25'], capabilities: { tools: {} } },
           }));
           return;
         }
@@ -313,7 +313,7 @@ describe('ModernHttpDownstreamClient', () => {
           ? JSON.stringify({
             jsonrpc: '2.0',
             id: body.id,
-            result: { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } },
+            result: { supportedVersions: ['2025-11-25'], capabilities: { tools: {} } },
           })
           : `data: ${JSON.stringify({ jsonrpc: '2.0', id: body.id, error: { code: -32602, message: 'bad params' } })}\n\n`);
       });
@@ -342,7 +342,7 @@ describe('ModernHttpDownstreamClient', () => {
           res.end(JSON.stringify({
             jsonrpc: '2.0',
             id: body.id,
-            result: { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } },
+            result: { supportedVersions: ['2025-11-25'], capabilities: { tools: {} } },
           }));
           return;
         }
@@ -374,7 +374,7 @@ describe('ModernHttpDownstreamClient', () => {
           jsonrpc: '2.0',
           id: body.id,
           result: body.method === 'server/discover'
-            ? { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } }
+            ? { supportedVersions: ['2025-11-25'], capabilities: { tools: {} } }
             : { content: [] },
         }));
       });
@@ -416,7 +416,7 @@ describe('ModernHttpDownstreamClient', () => {
             error: {
               code: -32022,
               message: 'Unsupported protocol version',
-              data: { supported: ['2026-06-01'] },
+              data: { supported: ['2025-06-18'] },
             },
           }));
           return;
@@ -425,7 +425,7 @@ describe('ModernHttpDownstreamClient', () => {
           jsonrpc: '2.0',
           id: body.id,
           result: body.method === 'server/discover'
-            ? { supportedVersions: ['2026-06-01'], capabilities: { tools: {} } }
+            ? { supportedVersions: ['2025-06-18'], capabilities: { tools: {} } }
             : { tools: [] },
         }));
       });
@@ -437,9 +437,9 @@ describe('ModernHttpDownstreamClient', () => {
       await client.listTools();
 
       expect(versions).toEqual([
-        { header: '2026-07-28', meta: '2026-07-28' },
-        { header: '2026-06-01', meta: '2026-06-01' },
-        { header: '2026-06-01', meta: '2026-06-01' },
+        { header: '2025-11-25', meta: '2025-11-25' },
+        { header: '2025-06-18', meta: '2025-06-18' },
+        { header: '2025-06-18', meta: '2025-06-18' },
       ]);
     } finally {
       await new Promise((resolve) => server.close(resolve));
@@ -459,7 +459,7 @@ describe('ModernHttpDownstreamClient', () => {
           jsonrpc: '2.0',
           id: body.id,
           result: body.method === 'server/discover'
-            ? { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } }
+            ? { supportedVersions: ['2025-11-25'], capabilities: { tools: {} } }
             : { tools: [] },
         }));
       });

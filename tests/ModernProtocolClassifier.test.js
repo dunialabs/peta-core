@@ -24,11 +24,11 @@ describe('ModernProtocolClassifier', () => {
     getSessionMock.mockReset();
   });
 
-  test('routes initialize with a modern _meta signal to fail-closed validation', () => {
+  test('routes initialize with modern transport signals through the sessionful handshake', () => {
     const controller = new ModernMcpController();
     const req = { originalUrl: '/mcp', headers: {}, body: { jsonrpc: '2.0', id: 1, method: 'initialize', params: { _meta: 'bad' } } };
 
-    expect(controller.shouldHandle(req)).toBe(true);
+    expect(controller.shouldHandle(req)).toBe(false);
   });
 
   test('leaves plain legacy initialize on legacy path', () => {
@@ -38,7 +38,7 @@ describe('ModernProtocolClassifier', () => {
     expect(controller.shouldHandle(req)).toBe(false);
   });
 
-  test('leaves legacy initialize with legacy protocol header on legacy path', () => {
+  test('leaves initialize with the standard protocol header on the sessionful path', () => {
     const controller = new ModernMcpController();
     const req = { originalUrl: '/mcp', headers: { 'mcp-protocol-version': '2025-11-25' }, body: { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} } };
 

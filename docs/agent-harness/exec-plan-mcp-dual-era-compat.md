@@ -2,7 +2,7 @@
 
 ## Goal
 
-Implement dual-era MCP gateway compatibility: modern upstream clients can use stateless MCP `2026-07-28`, legacy upstream clients keep sessionful behavior, and downstream HTTP servers can be selected as modern or legacy without breaking stdio/SSE legacy servers.
+Implement dual-era MCP gateway compatibility: modern upstream clients can use stateless MCP `2025-11-25`, legacy upstream clients keep sessionful behavior, and downstream HTTP servers can be selected as modern or legacy without breaking stdio/SSE legacy servers.
 
 ## User-Visible Change
 

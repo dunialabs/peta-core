@@ -31,6 +31,7 @@ jest.unstable_mockModule('../dist/mcp/core/ServerManager.js', () => ({
 const { ModernMcpAuthMiddleware } = await import('../dist/mcp/modern/ModernMcpAuthMiddleware.js');
 const { ModernMcpController } = await import('../dist/mcp/modern/ModernMcpController.js');
 const { RateLimitMiddleware } = await import('../dist/middleware/RateLimitMiddleware.js');
+const { MODERN_MCP_CONFIG } = await import('../dist/config/modernMcp.config.js');
 
 const rawToken = '12345678raw-secret-token-87654321';
 const maskedToken = '12345678...87654321';
@@ -85,12 +86,52 @@ describe('Modern auth token masking', () => {
     expect(enqueueLog.mock.calls[0][0].tokenMask).not.toBe(rawToken);
   });
 
+  test('accepts a case-insensitive Bearer authorization scheme', async () => {
+    const middleware = new ModernMcpAuthMiddleware({});
+    const req = {
+      headers: { authorization: `bearer ${rawToken}`, host: 'example.test' },
+      query: {},
+      secure: true,
+      clientIp: '127.0.0.1',
+      ip: '127.0.0.1',
+    };
+    const res = { setHeader: jest.fn(), status: jest.fn().mockReturnThis(), json: jest.fn().mockReturnThis() };
+    const next = jest.fn();
+
+    await middleware.authenticate(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  test('returns forbidden for a valid token outside the rollout allowlist', async () => {
+    MODERN_MCP_CONFIG.allowedClientIds.push('allowed-client');
+    try {
+      const middleware = new ModernMcpAuthMiddleware({});
+      const req = {
+        headers: { authorization: `Bearer ${rawToken}`, host: 'example.test' },
+        query: {},
+        secure: true,
+        clientIp: '127.0.0.1',
+        ip: '127.0.0.1',
+      };
+      const res = { setHeader: jest.fn(), status: jest.fn().mockReturnThis(), json: jest.fn().mockReturnThis() };
+
+      await middleware.authenticate(req, res, jest.fn());
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.setHeader).toHaveBeenCalledWith('WWW-Authenticate', expect.stringContaining('error="insufficient_scope"'));
+    } finally {
+      MODERN_MCP_CONFIG.allowedClientIds.length = 0;
+    }
+  });
+
   test('masks an alternate raw AuthContext token before modern request logging', async () => {
     const controller = new ModernMcpController();
     const context = {
       req: { clientIp: '127.0.0.1', ip: '127.0.0.1', headers: { 'user-agent': 'test-agent' } },
       authContext: authenticatedContext(),
-      protocolVersion: '2026-07-28',
+      protocolVersion: '2025-11-25',
       clientInfo: { name: 'test-client', version: '1.0.0' },
       clientCapabilities: {},
       requestId: 1,

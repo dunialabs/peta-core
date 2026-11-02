@@ -1,4 +1,4 @@
-export const MODERN_MCP_PROTOCOL_VERSION = '2026-07-28';
+export const MODERN_MCP_PROTOCOL_VERSION = '2025-11-25';
 
 export const MODERN_MCP_CONFIG = {
   enabled: process.env.MCP_2026_ENABLED === 'true',

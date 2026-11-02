@@ -282,8 +282,8 @@ export async function startApplication() {
       }
       // Check if token is present (Authorization header or query parameter)
       const authHeaderValue = req.headers['authorization'];
-      const bearerToken = authHeaderValue?.startsWith('Bearer ')
-        ? authHeaderValue.substring(7).trim()
+      const bearerToken = authHeaderValue && /^Bearer\s+/i.test(authHeaderValue)
+        ? authHeaderValue.replace(/^Bearer\s+/i, '').trim()
         : '';
       const hasAuthHeader = bearerToken.length > 0;
       const hasTokenParam =
