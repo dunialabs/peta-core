@@ -151,8 +151,8 @@ export class AuthMiddleware {
       let token: string | undefined = undefined;
       // 2. Extract token from Authorization header
       const authHeader = req.headers['authorization'];
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        token = authHeader.substring(7);
+      if (authHeader && /^Bearer\s+/i.test(authHeader)) {
+        token = authHeader.replace(/^Bearer\s+/i, '').trim();
       } else if (req.query.token && typeof req.query.token === 'string') {
         token = req.query.token;
       } else if (req.query.api_key && typeof req.query.api_key === 'string') {

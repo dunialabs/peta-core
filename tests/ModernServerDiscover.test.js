@@ -25,10 +25,10 @@ describe('ModernServerDiscover', () => {
     const controller = new ModernMcpController();
     const result = controller.serverDiscover({ authContext: { permissions: {}, userPreferences: {} } });
 
-    expect(result.supportedVersions).toContain('2026-07-28');
+    expect(result.supportedVersions).toContain('2025-11-25');
     expect(result.serverInfo).toBeUndefined();
     expect(result._meta['io.modelcontextprotocol/serverInfo'].name).toBeTruthy();
-    expect(result._meta.peta.protocolVersion).toBe('2026-07-28');
+    expect(result._meta.peta.protocolVersion).toBe('2025-11-25');
     expect(result._meta.peta.stateless).toBe(true);
     expect(result._meta.peta.legacySessionHeaders).toBe(false);
     expect(result._meta.peta.anonymousPublicEndpoint).toBe(false);

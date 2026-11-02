@@ -40,7 +40,7 @@ if (!JWT_SECRET) {
   failUsage('JWT_SECRET is required in .env or environment');
 }
 
-const MODERN_VERSION = '2026-07-28';
+const MODERN_VERSION = '2025-11-25';
 const LEGACY_VERSION = '2025-11-25';
 const MODERN_ERROR_CODES = {
   invalidRequest: -32600,
@@ -149,7 +149,7 @@ try {
       },
       expectedToolOriginal: 'compat-smoke-modern-unsupported-tool',
       logUrl: `http://127.0.0.1:${ports.modernUnsupported}/logs`,
-      expectedStartFailure: 'does not advertise MCP 2026-07-28',
+      expectedStartFailure: 'does not advertise MCP 2025-11-25',
     },
     {
       id: `${PREFIX}-stdio-forced-modern`,
@@ -181,7 +181,7 @@ try {
   await startGatewayServer(`${PREFIX}-legacy-http-forced`);
   await startGatewayServer(`${PREFIX}-modern-http-auto`);
   await startGatewayServer(`${PREFIX}-modern-http-forced`);
-  await expectStartFailure(`${PREFIX}-modern-http-unsupported`, 'does not advertise MCP 2026-07-28');
+  await expectStartFailure(`${PREFIX}-modern-http-unsupported`, 'does not advertise MCP 2025-11-25');
   await expectStartFailure(`${PREFIX}-stdio-forced-modern`, 'only supported for HTTP downstream servers');
 
   await verifyDownstreamSelection();

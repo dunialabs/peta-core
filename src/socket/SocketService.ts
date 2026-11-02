@@ -127,8 +127,8 @@ export class SocketService {
           token = authData.token;
         }
         // Otherwise use Authorization header
-        else if (authHeader && authHeader.startsWith('Bearer ')) {
-          token = authHeader.replace('Bearer ', '');
+        else if (authHeader && /^Bearer\s+/i.test(authHeader)) {
+          token = authHeader.replace(/^Bearer\s+/i, '').trim();
         }
 
         if (!token) {

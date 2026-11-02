@@ -43,7 +43,7 @@ export class AdminAuthMiddleware {
         return;
       }
 
-      if (typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ') || authHeader.length === 'Bearer '.length) {
+      if (typeof authHeader !== 'string' || !/^Bearer\s+/i.test(authHeader) || !authHeader.replace(/^Bearer\s+/i, '').trim()) {
         res.status(401).json({
           success: false,
           message: 'Bearer token is required',
@@ -52,7 +52,7 @@ export class AdminAuthMiddleware {
         return;
       }
 
-      const token = authHeader.substring(7);
+      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
 
       try {
         const authContext = await this.tokenValidator.validateToken(token);

@@ -62,7 +62,7 @@ function record(req, body) {
 
 function discoverResult() {
   return {
-    supportedVersions: unsupported ? ['2025-11-25'] : ['2026-07-28'],
+    supportedVersions: unsupported ? ['2024-11-05'] : ['2025-11-25'],
     serverInfo: { name: `compat-smoke-${fixtureId}`, version: '1.0.0' },
     capabilities: {
       tools: { listChanged: true },

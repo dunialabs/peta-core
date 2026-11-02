@@ -15,13 +15,20 @@ jest.unstable_mockModule('../dist/log/LogService.js', () => ({
 }));
 
 const originalModernEnabled = process.env.MCP_2026_ENABLED;
+const originalSupportedVersions = process.env.MCP_2026_SUPPORTED_VERSIONS;
 process.env.MCP_2026_ENABLED = 'true';
+process.env.MCP_2026_SUPPORTED_VERSIONS = '2025-11-25,2026-07-28';
 const { ModernMcpController } = await import('../dist/mcp/modern/ModernMcpController.js');
 const { ModernErrorCodes } = await import('../dist/mcp/modern/ModernMcpErrors.js');
 if (originalModernEnabled === undefined) {
   delete process.env.MCP_2026_ENABLED;
 } else {
   process.env.MCP_2026_ENABLED = originalModernEnabled;
+}
+if (originalSupportedVersions === undefined) {
+  delete process.env.MCP_2026_SUPPORTED_VERSIONS;
+} else {
+  process.env.MCP_2026_SUPPORTED_VERSIONS = originalSupportedVersions;
 }
 
 function modernRequest(overrides = {}) {
@@ -120,15 +127,34 @@ describe('ModernHttpValidation', () => {
     expect(controller.subscriptionMatches({}, filter, { method: 'notifications/tools/list_changed', params: {} })).toBe(false);
   });
 
-  test('accepts omitted clientInfo while keeping protocolVersion and clientCapabilities required', () => {
+  test('accepts standard Streamable HTTP requests without private metadata or mirror headers', () => {
     const controller = new ModernMcpController();
 
     expect(() => controller.validateRequest(modernRequest())).not.toThrow();
-    expect(() => controller.validateRequest(modernRequest({ params: { _meta: { 'io.modelcontextprotocol/clientCapabilities': {} } } }))).toThrow('io.modelcontextprotocol/protocolVersion');
-    expect(() => controller.validateRequest(modernRequest({ params: { _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28' } } }))).toThrow('io.modelcontextprotocol/clientCapabilities');
+    const request = modernRequest({ params: {} });
+    delete request.headers['mcp-method'];
+    expect(() => controller.validateRequest(request)).not.toThrow();
   });
 
-  test('uses MCP 2026-07-28 standard transport error codes', () => {
+  test('keeps optional private metadata validation when supplied', () => {
+    const controller = new ModernMcpController();
+    expect(() => controller.validateRequest(modernRequest({ params: { _meta: { 'io.modelcontextprotocol/protocolVersion': 7 } } }))).toThrow('protocolVersion must be a non-empty string');
+  });
+
+  test('rejects task-augmented tool calls because task lifecycle is not implemented', async () => {
+    const controller = new ModernMcpController();
+    await expect(controller.dispatch(
+      { authContext: { userId: 'user-1', permissions: {}, userPreferences: {} } },
+      { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'tool', task: { ttl: 1000 } } },
+      Date.now(),
+    )).rejects.toMatchObject({
+      httpStatus: 400,
+      rpcCode: ModernErrorCodes.InvalidRequest,
+      message: 'Task-augmented tool calls are not supported by the modern gateway',
+    });
+  });
+
+  test('uses the modern transport error codes', () => {
     expect(ModernErrorCodes.HeaderMismatch).toBe(-32020);
     expect(ModernErrorCodes.MissingRequiredClientCapability).toBe(-32021);
     expect(ModernErrorCodes.UnsupportedProtocolVersion).toBe(-32022);
@@ -226,6 +252,7 @@ describe('ModernHttpValidation', () => {
   test('preserves a valid JSON-RPC id when request metadata validation fails', async () => {
     const controller = new ModernMcpController();
     const req = modernRequest({ params: {} });
+    delete req.headers['mcp-protocol-version'];
     req.method = 'POST';
     const res = {
       headersSent: false,
@@ -236,14 +263,10 @@ describe('ModernHttpValidation', () => {
     await controller.handlePost(req, res);
 
     expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith({
-      jsonrpc: '2.0',
-      error: {
-        code: ModernErrorCodes.InvalidParams,
-        message: 'Missing required modern MCP request _meta',
-      },
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      error: { code: ModernErrorCodes.HeaderMismatch, message: 'MCP-Protocol-Version header is required' },
       id: 1,
-    });
+    }));
   });
 
   test('decodes Base64 sentinel Mcp-Name before comparison', () => {
