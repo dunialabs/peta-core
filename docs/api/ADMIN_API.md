@@ -389,11 +389,11 @@ Admin API supports two role permissions:
 
 Permission verification is performed in ConfigController. Requests that do not meet permission requirements will return `FORBIDDEN (1003)` error.
 
-All Admin API requests that are not listed below require a valid `Authorization: Bearer <Peta access token>` for an Owner or Admin. A present malformed or invalid Authorization header is rejected, including on the no-header actions. The following no-header actions are retained for initial setup and Console login:
+All Admin API requests that are not listed below require a valid `Authorization: Bearer <Peta access token>` for an Owner or Admin. A present malformed or invalid Authorization header is rejected, including on the public lookup actions. The following actions are retained for initial setup and Console login:
 
 - `GET_OWNER (1016)` and `GET_PROXY (5001)` support the Console login/setup flow.
-- `CREATE_PROXY (5002)` is available only while no proxy exists; `RESTORE_DATABASE (6002)` is available only while the proxy, users, and servers are empty.
-- `CREATE_USER (1010)` is available without a header only when `data.role` is `Owner`; the handler permits exactly one Owner and only as the first user.
+- `CREATE_PROXY (5002)` is available only while no proxy exists and requires an Owner/Admin bearer token or the loopback `X-Peta-Bootstrap-Secret` setup header. `RESTORE_DATABASE (6002)` is available only while the proxy, users, and servers are empty and always requires an Owner/Admin bearer token.
+- `CREATE_USER (1010)` for the first Owner requires `X-Peta-Bootstrap-Secret: <PETA_BOOTSTRAP_SECRET>`, a configured secret of at least 32 characters, and a loopback connection. It is never accepted anonymously or from a remote peer. The handler permits exactly one Owner and only as the first user.
 
 Bootstrap eligibility and creation are serialized by the database, so concurrent first-owner and first-proxy requests cannot both succeed. Restore rechecks all three empty-state tables under the same database lock after shutdown completes; a bootstrap write that arrives during shutdown is preserved and causes restore to fail.
 
@@ -401,8 +401,8 @@ Bootstrap eligibility and creation are serialized by the database, so concurrent
 
 **publicAccess and permissions merge logic**:
 
-- If `permissions` does not include a `serverId`, availability falls back to `server.publicAccess` (true allows access)
-- If `permissions` includes a `serverId`, `permissions[serverId].enabled` takes precedence over `publicAccess`
+- If `permissions` does not include a `serverId`, authenticated availability is denied. Administrators must explicitly grant the server; anonymous access uses the separate anonymous-access flag.
+- If `permissions` includes a `serverId`, `permissions[serverId].enabled` is the required administrator grant; `publicAccess` does not implicitly grant authenticated users
 - Final tool/resource/prompt visibility is the merge of server capabilities and admin permissions; you can only override `enabled` for existing capability items
 - Empty `tools`/`resources`/`prompts` maps mean "no per-capability overrides"; an enabled server entry with empty maps still grants the server's enabled capabilities
 
@@ -454,7 +454,7 @@ null
 **Function Description**:
 
 - **Replace semantics**: `permissions` replaces the user's existing permissions (not a patch)
-- If only some serverIds are provided, others are removed and fall back to `publicAccess`
+- If only some serverIds are provided, other authenticated serverIds remain denied until explicitly granted
 - Update permissions field in user database
 - Adding, removing, enabling, or disabling a server entry is persisted even when its capability maps are empty
 - Server-entry additions/removals invalidate all three capability lists, while capability-override additions/removals invalidate the affected list regardless of `enabled`; omitted entries inherit server defaults
@@ -483,7 +483,7 @@ null
 
 #### 1010 CREATE_USER
 
-**Permission**: **Owner only**. The first Owner may be created without an Authorization header only when `role` is `UserRole.Owner` and the database is empty.
+**Permission**: **Owner only**. The first Owner may be created with the loopback bootstrap header described above; a bearer Authorization header is not required for that one-time setup path.
 **Function**: Create new user
 
 **Request Parameters** (data):
@@ -518,6 +518,7 @@ null
 **Important Notes**:
 
 - `encryptedToken` must be an `EncryptedData` JSON string (see Data Structures Overview)
+- For the first Owner bootstrap, encrypt the Owner's bearer token with `PETA_BOOTSTRAP_SECRET`; Core verifies that envelope and derives the stored `userId` from the decrypted token.
 - For non-Owner creation, the admin token is used to decrypt `encryptedToken`, and `userId` must equal the first 32 chars of `SHA-256(token)`
 - Owner can be created only once, and must be the first user (empty database)
 
@@ -848,7 +849,7 @@ null
 - `configTemplate` (string, **required**): JSON config template string; must be non-empty and not `{}` (validated regardless of allowUserInput)
 - `category` (number, required): Server category. `1`: Template, `2`: CustomRemote, `3`: RestApi, `4`: Skills, `5`: CustomStdio
 - `lazyStartEnabled` (boolean, optional): Enable lazy loading for this server. When true, server stays managed in memory, delays startup until first use, and idle/unexpected closes can return it to `Sleeping` so it can be started again later. Defaults to `true`
-- `publicAccess` (boolean, optional): Whether public access is enabled. If true, users without explicit permissions can still access this server. Defaults to `false`
+- `publicAccess` (boolean, optional): Whether the server is eligible for public discovery. Authenticated users still require an explicit per-user permission grant. Defaults to `false`
 - `anonymousAccess` (boolean, optional): Whether anonymous access (no authentication token) is enabled. Defaults to `false`
 - `anonymousRateLimit` (number, optional): Rate limit for anonymous access (requests per minute per source IP). Must be an integer between 1 and 1000. Defaults to `10`
 
@@ -1594,7 +1595,7 @@ null
 
 #### 5002 CREATE_PROXY
 
-**Permission**: Public without an Authorization header during empty-system setup. A supplied Authorization header must be valid.
+**Permission**: Owner + Admin, or a loopback request carrying `X-Peta-Bootstrap-Secret: <PETA_BOOTSTRAP_SECRET>` while no proxy exists. A supplied Authorization header must be valid.
 **Function**: Create proxy (system only allows one proxy)
 
 **Request Parameters** (data):
@@ -1756,7 +1757,7 @@ null
 
 #### 6002 RESTORE_DATABASE
 
-**Permission**: Owner + Admin, or without an Authorization header when the proxy, users, and servers are all empty. A supplied Authorization header must be valid.
+**Permission**: Owner + Admin while the proxy, users, and servers are all empty. A supplied Authorization header must be valid.
 **Function**: Full database restore
 
 **Request Parameters** (data):
@@ -1816,7 +1817,7 @@ null
 
 - After setting webhook URL, logs will automatically sync to specified URL
 - Set to `null` to disable log sync
-- URL must use http or https protocol
+- URL must use http or https protocol, resolve only to a public host, contain no URL credentials or non-default port, and must not redirect during delivery. Each delivery is pinned to an address validated immediately before the request.
 
 ---
 
@@ -1871,7 +1872,7 @@ null
 **Request Parameters** (data):
 
 - `proxyKey` (string, required): Proxy key (for finding proxyId)
-- `tunnelId` (string, required): Cloudflare Tunnel ID
+- `tunnelId` (string, required): Cloudflare Tunnel ID; use 1-128 ASCII letters, digits, underscores, or hyphens, starting with a letter or digit
 - `subdomain` (string, required): Subdomain (e.g., `xxx.trycloudflare.com`)
 - `credentials` (object or string, required): Tunnel credentials (object or JSON string, must contain `TunnelSecret` field)
 - `publicIp` (string, optional): Public IP address (for record only), defaults to empty string
@@ -1905,7 +1906,8 @@ null
 - Externally created configurations (`createdBy = 1`) will not delete old tunnel
 - Automatically writes credential files to `./cloudflared/{tunnelId}.json` and `./cloudflared/credentials.json`
 - Calls `start-cloudflared-auto.cjs` script to restart cloudflared container
-- If restart fails, still returns success (data saved), but `restarted: false` and includes error information
+- If restart fails, still returns success (data saved), but `restarted: false` and includes a generic `restartError`; detailed restart diagnostics remain in server logs
+- Returned `dnsConf` data omits stored tunnel credentials; credentials are written only to the protected local runtime files
 
 **credentials object example**:
 
@@ -1959,6 +1961,7 @@ null
 - Returns all configurations if no parameters provided
 - Return result is an array, may be empty array
 - Each record includes Docker container's real-time running status
+- Stored tunnel credentials are never included in list responses
 
 **Field Description**:
 

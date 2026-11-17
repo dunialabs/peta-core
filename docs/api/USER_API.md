@@ -507,7 +507,7 @@ _Example 4: CustomStdio Server (category=5) — user provides env overrides_
 - `stdioEnv` (object, optional for CustomStdio): Environment variable overrides as key-value pairs
   - Each key is an environment variable name, each value is a string
   - Example: `{"API_KEY": "user-secret", "CUSTOM_VAR": "value"}`
-  - **Merge behavior**: Admin-defined env (from `configTemplate.env`) is merged with user-provided `stdioEnv`. User values override admin defaults on key collision.
+  - **Merge behavior**: Admin-defined env (from `configTemplate.env`) is merged with user-provided `stdioEnv`. User values override admin defaults on key collision, but only keys already declared by the administrator are accepted. `command`, `args`, `cwd`, `type`, and `url` remain immutable.
   - **Immutable fields**: `command` and `args` are set by admin in `configTemplate` and cannot be changed by the user.
   - **ConfigTemplate requirement**: CustomStdio servers must have a `configTemplate` with at least a `command` field. The `args` (array) and `env` (object) fields are optional.
   - **Docker runtime note**: If `PETA_CORE_IN_DOCKER=true` and the configured `command` is not `docker`, peta-core wraps execution into `docker run ... petaio/mcp-runner:latest ...` internally. User-facing configuration fields do not change.

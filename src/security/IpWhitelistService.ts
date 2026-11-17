@@ -39,8 +39,9 @@ export class IpWhitelistService {
       this.logger.info({ entryCount: this.whitelist.length }, 'Initialized');
     } catch (error) {
       this.logger.error({ error }, 'Failed to initialize');
-      // On initialization failure, keep default value (allow all)
-      this.whitelist = ["0.0.0.0/0"];
+      this.whitelist = [];
+      this.initialized = true;
+      throw error;
     }
   }
 
@@ -82,7 +83,7 @@ export class IpWhitelistService {
         await this.loadFromDatabase();
       } catch (error) {
         this.logger.error({ error }, 'Failed to refresh cache');
-        // On refresh failure, continue using cached data
+        throw error;
       }
     }
     

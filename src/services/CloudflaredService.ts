@@ -79,6 +79,7 @@ export class CloudflaredService {
     publicUrl: string;
     restartError?: string;
   }> {
+    this.assertSafeTunnelId(tunnelId);
     const now = Math.floor(Date.now() / 1000);
 
     // Query existing configuration
@@ -149,7 +150,7 @@ export class CloudflaredService {
       logger.info({ tunnelId }, 'Local files generated successfully');
     } catch (error: any) {
       logger.error({ error: error.message }, 'Failed to generate local files');
-      throw new AdminError(`Failed to generate local files: ${error.message}`, AdminErrorCode.CLOUDFLARED_RESTART_FAILED);
+      throw new AdminError('Failed to generate cloudflared configuration files', AdminErrorCode.CLOUDFLARED_RESTART_FAILED);
     }
 
     // Restart cloudflared container
@@ -165,13 +166,13 @@ export class CloudflaredService {
       restarted = true;
       logger.info('Cloudflared restarted successfully');
     } catch (error: any) {
-      restartError = error.message;
+      restartError = 'Cloudflared restart failed';
       logger.error({ error: error.message }, 'Failed to restart cloudflared');
       // Don't throw error, return partial success
     }
 
     return {
-      dnsConf: updatedRecord,
+      dnsConf: updatedRecord ? this.sanitizeConfig(updatedRecord) : null,
       restarted: restarted,
       message: restarted
         ? 'Cloudflared config updated and restarted successfully'
@@ -217,7 +218,7 @@ export class CloudflaredService {
 
     // Add status field to each record
     const dnsConfsWithStatus = dnsConfs.map(conf => ({
-      ...conf,
+      ...this.sanitizeConfig(conf),
       status: containerStatus
     }));
 
@@ -241,6 +242,9 @@ export class CloudflaredService {
     // At least one of id or tunnelId must be provided
     if (!id && !tunnelId) {
       throw new AdminError('Either id or tunnelId must be provided', AdminErrorCode.INVALID_REQUEST);
+    }
+    if (tunnelId !== undefined) {
+      this.assertSafeTunnelId(tunnelId);
     }
 
     // Query configuration
@@ -322,12 +326,12 @@ export class CloudflaredService {
       // Determine if it's a database issue or file issue
       if (validation.error?.includes('database')) {
         throw new AdminError(
-          validation.error,
+          'Cloudflared database configuration not found',
           AdminErrorCode.CLOUDFLARED_DATABASE_CONFIG_NOT_FOUND
         );
       } else {
         throw new AdminError(
-          validation.error || 'Local setup validation failed',
+          'Cloudflared local setup is unavailable',
           AdminErrorCode.CLOUDFLARED_LOCAL_FILE_NOT_FOUND
         );
       }
@@ -361,7 +365,7 @@ export class CloudflaredService {
     } catch (error: any) {
       logger.error({ error: error.message }, 'Failed to restart cloudflared');
       throw new AdminError(
-        `Failed to restart cloudflared: ${error.message}`,
+        'Failed to restart cloudflared',
         AdminErrorCode.CLOUDFLARED_RESTART_FAILED
       );
     }
@@ -370,8 +374,9 @@ export class CloudflaredService {
     const containerStatus = await dockerService.getContainerStatus();
 
     if (containerStatus !== 'running') {
+      logger.error({ containerStatus }, 'Cloudflared container did not reach running state after restart');
       throw new AdminError(
-        `Cloudflared container is not running after restart (status: ${containerStatus})`,
+        'Cloudflared container failed to start',
         AdminErrorCode.CLOUDFLARED_RESTART_FAILED
       );
     }
@@ -417,8 +422,9 @@ export class CloudflaredService {
     try {
       await dockerService.stopContainer();
     } catch (error: any) {
+      logger.error({ error: error.message }, 'Failed to stop cloudflared');
       throw new AdminError(
-        `Failed to stop cloudflared: ${error.message}`,
+        'Failed to stop cloudflared',
         AdminErrorCode.CLOUDFLARED_STOP_FAILED
       );
     }
@@ -517,7 +523,7 @@ export class CloudflaredService {
       
       // Read credentials from local file to generate config.yml
       try {
-        const credentialsPath = path.join(CLOUDFLARED_CONFIG.CONFIG_DIR, `${tunnelId}.json`);
+        const credentialsPath = this.getTunnelCredentialsPath(tunnelId);
         const credentialsContent = await fs.readFile(credentialsPath, 'utf8');
         const credentials = JSON.parse(credentialsContent);
         
@@ -588,13 +594,13 @@ export class CloudflaredService {
    * @param subdomain - Subdomain
    */
   async generateLocalFiles(tunnelId: string, credentials: TunnelCredentials, subdomain: string): Promise<void> {
+    const credentialsFile = this.getTunnelCredentialsPath(tunnelId);
     const configDir = CLOUDFLARED_CONFIG.CONFIG_DIR;
     
     // Ensure config directory exists
     await fs.mkdir(configDir, { recursive: true });
 
     // 1. Write main credentials file ({tunnelId}.json)
-    const credentialsFile = path.join(configDir, `${tunnelId}.json`);
     await fs.writeFile(credentialsFile, JSON.stringify(credentials, null, 2), 'utf8');
     logger.debug({ credentialsFile }, 'Written credentials file');
 
@@ -612,12 +618,18 @@ export class CloudflaredService {
     logger.info({ tunnelId, configDir }, 'Local files generated successfully');
   }
 
+  private sanitizeConfig<T extends Record<string, unknown>>(config: T): Omit<T, 'credentials'> {
+    const { credentials: _credentials, ...safeConfig } = config;
+    return safeConfig;
+  }
+
   /**
    * Generate cloudflared config.yml content
    * @param tunnelId - Tunnel ID
    * @param subdomain - Subdomain
    */
   generateConfigYaml(tunnelId: string, subdomain: string): string {
+    this.assertSafeTunnelId(tunnelId);
     // cloudflared runtime (container) reads credentials from CONTAINER_CONFIG_DIR (default /etc/cloudflared)
     const credentialsPath = path.posix.join(
       CLOUDFLARED_CONFIG.CONTAINER_CONFIG_DIR,
@@ -671,7 +683,7 @@ ingress:
   async cleanupLocalFiles(tunnelId: string): Promise<void> {
     const configDir = CLOUDFLARED_CONFIG.CONFIG_DIR;
     const filesToDelete = [
-      path.join(configDir, `${tunnelId}.json`),
+      this.getTunnelCredentialsPath(tunnelId),
       path.join(configDir, 'credentials.json'),
       path.join(configDir, 'config.yml')
     ];
@@ -694,7 +706,7 @@ ingress:
    * @param tunnelId - Tunnel ID
    */
   async checkLocalCredentialsFile(tunnelId: string): Promise<boolean> {
-    const credentialsFile = path.join(CLOUDFLARED_CONFIG.CONFIG_DIR, `${tunnelId}.json`);
+    const credentialsFile = this.getTunnelCredentialsPath(tunnelId);
     try {
       const content = await fs.readFile(credentialsFile, 'utf8');
       const credentials = JSON.parse(content);
@@ -702,6 +714,22 @@ ingress:
     } catch (error) {
       return false;
     }
+  }
+
+  private assertSafeTunnelId(tunnelId: string): void {
+    if (typeof tunnelId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(tunnelId)) {
+      throw new AdminError('Invalid tunnelId', AdminErrorCode.INVALID_REQUEST);
+    }
+  }
+
+  private getTunnelCredentialsPath(tunnelId: string): string {
+    this.assertSafeTunnelId(tunnelId);
+    const configDir = path.resolve(CLOUDFLARED_CONFIG.CONFIG_DIR);
+    const credentialsFile = path.resolve(configDir, `${tunnelId}.json`);
+    if (path.dirname(credentialsFile) !== configDir) {
+      throw new AdminError('Invalid tunnelId', AdminErrorCode.INVALID_REQUEST);
+    }
+    return credentialsFile;
   }
 
   // ==================== Cloud API Methods ====================
@@ -738,10 +766,8 @@ ingress:
       logger.info({ appId, tunnelId: result.tunnelId }, 'Tunnel created successfully');
       return result;
     } catch (error: any) {
-      const errorMessage = error.name === 'AbortError'
-        ? 'Request timeout'
-        : error.message;
-      logger.error({ error: errorMessage, appId }, 'Failed to create tunnel');
+      const errorMessage = error.name === 'AbortError' ? 'Request timeout' : 'Cloud API request failed';
+      logger.error({ error: error instanceof Error ? error.message : error, appId }, 'Failed to create tunnel');
       throw new AdminError(`Failed to create tunnel: ${errorMessage}`, AdminErrorCode.TUNNEL_CREATE_FAILED);
     } finally {
       clearTimeout(timeoutId);
@@ -779,10 +805,8 @@ ingress:
 
       logger.info({ tunnelId }, 'Deleted tunnel');
     } catch (error: any) {
-      const errorMessage = error.name === 'AbortError'
-        ? 'Request timeout'
-        : error.message;
-      logger.error({ error: errorMessage, tunnelId }, 'Failed to delete tunnel');
+      const errorMessage = error.name === 'AbortError' ? 'Request timeout' : 'Cloud API request failed';
+      logger.error({ error: error instanceof Error ? error.message : error, tunnelId }, 'Failed to delete tunnel');
       throw new AdminError(`Failed to delete tunnel: ${errorMessage}`, AdminErrorCode.TUNNEL_DELETE_FAILED);
     } finally {
       clearTimeout(timeoutId);
@@ -824,7 +848,7 @@ ingress:
       }
 
       // 3. Check local credentials file
-      const credentialsFile = path.join(CLOUDFLARED_CONFIG.CONFIG_DIR, `${tunnelId}.json`);
+      const credentialsFile = this.getTunnelCredentialsPath(tunnelId);
       try {
         const credentialsContent = await fs.readFile(credentialsFile, 'utf8');
         const credentials = JSON.parse(credentialsContent);
@@ -844,19 +868,21 @@ ingress:
           return {
             valid: false,
             tunnelId,
-            error: `Credentials file not found: ${credentialsFile}`
+            error: 'Cloudflared credentials file is missing'
           };
         }
+        logger.warn({ error: error.message, tunnelId }, 'Invalid cloudflared credentials file');
         return {
           valid: false,
           tunnelId,
-          error: `Invalid credentials file: ${error.message}`
+          error: 'Cloudflared credentials file is invalid'
         };
       }
     } catch (error: any) {
+      logger.error({ error: error.message }, 'Cloudflared local setup validation failed');
       return {
         valid: false,
-        error: `Validation failed: ${error.message}`
+        error: 'Cloudflared local setup validation failed'
       };
     }
   }

@@ -117,9 +117,9 @@ export class ConfigController {
       const authorization = req.headers.authorization;
       const token = typeof authorization === 'string' && /^Bearer\s+/i.test(authorization)
         ? authorization.replace(/^Bearer\s+/i, '').trim()
-        : undefined;
+        : req.bootstrapToken;
 
-      if (!this.isUnauthenticatedBootstrapAction(adminRequest, authorization, req.authContext)) {
+      if (!this.isUnauthenticatedBootstrapAction(adminRequest, authorization, req.authContext) && !req.bootstrapToken) {
         if (!token) {
           throw new AdminError('Token is required', AdminErrorCode.FORBIDDEN);
         }
@@ -516,7 +516,7 @@ export class ConfigController {
         success: false,
         error: {
           code: code,
-          message: error instanceof Error ? error.message : 'Internal server error',
+          message: error instanceof AdminError ? error.message : 'Internal server error',
         },
       };
       res.status(500).json(errorResponse);
@@ -552,11 +552,9 @@ export class ConfigController {
     switch (request.action) {
       case AdminActionType.GET_OWNER:
       case AdminActionType.GET_PROXY:
-      case AdminActionType.CREATE_PROXY:
-      case AdminActionType.RESTORE_DATABASE:
         return true;
       case AdminActionType.CREATE_USER:
-        return request.data?.role === UserRole.Owner;
+        return false;
       default:
         return false;
     }

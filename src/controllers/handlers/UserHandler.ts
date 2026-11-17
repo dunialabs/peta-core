@@ -84,11 +84,16 @@ export class UserHandler {
     }
 
     if (role !== UserRole.Owner) {
-      // Validate user data legitimacy: decrypt encryptedToken with token to get token plaintext, then calculate userId from token to verify userId consistency
       const decryptedToken = await CryptoService.decryptDataFromString(encryptedToken, token!);
       const calculatedUserId = await CryptoService.calculateUserId(decryptedToken);
       if (calculatedUserId !== userId) {
         throw new AdminError('Invalid token', AdminErrorCode.INVALID_REQUEST);
+      }
+    } else if (token && token === process.env.PETA_BOOTSTRAP_SECRET) {
+      const decryptedToken = await CryptoService.decryptDataFromString(encryptedToken, token);
+      const calculatedUserId = await CryptoService.calculateUserId(decryptedToken);
+      if (calculatedUserId !== userId) {
+        throw new AdminError('Invalid bootstrap token envelope', AdminErrorCode.INVALID_REQUEST);
       }
     }
 

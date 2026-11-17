@@ -73,7 +73,7 @@ export class BackupHandler {
       };
     } catch (error: any) {
       this.logger.error({ error }, 'Backup failed');
-      throw new AdminError(`Backup failed: ${error.message}`, AdminErrorCode.BACKUP_FAILED);
+      throw new AdminError('Backup failed', AdminErrorCode.BACKUP_FAILED);
     }
   }
 
@@ -198,7 +198,7 @@ export class BackupHandler {
       }
 
       this.logger.error({ error }, 'Restore failed');
-      throw new AdminError(`Restore failed: ${error.message}`, AdminErrorCode.RESTORE_FAILED);
+      throw new AdminError('Restore failed', AdminErrorCode.RESTORE_FAILED);
     }
   }
 }

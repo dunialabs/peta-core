@@ -304,8 +304,11 @@ MCP_2026_SUPPORTED_VERSIONS=2025-11-25
 
 # Canonical public OAuth/MCP origin when publishing through a tunnel or reverse proxy.
 # PETA_PUBLIC_URL=https://peta.example.com
-# Trust only the proxy addresses/hops that supply forwarded headers.
-# TRUST_PROXY='loopback, linklocal, uniquelocal'
+# Trust only the explicitly listed proxy addresses or CIDRs that supply forwarded headers.
+# TRUST_PROXY=1
+# TRUSTED_PROXY_IPS=127.0.0.1,10.0.0.0/8
+# PETA_BOOTSTRAP_SECRET=replace-with-at-least-32-random-characters
+# PETA_MAX_RATE_LIMIT_USERS=10000
 
 # -------------------- Logging Configuration (Pino Logger) --------------------
 LOG_LEVEL=info
@@ -339,7 +342,7 @@ docker compose logs -f
 - **API Service**: http://localhost:3002
 - **Health Check**: http://localhost:3002/health
 
-> **OAuth issuer note:** Docker service names, container ports, host `localhost`, and your public domain are different OAuth issuers from a client perspective. Public Docker deployments require `PETA_PUBLIC_URL=https://your-domain.example` and final public `/mcp` client setup, or `TRUST_PROXY` configured for the proxy that supplies `X-Forwarded-Proto: https` and `X-Forwarded-Host: your-domain.example`. Raw `Host` fallback is localhost/loopback development-only; never trust arbitrary client-supplied forwarding headers.
+> **OAuth issuer note:** Docker service names, container ports, host `localhost`, and your public domain are different OAuth issuers from a client perspective. Public Docker deployments require `PETA_PUBLIC_URL=https://your-domain.example` and final public `/mcp` client setup, or `TRUST_PROXY` plus `TRUSTED_PROXY_IPS` configured for the proxy that supplies `X-Forwarded-Proto: https` and `X-Forwarded-Host: your-domain.example`. Raw `Host` fallback is localhost/loopback development-only; never trust arbitrary client-supplied forwarding headers.
 
 ## ⚙️ Configuration
 

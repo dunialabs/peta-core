@@ -190,7 +190,7 @@
         </div>
     </div>
 
-    <script>
+    <script nonce="{{CSP_NONCE}}">
         // ===== Peta Desk Integration: Auto-authorization Flow =====
 
         /**
@@ -240,21 +240,6 @@
             } catch (error) {
                 console.error('[OAuth] Custom scheme invocation failed:', error);
                 // Silent failure - no user impact
-            }
-        }
-
-        /**
-         * Extract token parameter from current URL
-         * Returns token value or null if not present
-         */
-        function getTokenFromUrl() {
-            try {
-                const params = new URLSearchParams(window.location.search);
-                const token = params.get('token');
-                return token ? token.trim() : null;
-            } catch (error) {
-                console.error('[OAuth] Failed to parse URL parameters:', error);
-                return null;
             }
         }
 
@@ -388,52 +373,6 @@
         }
 
         /**
-         * Handle token callback from Peta Desk
-         * Directly submit authorization request to backend
-         */
-        async function handleTokenCallback(token) {
-            console.log('[OAuth] Token received, submitting authorization');
-
-            const formData = {
-                client_id: "{{CLIENT_ID}}",
-                redirect_uri: "{{REDIRECT_URI}}",
-                scope: "{{SCOPE}}",
-                state: "{{STATE}}",
-                code_challenge: "{{CODE_CHALLENGE}}",
-                code_challenge_method: "{{CODE_CHALLENGE_METHOD}}",
-                resource: "{{RESOURCE}}",
-                approved: true,
-                user_token: token
-            };
-
-            try {
-                const response = await fetch('/authorize', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(formData),
-                });
-
-                if (!response.ok) {
-                    throw new Error('Authorization request failed');
-                }
-
-                const data = await response.json();
-
-                if (data.redirect) {
-                    console.log('[OAuth] Authorization successful, redirecting');
-                    redirectOAuthClientCallback(data.redirect);
-                } else {
-                    console.error('[OAuth] No redirect URL in response');
-                }
-            } catch (error) {
-                console.error('[OAuth] Authorization error:', error);
-                alert('Authorization failed. Please try again.');
-            }
-        }
-
-        /**
          * Invoke Peta Desk app with current URL
          */
         function invokePetaDesk() {
@@ -475,18 +414,8 @@
 
             // ===== Main Authorization Flow =====
 
-            // Check for token parameter in URL
-            const token = getTokenFromUrl();
-
-            if (token) {
-                // Scenario 1: Token present → auto-submit authorization
-                console.log('[OAuth] Token found in URL, auto-submitting authorization');
-                handleTokenCallback(token);
-            } else {
-                // Scenario 2: No token → auto-invoke Peta Desk app
-                console.log('[OAuth] No token found, auto-invoking Peta Desk app');
-                startDeskAuthorization();
-            }
+            // Tokens are delivered through the Desk callback POST, never through the browser URL.
+            startDeskAuthorization();
         });
     </script>
 </body>

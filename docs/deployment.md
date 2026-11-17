@@ -206,9 +206,12 @@ All configuration is set via environment variables (for example in a `.env` file
 | `SSL_CERT_PATH` |          | –       | Path to TLS certificate, required if `ENABLE_HTTPS=true`. |
 | `SSL_KEY_PATH`  |          | –       | Path to TLS private key, required if `ENABLE_HTTPS=true`. |
 | `PETA_PUBLIC_URL` |          | –       | Canonical public origin for OAuth issuer and `/mcp` protected-resource URLs, for example `https://peta.example.com`. |
-| `TRUST_PROXY` |          | –       | Explicit Express trusted-proxy setting (IP/subnet list, hop count, `true`, or `false`) controlling whether forwarded host/proto headers are accepted. |
+| `TRUST_PROXY` |          | –       | Enable Express trusted-proxy handling. Any value other than `false` requires the explicit `TRUSTED_PROXY_IPS` address/CIDR allow-list. |
+| `TRUSTED_PROXY_IPS` |          | –       | Comma-separated proxy IP addresses or IPv4 CIDRs allowed to supply forwarded host/proto and client-IP headers. |
+| `PETA_BOOTSTRAP_SECRET` |          | –       | High-entropy secret of at least 32 characters required with a loopback `X-Peta-Bootstrap-Secret` header for first Owner and first proxy setup actions. |
+| `PETA_MAX_RATE_LIMIT_USERS` |          | `10000` | Maximum in-memory per-user rate-limit buckets. New identities fail closed when the cap is reached until expired buckets are reclaimed. |
 
-For OAuth-based MCP clients, the externally visible Peta Core URL must be stable before production use. Public deployments require `PETA_PUBLIC_URL` to pin the canonical public origin, or a trusted proxy configured through `TRUST_PROXY` that supplies `X-Forwarded-Proto` and `X-Forwarded-Host`. Without either, Peta Core accepts raw `Host` only for localhost and loopback development addresses. Configure reverse proxies, tunnels, and load balancers to send values such as:
+For OAuth-based MCP clients, the externally visible Peta Core URL must be stable before production use. Public deployments require `PETA_PUBLIC_URL` to pin the canonical public origin, or a trusted proxy configured through `TRUST_PROXY` plus `TRUSTED_PROXY_IPS` that supplies `X-Forwarded-Proto` and `X-Forwarded-Host`. Without either, Peta Core accepts raw `Host` only for localhost and loopback development addresses. Configure reverse proxies, tunnels, and load balancers to send values such as:
 
 ```http
 X-Forwarded-Proto: https
@@ -329,3 +332,6 @@ npm run db:stop     # Stop database containers
 See `../package.json` for the full list of scripts.
 
 ---
+# Security-related runtime settings
+
+Set `PETA_PUBLIC_URL` in public deployments. If a reverse proxy supplies client IP headers, list only the proxy addresses or CIDRs in `TRUSTED_PROXY_IPS`; Core ignores forwarded IP headers from every other peer. `TRUST_PROXY=true` is rejected because it does not identify a trusted proxy. Configure a high-entropy `PETA_BOOTSTRAP_SECRET` of at least 32 characters before creating the first Owner; the bootstrap request must come from loopback and include the matching `X-Peta-Bootstrap-Secret` header.

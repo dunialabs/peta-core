@@ -16,6 +16,7 @@ import { createLogger } from '../logger/index.js';
 import { prisma } from '../config/prisma.js';
 import { getAuthorizationServerUrl } from '../utils/urlUtils.js';
 import { maskToken } from '../utils/tokenMask.js';
+import { RateLimitService } from '../security/RateLimitService.js';
 
 const PUBLIC_URL_CONFIGURATION_ERROR = 'PETA_PUBLIC_URL or a trusted proxy is required for public URLs';
 
@@ -25,6 +26,7 @@ declare global {
     interface Request {
       authContext?: AuthContext;
       clientSession?: ClientSession;
+      rateLimitChecked?: boolean;
     }
   }
 }
@@ -38,6 +40,7 @@ export class AuthMiddleware {
 
   constructor(
     private tokenValidator: TokenValidator,
+    private rateLimitService?: RateLimitService,
   ) {
     this.oauthTokenValidator = new OAuthTokenValidator();
   }
@@ -53,25 +56,57 @@ export class AuthMiddleware {
         this.logger.debug({ sessionId }, 'Session ID found');
         const existingSession = SessionStore.instance.getSession(sessionId);
         if (existingSession) {
-
-          const token = existingSession.token;
-          const isJwtFormat = token.includes('.') && token.split('.').length === 3;
-          if (isJwtFormat) {
-            const oauthResult = await this.oauthTokenValidator.validateToken(token);
-            if (!oauthResult.valid) {
-              await SessionStore.instance.removeAllUserSessions(
-                existingSession.userId,
-                DisconnectReason.SESSION_REMOVED
-              );
-              const authError = new AuthError(
+          if (existingSession.authContext.kind !== 'anonymous') {
+            const authHeader = req.headers.authorization;
+            const presentedToken = typeof authHeader === 'string' && /^Bearer\s+/i.test(authHeader)
+              ? authHeader.replace(/^Bearer\s+/i, '').trim()
+              : '';
+            if (!presentedToken) {
+              return this.sendAuthError(req, res, new AuthError(
                 AuthErrorType.INVALID_TOKEN,
-                oauthResult.error || 'OAuth token validation failed',
-                existingSession.userId
-              );
-              return this.sendAuthError(req, res, authError);
+                'Authorization header with Bearer token is required',
+                existingSession.userId,
+              ), 'invalid_request');
+            }
+            const presentedFingerprint = createHash('sha256').update(presentedToken).digest('hex');
+            const sessionFingerprint = createHash('sha256').update(existingSession.token).digest('hex');
+            if (presentedFingerprint !== sessionFingerprint) {
+              return this.sendAuthError(req, res, new AuthError(AuthErrorType.INVALID_TOKEN, 'Session token does not match', existingSession.userId));
+            }
+            const isJwtFormat = presentedToken.includes('.') && presentedToken.split('.').length === 3;
+            let validatedContext: AuthContext;
+            if (isJwtFormat) {
+              const oauthResult = await this.oauthTokenValidator.validateToken(presentedToken);
+              if (!oauthResult.valid || !oauthResult.authContext) {
+                await SessionStore.instance.removeAllUserSessions(existingSession.userId, DisconnectReason.SESSION_REMOVED);
+                return this.sendAuthError(req, res, new AuthError(AuthErrorType.INVALID_TOKEN, 'OAuth token validation failed', existingSession.userId));
+              }
+              validatedContext = oauthResult.authContext;
+            } else {
+              try {
+                validatedContext = await this.tokenValidator.validateToken(presentedToken);
+              } catch (error) {
+                return this.sendAuthError(req, res, error instanceof AuthError ? error : new AuthError(AuthErrorType.INVALID_TOKEN, 'Invalid token', existingSession.userId));
+              }
+            }
+            if (validatedContext.userId !== existingSession.userId) {
+              return this.sendAuthError(req, res, new AuthError(AuthErrorType.INVALID_TOKEN, 'Session token does not match', existingSession.userId));
             }
           }
-           
+
+          const sessionAgeMs = Date.now() - existingSession.createdAt.getTime();
+          if (sessionAgeMs >= 24 * 60 * 60 * 1000) {
+            await SessionStore.instance.removeAllUserSessions(
+              existingSession.userId,
+              DisconnectReason.SESSION_TIMEOUT,
+            );
+            return this.sendAuthError(req, res, new AuthError(
+              AuthErrorType.SESSION_EXPIRED,
+              'MCP session lifetime has expired',
+              existingSession.userId,
+            ));
+          }
+
           // New: Check if user info needs to be refreshed (every 5 minutes)
           await this.refreshUserInfoIfNeeded(existingSession);
           
@@ -207,7 +242,7 @@ export class AuthMiddleware {
           } else {
             throw new AuthError(
               AuthErrorType.INVALID_TOKEN,
-              oauthResult.error || 'OAuth token validation failed'
+              'OAuth token validation failed'
             );
           }
         } else if (isHexFormat) {
@@ -249,6 +284,13 @@ export class AuthMiddleware {
         ? sessionId
         : AuthUtils.generateSessionId();
 
+      if (this.rateLimitService) {
+        const admission = await this.rateLimitService.checkRateLimit(authContext.userId, authContext.rateLimit);
+        if (!admission.allowed) {
+          return this.sendAuthError(req, res, new AuthError(AuthErrorType.RATE_LIMIT_EXCEEDED, 'Rate limit exceeded', authContext.userId));
+        }
+        req.rateLimitChecked = true;
+      }
       const clientSession = await SessionStore.instance.createSession(
         newSessionId,
         authContext.userId,
@@ -360,6 +402,8 @@ export class AuthMiddleware {
         return 403;
       case AuthErrorType.SESSION_EXPIRED:
         return 401;
+      case AuthErrorType.RATE_LIMIT_EXCEEDED:
+        return 429;
       case AuthErrorType.DECRYPTION_FAILED:
         return 500;
       default:
@@ -454,6 +498,13 @@ export class AuthMiddleware {
       ? requestedSessionId!
       : AuthUtils.generateSessionId();
 
+    if (this.rateLimitService) {
+      const admission = await this.rateLimitService.checkRateLimit(authContext.userId, authContext.rateLimit);
+      if (!admission.allowed) {
+        return this.sendAuthError(req, res, new AuthError(AuthErrorType.RATE_LIMIT_EXCEEDED, 'Rate limit exceeded', authContext.userId));
+      }
+      req.rateLimitChecked = true;
+    }
     const clientSession = await SessionStore.instance.createSession(
       newSessionId,
       authContext.userId,
@@ -537,6 +588,9 @@ export class AuthMiddleware {
       expiresAt: user.expiresAt && user.expiresAt > 0 ? user.expiresAt : null,
       rateLimit: user.ratelimit,
       tenantId: user.proxyId > 0 ? String(user.proxyId) : undefined,
+      ...(session.authContext.oauthClientId ? { oauthClientId: session.authContext.oauthClientId } : {}),
+      ...(session.authContext.oauthScopes ? { oauthScopes: session.authContext.oauthScopes } : {}),
+      ...(session.authContext.oauthAccessTokenExpiresAt ? { oauthAccessTokenExpiresAt: session.authContext.oauthAccessTokenExpiresAt } : {}),
     };
 
     // Update authentication context in session

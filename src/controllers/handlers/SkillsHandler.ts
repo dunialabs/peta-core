@@ -109,7 +109,7 @@ export class SkillsHandler {
     } catch (error) {
       logger.error({ error, serverId }, 'Failed to list skills');
       throw new AdminError(
-        error instanceof Error ? error.message : 'Failed to list skills',
+        'Failed to list skills',
         this.getSkillsErrorCode(error, 'list')
       );
     }
@@ -158,7 +158,7 @@ export class SkillsHandler {
     } catch (error) {
       logger.error({ error, serverId }, 'Failed to upload skills');
       throw new AdminError(
-        error instanceof Error ? error.message : 'Failed to upload skills',
+        'Failed to upload skills',
         this.getSkillsErrorCode(error, 'upload')
       );
     }
@@ -190,7 +190,7 @@ export class SkillsHandler {
     } catch (error) {
       logger.error({ error, serverId, skillName }, 'Failed to delete skill');
       throw new AdminError(
-        error instanceof Error ? error.message : 'Failed to delete skill',
+        'Failed to delete skill',
         this.getSkillsErrorCode(error, 'delete')
       );
     }
@@ -216,7 +216,7 @@ export class SkillsHandler {
     } catch (error) {
       logger.error({ error, serverId }, 'Failed to delete server skills');
       throw new AdminError(
-        error instanceof Error ? error.message : 'Failed to delete server skills',
+        'Failed to delete server skills',
         this.getSkillsErrorCode(error, 'delete')
       );
     }

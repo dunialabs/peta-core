@@ -1,6 +1,7 @@
-import type { IncomingHttpHeaders } from 'node:http';
+import type { IncomingHttpHeaders, IncomingMessage } from 'node:http';
 import { lookup } from 'node:dns/promises';
 import { BlockList, isIP } from 'node:net';
+import { request as httpRequest } from 'node:http';
 import { request } from 'node:https';
 import { createLogger } from '../../logger/index.js';
 
@@ -77,12 +78,23 @@ export type ClientMetadataNetworkValidationResult = {
   addresses?: string[];
 };
 
+export interface ClientMetadataNetworkValidationOptions {
+  allowFakeIp?: boolean;
+}
+
 export type ClientMetadataHttpResponse = {
   ok: boolean;
   status: number;
   statusText: string;
   headers: IncomingHttpHeaders;
   body: string;
+};
+
+export type PinnedHttpResponse = {
+  ok: boolean;
+  status: number;
+  statusText: string;
+  headers: IncomingHttpHeaders;
 };
 
 export class ClientMetadataNetwork {
@@ -93,7 +105,10 @@ export class ClientMetadataNetwork {
     private readonly maxMetadataBytes: number,
   ) {}
 
-  async validatePublicNetworkTarget(url: string): Promise<ClientMetadataNetworkValidationResult> {
+  async validatePublicNetworkTarget(
+    url: string,
+    options: ClientMetadataNetworkValidationOptions = {},
+  ): Promise<ClientMetadataNetworkValidationResult> {
     const parsedUrl = new URL(url);
     const hostname = parsedUrl.hostname.toLowerCase();
     const ipHostname = this.unbracketIpv6Hostname(hostname);
@@ -111,7 +126,7 @@ export class ClientMetadataNetwork {
       return { valid: false, error: 'Client metadata URL host did not resolve' };
     }
 
-    const allowFakeIp = this.allowFakeIpClientMetadata();
+    const allowFakeIp = options.allowFakeIp ?? this.allowFakeIpClientMetadata();
     const allowedFakeIpAddresses: string[] = [];
 
     for (const { address } of addresses) {
@@ -158,6 +173,25 @@ export class ClientMetadataNetwork {
     for (const address of addresses) {
       try {
         return await this.fetchPinnedMetadataDocumentFromAddress(url, address);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
+    }
+
+    throw lastError ?? new Error('Client metadata URL host did not resolve');
+  }
+
+  async postPinnedJson(
+    url: string,
+    addresses: readonly string[],
+    body: string,
+    headers: Record<string, string> = {},
+  ): Promise<PinnedHttpResponse> {
+    let lastError: Error | undefined;
+
+    for (const address of addresses) {
+      try {
+        return await this.postPinnedJsonToAddress(url, address, body, headers);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
       }
@@ -245,6 +279,49 @@ export class ClientMetadataNetwork {
       req.on('timeout', () => req.destroy(new Error('Client metadata fetch timeout (exceeded 5 seconds)')));
       req.on('error', reject);
       req.end();
+    });
+  }
+
+  private postPinnedJsonToAddress(
+    url: string,
+    address: string,
+    body: string,
+    headers: Record<string, string>,
+  ): Promise<PinnedHttpResponse> {
+    const parsedUrl = new URL(url);
+    const requestOptions = {
+      method: 'POST',
+      hostname: address,
+      port: parsedUrl.port ? Number(parsedUrl.port) : parsedUrl.protocol === 'https:' ? 443 : 80,
+      path: `${parsedUrl.pathname}${parsedUrl.search}`,
+      headers: {
+        ...headers,
+        Host: parsedUrl.host,
+        'Content-Length': Buffer.byteLength(body).toString(),
+      },
+      timeout: this.fetchTimeoutMs,
+    };
+
+    return new Promise((resolve, reject) => {
+      const onResponse = (res: IncomingMessage) => {
+        res.on('data', () => undefined);
+        res.on('end', () => {
+          const status = res.statusCode ?? 0;
+          resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            statusText: res.statusMessage ?? '',
+            headers: res.headers,
+          });
+        });
+      };
+
+      const req = parsedUrl.protocol === 'https:'
+        ? request({ ...requestOptions, servername: parsedUrl.hostname }, onResponse)
+        : httpRequest(requestOptions, onResponse);
+      req.on('timeout', () => req.destroy(new Error('Pinned webhook request timeout')));
+      req.on('error', reject);
+      req.end(body);
     });
   }
 }

@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { RateLimitService } from '../security/RateLimitService.js';
+import { normalizeRateLimit, RateLimitService } from '../security/RateLimitService.js';
 import { MCPEventLogType } from '../types/enums.js';
 import { LogService } from '../log/LogService.js';
 import { createLogger } from '../logger/index.js';
@@ -19,8 +19,14 @@ export class RateLimitMiddleware {
       if (!req.authContext) {
         return next();
       }
+
+      if (req.rateLimitChecked) {
+        req.rateLimitChecked = false;
+        return next();
+      }
       
-      const { userId, rateLimit } = req.authContext;
+      const { userId } = req.authContext;
+      const rateLimit = normalizeRateLimit(req.authContext.rateLimit);
       
       // Check rate limit
       const result = await this.rateLimitService.checkRateLimit(userId, rateLimit);

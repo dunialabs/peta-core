@@ -22,8 +22,11 @@ export class CloudflaredHandler {
     if (!proxyKey) {
       throw new AdminError('Missing required field: proxyKey', AdminErrorCode.INVALID_REQUEST);
     }
-    if (!tunnelId) {
+    if (typeof tunnelId !== 'string' || tunnelId.length === 0) {
       throw new AdminError('Missing required field: tunnelId', AdminErrorCode.INVALID_REQUEST);
+    }
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(tunnelId)) {
+      throw new AdminError('Invalid tunnelId', AdminErrorCode.INVALID_REQUEST);
     }
     if (!subdomain) {
       throw new AdminError('Missing required field: subdomain', AdminErrorCode.INVALID_REQUEST);

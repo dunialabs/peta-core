@@ -1,5 +1,5 @@
 import { ClientSession } from './ClientSession.js';
-import { DisconnectReason, DetailedLogEntry } from '../../types/auth.types.js';
+import { AuthError, AuthErrorType, DisconnectReason, DetailedLogEntry } from '../../types/auth.types.js';
 import { LogService } from '../../log/LogService.js';
 import { ProxySession } from './ProxySession.js';
 import { AuthContext } from '../../types/auth.types.js';
@@ -37,11 +37,15 @@ export class SessionStore {
   private eventStores: Map<string, PersistentEventStore> = new Map(); // New: Manage EventStore
   private sessionLoggers: Map<string, SessionLogger> = new Map(); // New: Manage SessionLogger
   private terminatedSessions: Map<string, TerminatedSessionTombstone> = new Map();
+  private pendingSessions: Set<string> = new Set();
+  private pendingUserSessions: Map<string, number> = new Map();
 
   // Logger for SessionStore
   private logger = createLogger('SessionStore');
   private static readonly SESSION_INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000;
   private static readonly SESSION_RECONNECT_GRACE_MS = 30 * 1000;
+  private static readonly MAX_SESSIONS = Math.max(1, Number.parseInt(process.env.PETA_MAX_SESSIONS ?? '1000', 10) || 1000);
+  private static readonly MAX_SESSIONS_PER_USER = Math.max(1, Number.parseInt(process.env.PETA_MAX_SESSIONS_PER_USER ?? '10', 10) || 10);
 
   static instance: SessionStore = new SessionStore();
 
@@ -62,76 +66,115 @@ export class SessionStore {
     ip: string,
     userAgent: string,
   ): Promise<ClientSession> {
-    if (this.sessions.has(sessionId)) {
+    this.reserveSession(sessionId, userId);
+    let reservationActive = true;
+
+    try {
+
+      // 1. Create ClientSession
+      const clientSession = new ClientSession(sessionId, userId, token, authContext);
+
+      clientSession.updateLastUserInfoRefresh(Date.now());
+
+      // 2. Create EventStore instance
+      const eventStore = new PersistentEventStore(sessionId, userId);
+
+      // 3. Store EventStore
+      this.eventStores.set(sessionId, eventStore);
+
+      // 4. Create SessionLogger with initial HTTP context
+      const tokenMask = maskToken(token);
+      const sessionLogger = new SessionLogger({
+        userId,
+        sessionId,
+        tokenMask,
+        ip,
+        userAgent,
+      });
+
+      // 5. Store SessionLogger
+      this.sessionLoggers.set(sessionId, sessionLogger);
+
+      // 5.5. Log SessionInit event (1301)
+      await sessionLogger.logSessionLifecycle({
+        action: MCPEventLogType.SessionInit,
+      });
+
+      const profile = await discoveryConfigService.getActiveProfile();
+      const instructions =
+        profile && profile.enabled && profile.mode !== 'FLAT' && profile.instructionText
+          ? profile.instructionText
+          : undefined;
+
+      // 6. Create corresponding ProxySession, pass SessionLogger
+      const proxySession = new ProxySession(
+        sessionId,
+        userId,
+        clientSession,
+        sessionLogger,
+        eventStore,
+        (sessionId: string, options?: SessionCloseOptions) =>
+          this.removeSingleSession(sessionId, DisconnectReason.CLIENT_DISCONNECT, options),
+        instructions,
+      );
+
+      // 7. Associate ProxySession with ClientSession
+      clientSession.setProxySession(proxySession);
+
+      // 8. Store to SessionStore
+      this.sessions.set(sessionId, clientSession);
+      this.proxySessions.set(sessionId, proxySession);
+
+      // 9. Add to user session mapping
+      if (!this.userSessions.has(userId)) {
+        this.userSessions.set(userId, new Set());
+      }
+      this.userSessions.get(userId)!.add(sessionId);
+      this.releaseSessionReservation(sessionId, userId);
+      reservationActive = false;
+
+      this.logger.info(
+        { userId, sessionId },
+        'Created complete session with EventStore and SessionLogger',
+      );
+      return clientSession;
+    } finally {
+      if (reservationActive) {
+        this.releaseSessionReservation(sessionId, userId);
+        this.eventStores.delete(sessionId);
+        this.sessionLoggers.delete(sessionId);
+      }
+    }
+  }
+
+  private reserveSession(sessionId: string, userId: string): void {
+    if (this.sessions.has(sessionId) || this.pendingSessions.has(sessionId)) {
       this.logger.warn({ userId, sessionId }, 'Refusing to create duplicate active session');
       throw new Error(`Session already exists: ${sessionId}`);
     }
 
-    // 1. Create ClientSession
-    const clientSession = new ClientSession(sessionId, userId, token, authContext);
-
-    clientSession.updateLastUserInfoRefresh(Date.now());
-
-    // 2. Create EventStore instance
-    const eventStore = new PersistentEventStore(sessionId, userId);
-
-    // 3. Store EventStore
-    this.eventStores.set(sessionId, eventStore);
-
-    // 4. Create SessionLogger with initial HTTP context
-    const tokenMask = maskToken(token);
-    const sessionLogger = new SessionLogger({
-      userId,
-      sessionId,
-      tokenMask,
-      ip,
-      userAgent,
-    });
-
-    // 5. Store SessionLogger
-    this.sessionLoggers.set(sessionId, sessionLogger);
-
-    // 5.5. Log SessionInit event (1301)
-    await sessionLogger.logSessionLifecycle({
-      action: MCPEventLogType.SessionInit,
-    });
-
-    const profile = await discoveryConfigService.getActiveProfile();
-    const instructions =
-      profile && profile.enabled && profile.mode !== 'FLAT' && profile.instructionText
-        ? profile.instructionText
-        : undefined;
-
-    // 6. Create corresponding ProxySession, pass SessionLogger
-    const proxySession = new ProxySession(
-      sessionId,
-      userId,
-      clientSession,
-      sessionLogger,
-      eventStore,
-      (sessionId: string, options?: SessionCloseOptions) =>
-        this.removeSingleSession(sessionId, DisconnectReason.CLIENT_DISCONNECT, options),
-      instructions,
-    );
-
-    // 7. Associate ProxySession with ClientSession
-    clientSession.setProxySession(proxySession);
-
-    // 8. Store to SessionStore
-    this.sessions.set(sessionId, clientSession);
-    this.proxySessions.set(sessionId, proxySession);
-
-    // 9. Add to user session mapping
-    if (!this.userSessions.has(userId)) {
-      this.userSessions.set(userId, new Set());
+    const pendingUserCount = this.pendingUserSessions.get(userId) ?? 0;
+    if (this.sessions.size + this.pendingSessions.size >= SessionStore.MAX_SESSIONS) {
+      throw new AuthError(AuthErrorType.RATE_LIMIT_EXCEEDED, 'MCP session capacity reached', userId);
     }
-    this.userSessions.get(userId)!.add(sessionId);
+    if ((this.userSessions.get(userId)?.size ?? 0) + pendingUserCount >= SessionStore.MAX_SESSIONS_PER_USER) {
+      throw new AuthError(AuthErrorType.RATE_LIMIT_EXCEEDED, 'MCP session capacity reached for user', userId);
+    }
 
-    this.logger.info(
-      { userId, sessionId },
-      'Created complete session with EventStore and SessionLogger',
-    );
-    return clientSession;
+    this.pendingSessions.add(sessionId);
+    this.pendingUserSessions.set(userId, pendingUserCount + 1);
+  }
+
+  private releaseSessionReservation(sessionId: string, userId: string): void {
+    if (!this.pendingSessions.delete(sessionId)) {
+      return;
+    }
+    const pendingUserCount = (this.pendingUserSessions.get(userId) ?? 1) - 1;
+    if (pendingUserCount > 0) {
+      this.pendingUserSessions.set(userId, pendingUserCount);
+    } else {
+      this.pendingUserSessions.delete(userId);
+    }
   }
 
   /**

@@ -29,6 +29,9 @@ import { APP_INFO } from '../config/config.js';
 import { ProxyRepository } from '../repositories/ProxyRepository.js';
 import { UserRequestHandler } from '../user/UserRequestHandler.js';
 import { approvalService } from '../mcp/services/ApprovalService.js';
+import { IpWhitelistService } from '../security/IpWhitelistService.js';
+import { RateLimitService } from '../security/RateLimitService.js';
+import { normalizeIp, resolveClientIp } from '../security/ClientIpResolver.js';
 
 /**
  * Pending request storage item
@@ -57,8 +60,12 @@ export class SocketService {
    * Used to store requests waiting for responses
    */
   private pendingRequests: Map<string, PendingRequest> = new Map();
+  private readonly maxConnectionsPerUser = Math.max(1, Number.parseInt(process.env.PETA_MAX_SOCKET_CONNECTIONS_PER_USER ?? '10', 10) || 10);
 
-  constructor() {
+  constructor(
+    private ipWhitelistService?: IpWhitelistService,
+    private rateLimitService?: RateLimitService,
+  ) {
     this.tokenValidator = new TokenValidator();
   }
 
@@ -116,6 +123,13 @@ export class SocketService {
 
     this.io.use(async (socket, next) => {
       try {
+        if (this.ipWhitelistService) {
+          const peerIp = normalizeIp(socket.handshake.address);
+          const clientIp = resolveClientIp(peerIp, socket.handshake.headers);
+          if (!(await this.ipWhitelistService.isIpAllowed(clientIp))) {
+            return next(new Error('Access denied by IP whitelist'));
+          }
+        }
         // 1. Get token from handshake information (supports two methods)
         const authData = socket.handshake.auth as SocketAuthData;
         const authHeader = socket.handshake.headers.authorization;
@@ -153,13 +167,22 @@ export class SocketService {
         // 4. Handle authentication failure
         if (error instanceof AuthError) {
           this.logger.warn({ error: error.message, type: error.type }, 'Socket authentication failed');
-          return next(new Error(`Authentication failed: ${error.message}`));
+          return next(new Error('Authentication failed'));
         } else {
           this.logger.error({ error }, 'Socket authentication error');
           return next(new Error('Authentication failed'));
         }
       }
     });
+  }
+
+  private async allowUserEvent(socketData: SocketData): Promise<boolean> {
+    if (!this.rateLimitService) return true;
+    const result = await this.rateLimitService.checkRateLimit(
+      socketData.userId,
+      socketData.authContext.rateLimit,
+    );
+    return result.allowed;
   }
 
   /**
@@ -174,6 +197,11 @@ export class SocketService {
       const socketData = socket.data as SocketData;
       const userId = socketData.userId;
 
+      const currentConnections = this.connections.get(userId)?.length ?? 0;
+      if (currentConnections >= this.maxConnectionsPerUser) {
+        socket.disconnect(true);
+        return;
+      }
       this.logger.info({ userId, socketId: socket.id }, 'Client connected');
 
       // 1. Join socket to Room named by userId
@@ -233,6 +261,10 @@ export class SocketService {
 
       // 4.2 Listen for get capabilities request
       socket.on('get_capabilities', async (request: any) => {
+        if (!(await this.allowUserEvent(socketData))) {
+          socket.emit(SOCKET_RESPONSE_EVENT, { requestId: request?.requestId, success: false, error: { code: 1203, message: 'Rate limit exceeded' }, timestamp: Date.now() });
+          return;
+        }
         try {
           // Call UserRequestHandler (transport-agnostic business logic)
           const capabilities = await UserRequestHandler.instance.handleGetCapabilities(userId);
@@ -253,7 +285,7 @@ export class SocketService {
             success: false,
             error: {
               code: 1201, // SERVER_ERROR
-              message: error.message || 'Failed to get capabilities'
+              message: 'Failed to get capabilities'
             },
             timestamp: Date.now()
           };
@@ -264,6 +296,10 @@ export class SocketService {
 
       // 4.3 Listen for set capabilities request
       socket.on('set_capabilities', async (request: any) => {
+        if (!(await this.allowUserEvent(socketData))) {
+          socket.emit(SOCKET_RESPONSE_EVENT, { requestId: request?.requestId, success: false, error: { code: 1203, message: 'Rate limit exceeded' }, timestamp: Date.now() });
+          return;
+        }
         try {
           // Call UserRequestHandler (transport-agnostic business logic)
           await UserRequestHandler.instance.handleSetCapabilities(userId, request.data);
@@ -283,7 +319,7 @@ export class SocketService {
             success: false,
             error: {
               code: 1201, // SERVER_ERROR
-              message: error.message || 'Failed to set capabilities'
+              message: 'Failed to set capabilities'
             },
             timestamp: Date.now()
           };
@@ -294,6 +330,10 @@ export class SocketService {
 
       // 5. Listen for configure Server event
       socket.on('configure_server', async (request: any) => {
+        if (!(await this.allowUserEvent(socketData))) {
+          socket.emit(SOCKET_RESPONSE_EVENT, { requestId: request?.requestId, success: false, error: { code: 1203, message: 'Rate limit exceeded' }, timestamp: Date.now() });
+          return;
+        }
         try {
           // Call UserRequestHandler (transport-agnostic business logic)
           const result = await UserRequestHandler.instance.handleConfigureServer(
@@ -318,7 +358,7 @@ export class SocketService {
             success: false,
             error: {
               code: 1201, // SERVER_ERROR
-              message: error.message || 'Failed to configure server'
+              message: 'Failed to configure server'
             },
             timestamp: Date.now()
           };
@@ -329,6 +369,10 @@ export class SocketService {
 
       // 5.1 Listen for unconfigure Server event
       socket.on('unconfigure_server', async (request: any) => {
+        if (!(await this.allowUserEvent(socketData))) {
+          socket.emit(SOCKET_RESPONSE_EVENT, { requestId: request?.requestId, success: false, error: { code: 1203, message: 'Rate limit exceeded' }, timestamp: Date.now() });
+          return;
+        }
         try {
           // Call UserRequestHandler (transport-agnostic business logic)
           const result = await UserRequestHandler.instance.handleUnconfigureServer(
@@ -352,7 +396,7 @@ export class SocketService {
             success: false,
             error: {
               code: 1201, // SERVER_ERROR
-              message: error.message || 'Failed to unconfigure server'
+              message: 'Failed to unconfigure server'
             },
             timestamp: Date.now()
           };
@@ -374,6 +418,10 @@ export class SocketService {
         };
 
         try {
+          if (!(await this.allowUserEvent(socketData))) {
+            sendAck({ success: false, id: payload?.id ?? '', error: 'Rate limit exceeded' });
+            return;
+          }
           if (!payload?.id || (payload.decision !== 'APPROVED' && payload.decision !== 'REJECTED')) {
             sendAck({ success: false, id: payload?.id ?? '', error: 'Invalid approval_decide payload' });
             return;
@@ -417,7 +465,7 @@ export class SocketService {
           sendAck({ success: true, id: decided.id, decision: payload.decision });
         } catch (error: any) {
           this.logger.error({ error, userId, payload }, 'approval_decide failed');
-          sendAck({ success: false, id: payload?.id ?? '', error: error?.message || 'Failed to process approval decision' });
+          sendAck({ success: false, id: payload?.id ?? '', error: 'Failed to process approval decision' });
         }
       });
 

@@ -100,7 +100,9 @@ export class OAuthService {
     if (!storedSecret) {
       return false;
     }
-    return clientSecret === storedSecret;
+    const presented = Buffer.from(clientSecret);
+    const expected = Buffer.from(storedSecret);
+    return presented.length === expected.length && crypto.timingSafeEqual(presented, expected);
   }
 
   /**

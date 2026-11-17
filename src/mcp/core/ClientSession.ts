@@ -19,6 +19,7 @@ export class ClientSession {
   userId: string;
   token: string;
   lastActive: Date;
+  readonly createdAt: Date;
   status: ClientSessionStatus;
   connection?: Server;
   capabilities?: ClientCapabilities;
@@ -61,6 +62,7 @@ export class ClientSession {
     this.userId = userId;
     this.token = token;
     this.lastActive = new Date();
+    this.createdAt = new Date();
     this.status = ClientSessionStatus.Active;
     this.authContext = authContext;
     this.launchConfigs = authContext.launchConfigs;
@@ -124,8 +126,12 @@ export class ClientSession {
   }
 
   isExpired(now?: Date, timeoutMinutes?: number): boolean {
+    const currentTime = now ?? new Date();
+    if (currentTime.getTime() - this.createdAt.getTime() >= 24 * 60 * 60 * 1000) {
+      return true;
+    }
     // Check if user authorization has expired
-    if (this.authContext.expiresAt && Math.floor(Date.now() / 1000) > this.authContext.expiresAt) {
+    if (this.authContext.expiresAt && Math.floor(currentTime.getTime() / 1000) > this.authContext.expiresAt) {
       return true;
     }
     
@@ -296,7 +302,7 @@ export class ClientSession {
     const isAnonymous = this.authContext.kind === 'anonymous';
     if (isAnonymous && !serverContext.serverEntity.anonymousAccess) return false;
     const serverPermsEnabled = this.permissions[serverID]?.enabled
-      ?? (isAnonymous ? serverContext.serverEntity.anonymousAccess : serverContext.serverEntity.publicAccess);
+      ?? (isAnonymous ? serverContext.serverEntity.anonymousAccess : false);
     const userPreferencesEnabled = this.userPreferences[serverID]?.enabled ?? true;
 
     if (serverContext.serverEntity.allowUserInput) {
@@ -317,21 +323,21 @@ export class ClientSession {
 
     try {
       const serverPerms = serverContext.capabilitiesConfig;
-      if (!serverPerms) return serverContext;
+      if (!serverPerms) return undefined;
       
       switch (type) {
         case 'tool':
-          if (serverPerms.tools[name]?.enabled ?? true) {
+          if (serverPerms.tools?.[name]?.enabled !== false) {
             return serverContext;
           }
           break;
         case 'resource':
-          if (serverPerms.resources[name]?.enabled ?? true) {
+          if (serverPerms.resources?.[name]?.enabled !== false) {
             return serverContext;
           }
           break;
         case 'prompt':
-          if (serverPerms.prompts[name]?.enabled ?? true) {
+          if (serverPerms.prompts?.[name]?.enabled !== false) {
             return serverContext;
           }
           break;
@@ -354,16 +360,16 @@ export class ClientSession {
   }
 
   private canUseToolByServerContext(serverContext: ServerContext, toolName: string): boolean {
+    if (serverContext.capabilitiesConfig.tools?.[toolName]?.enabled === false) return false;
     
     if (serverContext.serverEntity.allowUserInput) {
       if (serverContext.userId !== this.userId) return false;
     } else {
       const serverPerms = this.permissions[serverContext.serverID];
-      const serverPermsEnabled = serverPerms?.tools[toolName]?.enabled ?? true;
-      if (!serverPermsEnabled) return false;
+      if (serverPerms?.tools?.[toolName]?.enabled === false) return false;
     }
     
-    const userPreferencesEnabled = this.userPreferences[serverContext.serverID]?.tools[toolName]?.enabled ?? true;
+    const userPreferencesEnabled = this.userPreferences[serverContext.serverID]?.tools?.[toolName]?.enabled ?? true;
     return userPreferencesEnabled;
   }
 
@@ -378,16 +384,16 @@ export class ClientSession {
   }
 
   private canAccessResourceByServerContext(serverContext: ServerContext, resourceName: string): boolean {
+    if (serverContext.capabilitiesConfig.resources?.[resourceName]?.enabled === false) return false;
     
     if (serverContext.serverEntity.allowUserInput) {
       if (serverContext.userId !== this.userId) return false;
     } else {
       const serverPerms = this.permissions[serverContext.serverID];
-      const serverPermsEnabled = serverPerms?.resources[resourceName]?.enabled ?? true;
-      if (!serverPermsEnabled) return false;
+      if (serverPerms?.resources?.[resourceName]?.enabled === false) return false;
     }
     
-    const userPreferencesEnabled = this.userPreferences[serverContext.serverID]?.resources[resourceName]?.enabled ?? true;
+    const userPreferencesEnabled = this.userPreferences[serverContext.serverID]?.resources?.[resourceName]?.enabled ?? true;
     return userPreferencesEnabled;
   }
 
@@ -402,16 +408,21 @@ export class ClientSession {
 
 
   private canUsePromptByServerContext(serverContext: ServerContext, promptName: string): boolean {
+    if (serverContext.capabilitiesConfig.prompts?.[promptName]?.enabled === false) return false;
+
     if (serverContext.serverEntity.allowUserInput) {
       if (serverContext.userId !== this.userId) return false;
     } else {
       const serverPerms = this.permissions[serverContext.serverID];
-      const serverPermsEnabled = serverPerms?.prompts[promptName]?.enabled ?? true;
-      if (!serverPermsEnabled) return false;
+      if (serverPerms?.prompts?.[promptName]?.enabled === false) return false;
     }
 
-    const userPreferencesEnabled = this.userPreferences[serverContext.serverID]?.prompts[promptName]?.enabled ?? true;
+    const userPreferencesEnabled = this.userPreferences[serverContext.serverID]?.prompts?.[promptName]?.enabled ?? true;
     return userPreferencesEnabled;
+  }
+
+  hasOAuthScope(scope: string): boolean {
+    return this.authContext.oauthScopes === undefined || this.authContext.oauthScopes.includes(scope);
   }
 
   /**
@@ -497,7 +508,7 @@ export class ClientSession {
   }
 
   getDangerLevel(serverID: string, toolName: string): DangerLevel | undefined {
-    const dangerLevel = this.userPreferences[serverID]?.tools[toolName]?.dangerLevel;
+    const dangerLevel = this.userPreferences[serverID]?.tools?.[toolName]?.dangerLevel;
     return dangerLevel;
   }
 
