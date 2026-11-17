@@ -50,6 +50,7 @@ import type { DownstreamMcpClient } from './DownstreamMcpClient.js';
 import { LegacySdkDownstreamClient } from './LegacySdkDownstreamClient.js';
 import { ModernHttpDownstreamClient } from './ModernHttpDownstreamClient.js';
 import { MODERN_MCP_CONFIG } from '../../config/modernMcp.config.js';
+import { sanitizeUrlForLog } from '../../utils/urlUtils.js';
 
 /**
  * Subscription state structure
@@ -879,7 +880,7 @@ export class ServerManager {
     const result: ServerContext[] = [];
     for (const server of availableServers) {
       const enabled =
-        permissions[server.serverEntity.serverId]?.enabled ?? server.serverEntity.publicAccess;
+        permissions[server.serverEntity.serverId]?.enabled ?? false;
       if (!enabled) {
         continue;
       }
@@ -1136,7 +1137,6 @@ export class ServerManager {
         this.logger.info(
           {
             serverId: serverEntity.serverId,
-            originalCommand: runnerMetadata.originalCommand,
             runnerImage: runnerMetadata.runnerImage,
           },
           'CustomStdio command wrapped to runner container',
@@ -1164,7 +1164,7 @@ export class ServerManager {
             throw error;
           }
           this.logger.warn(
-            { error, serverId: serverEntity.serverId, url: resolvedLaunchConfig.url },
+            { error, serverId: serverEntity.serverId, url: sanitizeUrlForLog(resolvedLaunchConfig.url) },
             'Modern HTTP downstream probe failed, falling back to legacy transport',
           );
         }
@@ -1227,7 +1227,6 @@ export class ServerManager {
               this.logger.error(
                 {
                   serverId: serverEntity.serverId,
-                  originalCommand: runnerMetadata.originalCommand,
                   runnerImage: runnerMetadata.runnerImage,
                   category: runnerFailure.category,
                   reason: runnerFailure.reason,
@@ -1274,7 +1273,7 @@ export class ServerManager {
       } catch (error) {
         if (DownstreamTransportFactory.canFallbackHttpToSse(resolvedLaunchConfig, transportType)) {
           this.logger.warn(
-            { error, serverId: serverEntity.serverId, url: resolvedLaunchConfig.url },
+            { error, serverId: serverEntity.serverId, url: sanitizeUrlForLog(resolvedLaunchConfig.url) },
             'Streamable HTTP connection failed, trying SSE fallback',
           );
 
@@ -1320,7 +1319,6 @@ export class ServerManager {
             this.logger.error(
               {
                 serverId: serverEntity.serverId,
-                originalCommand: runnerMetadata.originalCommand,
                 runnerImage: runnerMetadata.runnerImage,
                 category: runnerFailure.category,
                 reason: runnerFailure.reason,

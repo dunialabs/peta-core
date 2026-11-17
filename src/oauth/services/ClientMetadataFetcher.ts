@@ -18,6 +18,7 @@ import {
   type ClientMetadataNetworkValidationResult,
 } from './ClientMetadataNetwork.js';
 import { ClientMetadataValidator } from './ClientMetadataValidator.js';
+import { sanitizeUrlForLog } from '../../utils/urlUtils.js';
 
 export interface ClientMetadataValidationResult {
   valid: boolean;
@@ -62,6 +63,13 @@ export class ClientMetadataFetcher {
         };
       }
 
+      if (parsedUrl.port && parsedUrl.port !== '443') {
+        return {
+          valid: false,
+          error: 'Client metadata URL must use HTTPS port 443',
+        };
+      }
+
       // 2. Check path
       if (parsedUrl.pathname === '/' || parsedUrl.pathname === '') {
         return {
@@ -92,6 +100,7 @@ export class ClientMetadataFetcher {
     clientMetadataUrl: string,
     skipCache: boolean = false
   ): Promise<ClientMetadataValidationResult> {
+    const logUrl = sanitizeUrlForLog(clientMetadataUrl);
     // 1. Validate URL format
     const urlValidation = this.validateClientMetadataUrl(clientMetadataUrl);
     if (!urlValidation.valid) {
@@ -106,7 +115,7 @@ export class ClientMetadataFetcher {
     if (!skipCache) {
       const cached = this.metadataCache.get(clientMetadataUrl);
       if (cached && (Date.now() - cached.fetchedAt < this.CACHE_TTL)) {
-        this.logger.debug({ url: clientMetadataUrl }, 'Client metadata cache hit');
+        this.logger.debug({ url: logUrl }, 'Client metadata cache hit');
         return {
           valid: true,
           metadata: cached.metadata
@@ -115,7 +124,7 @@ export class ClientMetadataFetcher {
     }
 
     // 3. Fetch metadata from URL
-    this.logger.info({ url: clientMetadataUrl }, 'Fetching client metadata from URL');
+    this.logger.info({ url: logUrl }, 'Fetching client metadata from URL');
 
     try {
       const networkValidation = await this.validatePublicNetworkTarget(clientMetadataUrl);
@@ -139,7 +148,7 @@ export class ClientMetadataFetcher {
 
       if (!response.ok) {
         this.logger.warn({
-          url: clientMetadataUrl,
+          url: logUrl,
           status: response.status,
           statusText: response.statusText
         }, 'Failed to fetch client metadata');
@@ -190,11 +199,11 @@ export class ClientMetadataFetcher {
         fetchedAt: Date.now()
       });
 
-      this.logger.info({ url: clientMetadataUrl }, 'Client metadata fetched and cached successfully');
+      this.logger.info({ url: logUrl }, 'Client metadata fetched and cached successfully');
       return validationResult;
 
     } catch (error) {
-      this.logger.error({ error, url: clientMetadataUrl }, 'Error fetching client metadata');
+      this.logger.error({ error, url: logUrl }, 'Error fetching client metadata');
 
       if (error instanceof Error && error.name === 'AbortError') {
         return {
@@ -207,7 +216,7 @@ export class ClientMetadataFetcher {
       return {
         valid: false,
         error: 'invalid_client_metadata',
-        errorDescription: `Error fetching metadata: ${error instanceof Error ? error.message : String(error)}`
+        errorDescription: 'Unable to fetch client metadata'
       };
     }
   }
@@ -248,7 +257,7 @@ export class ClientMetadataFetcher {
   clearCache(clientMetadataUrl?: string): void {
     if (clientMetadataUrl) {
       this.metadataCache.delete(clientMetadataUrl);
-      this.logger.debug({ url: clientMetadataUrl }, 'Cleared metadata cache for URL');
+      this.logger.debug({ url: sanitizeUrlForLog(clientMetadataUrl) }, 'Cleared metadata cache for URL');
     } else {
       this.metadataCache.clear();
       this.logger.info('Cleared all metadata cache');

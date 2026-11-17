@@ -121,7 +121,13 @@ export class ServerContext {
   updateCapabilitiesConfig(newCaps: string) {
     try {
       this.serverEntity.capabilities = newCaps;
-      this.capabilitiesConfig = JSON.parse(newCaps) as ServerConfigCapabilities;
+      const parsedCapabilities = JSON.parse(newCaps) as ServerConfigCapabilities;
+      this.capabilitiesConfig = {
+        ...parsedCapabilities,
+        tools: parsedCapabilities.tools ?? {},
+        resources: parsedCapabilities.resources ?? {},
+        prompts: parsedCapabilities.prompts ?? {},
+      };
     } catch (error) {
       this.logger.error({ error, serverName: this.serverEntity.serverName }, 'Error parsing server capabilities config');
     }
@@ -227,11 +233,11 @@ export class ServerContext {
   }
 
   getDangerLevel(toolName: string): DangerLevel | undefined {
-    return this.capabilitiesConfig.tools[toolName]?.dangerLevel;
+    return this.capabilitiesConfig.tools?.[toolName]?.dangerLevel;
   }
 
   getToolDescription(toolName: string): string {
-    return this.tools?.tools?.find((tool: Tool) => tool.name === toolName)?.description ?? this.capabilitiesConfig.tools[toolName]?.description ?? '';
+    return this.tools?.tools?.find((tool: Tool) => tool.name === toolName)?.description ?? this.capabilitiesConfig.tools?.[toolName]?.description ?? '';
   }
 
   updateStatus(newStatus: ServerStatus) {

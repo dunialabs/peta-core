@@ -60,6 +60,8 @@ describe('AdminAuthMiddleware', () => {
   });
 
   test('allows only documented no-header admin bootstrap and login actions', async () => {
+    const originalBootstrapSecret = process.env.PETA_BOOTSTRAP_SECRET;
+    process.env.PETA_BOOTSTRAP_SECRET = 'b'.repeat(32);
     await withAdminApp({ validateToken: jest.fn() }, async (port) => {
       const url = `http://127.0.0.1:${port}/admin`;
       const post = (body, headers = {}) => fetch(url, {
@@ -70,13 +72,24 @@ describe('AdminAuthMiddleware', () => {
 
       expect((await post({ action: 1016, data: {} })).status).toBe(204);
       expect((await post({ action: 5001, data: {} })).status).toBe(204);
-      expect((await post({ action: 5002, data: { name: 'Peta', proxyKey: 'key' } })).status).toBe(204);
-      expect((await post({ action: 6002, data: { backup: {} } })).status).toBe(204);
-      expect((await post({ action: 1010, data: { role: 1 } })).status).toBe(204);
+      expect((await post({ action: 5002, data: { name: 'Peta', proxyKey: 'key' } })).status).toBe(401);
+      expect((await post({ action: 6002, data: { backup: {} } })).status).toBe(401);
+      expect((await post(
+        { action: 5002, data: { name: 'Peta', proxyKey: 'key' } },
+        { 'X-Peta-Bootstrap-Secret': process.env.PETA_BOOTSTRAP_SECRET },
+      )).status).toBe(204);
+      expect((await post(
+        { action: 6002, data: { backup: {} } },
+        { 'X-Peta-Bootstrap-Secret': process.env.PETA_BOOTSTRAP_SECRET },
+      )).status).toBe(401);
+      expect((await post({ action: 1010, data: { role: 1 } })).status).toBe(401);
+      expect((await post({ action: 1010, data: { role: 1 } }, { 'X-Peta-Bootstrap-Secret': process.env.PETA_BOOTSTRAP_SECRET })).status).toBe(204);
       expect((await post({ action: 1010, data: { role: 2 } })).status).toBe(401);
       expect((await post({ action: 1010, data: {} })).status).toBe(401);
       expect((await post({ action: 1016, data: {} }, { Authorization: 'Bearer malformed' })).status).toBe(401);
       expect((await post({ action: 1016, data: {} }, { Authorization: '' })).status).toBe(401);
     });
+    if (originalBootstrapSecret === undefined) delete process.env.PETA_BOOTSTRAP_SECRET;
+    else process.env.PETA_BOOTSTRAP_SECRET = originalBootstrapSecret;
   });
 });

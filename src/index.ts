@@ -96,7 +96,7 @@ export async function initializeAuthModule() {
   const ipWhitelistMiddleware = new IpWhitelistMiddleware(ipWhitelistService);
 
   // 9. Create authentication middleware
-  const authMiddleware = new AuthMiddleware(tokenValidator);
+  const authMiddleware = new AuthMiddleware(tokenValidator, rateLimitService);
 
   // 9.1. Create admin authentication middleware
   const adminAuthMiddleware = new AdminAuthMiddleware(tokenValidator);
@@ -176,16 +176,11 @@ export async function startApplication() {
     const app = express();
     const configuredTrustProxy = process.env.TRUST_PROXY?.trim();
     if (configuredTrustProxy) {
-      app.set(
-        'trust proxy',
-        configuredTrustProxy === 'true'
-          ? true
-          : configuredTrustProxy === 'false'
-            ? false
-            : /^\d+$/.test(configuredTrustProxy)
-              ? Number(configuredTrustProxy)
-              : configuredTrustProxy,
-      );
+      const trustedProxyIps = (process.env.TRUSTED_PROXY_IPS ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
+      if (configuredTrustProxy !== 'false' && trustedProxyIps.length === 0) {
+        throw new Error('TRUST_PROXY requires an explicit TRUSTED_PROXY_IPS allow-list');
+      }
+      app.set('trust proxy', configuredTrustProxy === 'false' ? false : trustedProxyIps);
     }
     let resultCacheStore: ResultCacheStore = new NoopResultCacheStore();
 
@@ -220,7 +215,7 @@ export async function startApplication() {
           {
             headers: req.headers,
             method: req.method,
-            url: req.url,
+            url: urlUtils.sanitizeRequestUrl(req.url),
           },
           'Received PUT request',
         );
@@ -247,7 +242,7 @@ export async function startApplication() {
           {
             headers: req.headers,
             method: req.method,
-            url: req.url,
+            url: urlUtils.sanitizeRequestUrl(req.url),
           },
           'Received PATCH request',
         );
@@ -275,7 +270,7 @@ export async function startApplication() {
           {
             headers: req.headers,
             method: req.method,
-            url: req.url,
+            url: urlUtils.sanitizeRequestUrl(req.url),
           },
           'Received HEAD request',
         );
@@ -422,7 +417,7 @@ export async function startApplication() {
           {
             headers: req.headers,
             method: req.method,
-            url: req.url,
+            url: urlUtils.sanitizeRequestUrl(req.url),
           },
           'Received OPTIONS request',
         );
@@ -445,6 +440,11 @@ export async function startApplication() {
 
     // ==================== General middleware ====================
 
+    app.use((_req, res, next) => {
+      res.setHeader('Referrer-Policy', 'no-referrer');
+      next();
+    });
+
     // Body parser middleware - must be before middleware that needs to access req.body
     // Increased limit for Skills ZIP file uploads (max 10MB + JSON overhead)
     app.use(express.json({ limit: '15mb' }));
@@ -457,7 +457,7 @@ export async function startApplication() {
         requestLogger.debug(
           {
             method: req.method,
-            url: req.url,
+            url: urlUtils.sanitizeRequestUrl(req.url),
             body: req.body,
           },
           'Received request',
@@ -535,7 +535,7 @@ export async function startApplication() {
 
     // Register user routes (requires valid user token, no role check)
     // Apply user authentication middleware to /user routes
-    app.use('/user', authModule.userAuthMiddleware.authenticate);
+    app.use('/user', authModule.ipWhitelistMiddleware.checkIpWhitelist, authModule.userAuthMiddleware.authenticate, authModule.rateLimitMiddleware.checkRateLimit);
 
     // Register user routes
     authModule.userController.registerRoutes(app);
@@ -604,7 +604,7 @@ export async function startApplication() {
         appLogger.error({ error }, 'Health check error');
         res.status(500).json({
           status: 'unhealthy',
-          error: error instanceof Error ? error.message : String(error),
+          error: 'Internal server error',
         });
       }
     });
@@ -672,7 +672,7 @@ export async function startApplication() {
     // ==================== Initialize Socket.IO ====================
 
     // Create and initialize SocketService
-    const socketService = new SocketService();
+    const socketService = new SocketService(authModule.ipWhitelistService, authModule.rateLimitService);
     socketService.initialize(server);
 
     // Set SocketNotifier

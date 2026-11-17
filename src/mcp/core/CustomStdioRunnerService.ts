@@ -2,6 +2,7 @@ import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { Server } from '@prisma/client';
 import { ServerCategory } from '../../types/enums.js';
 import { assertDockerRuntimeAvailable } from '../../utils/DockerRuntimeProbe.js';
+import { redactError } from '../../utils/logRedaction.js';
 import {
   appendStderrTail,
   buildCustomStdioRunnerLaunchPlan,
@@ -95,7 +96,7 @@ export class CustomStdioRunnerService {
     error?: unknown
   ): RunnerFailureDetails | null {
     const errorText = error instanceof Error ? error.message : error !== undefined ? String(error) : '';
-    const stderrSummary = this.summarizeStderrTail(trace.stderrTail);
+    const stderrSummary = redactError(this.summarizeStderrTail(trace.stderrTail));
     const classification = classifyCustomStdioRunnerFailure(trace.exitCode, trace.stderrTail, errorText);
 
     if (
@@ -115,13 +116,9 @@ export class CustomStdioRunnerService {
       prefix = 'CustomStdio runner command failed';
     }
 
-    let message =
-      `${prefix} (serverId=${serverId}, originalCommand=${runnerMetadata.originalCommand}, ` +
-      `runnerImage=${runnerMetadata.runnerImage}, exitCode=${exitCodeText}, reason=${classification.reason})`;
-
-    if (stderrSummary !== '') {
-      message += ` stderr=${stderrSummary}`;
-    }
+    const message =
+      `${prefix} (serverId=${serverId}, runnerImage=${runnerMetadata.runnerImage}, ` +
+      `exitCode=${exitCodeText}, reason=${classification.reason})`;
 
     return {
       category: classification.category,

@@ -12,11 +12,14 @@ jest.unstable_mockModule('../dist/mcp/core/ClientSession.js', () => ({
     }
     updateLastUserInfoRefresh() {}
     setProxySession() {}
+    async close() {}
   },
 }));
 
 jest.unstable_mockModule('../dist/mcp/core/ProxySession.js', () => ({
-  ProxySession: class {},
+  ProxySession: class {
+    async cleanup() {}
+  },
 }));
 
 jest.unstable_mockModule('../dist/mcp/core/PersistentEventStore.js', () => ({
@@ -24,7 +27,11 @@ jest.unstable_mockModule('../dist/mcp/core/PersistentEventStore.js', () => ({
 }));
 
 jest.unstable_mockModule('../dist/mcp/core/GlobalRequestRouter.js', () => ({
-  GlobalRequestRouter: class {},
+  GlobalRequestRouter: class {
+    static getInstance() {
+      return { cleanupAllSessionNotifications() {}, cleanupSessionNotifications() {} };
+    }
+  },
 }));
 
 jest.unstable_mockModule('../dist/mcp/core/ServerManager.js', () => ({
@@ -67,6 +74,10 @@ describe('SessionStore token masking', () => {
     sessionLoggerData.length = 0;
   });
 
+  afterEach(async () => {
+    await SessionStore.instance.removeAllSessions();
+  });
+
   test('fully redacts a short token in the session audit logger context', async () => {
     const token = '1234567890abcdef';
     await SessionStore.instance.createSession(
@@ -90,5 +101,35 @@ describe('SessionStore token masking', () => {
     );
 
     expect(sessionLoggerData[0].tokenMask).toBe('[redacted]');
+  });
+
+  test('reserves per-user capacity before asynchronous session setup completes', async () => {
+    const attempts = Array.from({ length: 11 }, (_, index) => SessionStore.instance.createSession(
+      `capacity-session-${index}`,
+      'capacity-user',
+      `token-${index}`,
+      {
+        userId: 'capacity-user',
+        token: `token-${index}`,
+        role: 1,
+        status: 1,
+        permissions: {},
+        userPreferences: {},
+        launchConfigs: '{}',
+        authenticatedAt: new Date(),
+        expiresAt: null,
+        rateLimit: 10,
+      },
+      '127.0.0.1',
+      'test-agent',
+    ));
+
+    const results = await Promise.allSettled(attempts);
+    const rejected = results.filter((result) => result.status === 'rejected');
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+
+    expect(fulfilled).toHaveLength(10);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toMatchObject({ type: 'RATE_LIMIT_EXCEEDED' });
   });
 });

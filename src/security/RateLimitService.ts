@@ -7,6 +7,14 @@ export interface RateLimitResult {
   retryAfter?: number;
 }
 
+const DEFAULT_MAX_TRACKED_USERS = 10_000;
+const DEFAULT_MAX_REQUESTS_PER_MINUTE = 100_000;
+
+export function normalizeRateLimit(rateLimit: number): number {
+  if (!Number.isFinite(rateLimit)) return 1;
+  return Math.min(Math.max(Math.floor(rateLimit), 1), DEFAULT_MAX_REQUESTS_PER_MINUTE);
+}
+
 export class RateLimitService {
   private userRequestCounts: Map<string, {
     count: number;
@@ -15,6 +23,10 @@ export class RateLimitService {
   }> = new Map();
   
   private readonly WINDOW_SIZE = 60 * 1000; // 1 minute, milliseconds
+  private readonly MAX_TRACKED_USERS = Math.max(
+    1,
+    Number.parseInt(process.env.PETA_MAX_RATE_LIMIT_USERS ?? String(DEFAULT_MAX_TRACKED_USERS), 10) || DEFAULT_MAX_TRACKED_USERS,
+  );
   
   // Logger for RateLimitService
   private logger = createLogger('RateLimitService');
@@ -26,9 +38,19 @@ export class RateLimitService {
   
   async checkRateLimit(userId: string, rateLimit: number): Promise<RateLimitResult> {
     const now = Date.now();
+    const effectiveRateLimit = normalizeRateLimit(rateLimit);
     const userCount = this.userRequestCounts.get(userId);
     
     if (!userCount) {
+      this.cleanupExpiredCounts(now);
+      if (this.userRequestCounts.size >= this.MAX_TRACKED_USERS) {
+        return {
+          allowed: false,
+          remaining: 0,
+          resetTime: now + this.WINDOW_SIZE,
+          retryAfter: 60,
+        };
+      }
       // First request, create count record
       this.userRequestCounts.set(userId, {
         count: 1,
@@ -38,7 +60,7 @@ export class RateLimitService {
       
       return {
         allowed: true,
-        remaining: rateLimit - 1,
+        remaining: effectiveRateLimit - 1,
         resetTime: now + this.WINDOW_SIZE
       };
     }
@@ -52,13 +74,13 @@ export class RateLimitService {
       
       return {
         allowed: true,
-        remaining: rateLimit - 1,
+        remaining: effectiveRateLimit - 1,
         resetTime: now + this.WINDOW_SIZE
       };
     }
     
     // Check if rate limit exceeded
-    if (userCount.count >= rateLimit) {
+    if (userCount.count >= effectiveRateLimit) {
       const resetTime = userCount.windowStart + this.WINDOW_SIZE;
       const retryAfter = Math.ceil((resetTime - now) / 1000);
 
@@ -76,19 +98,19 @@ export class RateLimitService {
     
     return {
       allowed: true,
-      remaining: rateLimit - userCount.count,
+      remaining: effectiveRateLimit - userCount.count,
       resetTime: userCount.windowStart + this.WINDOW_SIZE
     };
   }
   
   private startCleanupTimer(): void {
-    setInterval(() => {
+    const timer = setInterval(() => {
       this.cleanupExpiredCounts();
     }, 5 * 60 * 1000); // Clean up every 5 minutes
+    timer.unref?.();
   }
   
-  private async cleanupExpiredCounts(): Promise<void> {
-    const now = Date.now();
+  private cleanupExpiredCounts(now: number = Date.now()): void {
     const expiredUsers: string[] = [];
     
     for (const [userId, count] of this.userRequestCounts.entries()) {

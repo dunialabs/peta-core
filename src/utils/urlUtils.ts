@@ -77,3 +77,24 @@ export function getAuthorizationServerUrl(req: Request): string {
 
   return url.toString().replace(/\/$/, ''); // Remove trailing slash
 }
+
+export function sanitizeUrlForLog(value: string): string {
+  try {
+    const url = new URL(value);
+    return url.origin;
+  } catch {
+    return '[invalid-url]';
+  }
+}
+
+export function sanitizeRequestUrl(value: string): string {
+  try {
+    const url = new URL(value, 'http://localhost');
+    for (const key of ['token', 'api_key', 'access_token', 'refresh_token', 'client_secret', 'code']) {
+      if (url.searchParams.has(key)) url.searchParams.set(key, '[REDACTED]');
+    }
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return '[invalid-url]';
+  }
+}

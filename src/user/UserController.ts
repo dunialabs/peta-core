@@ -126,7 +126,9 @@ export class UserController {
         success: false,
         error: {
           code: errorCode,
-          message: error instanceof Error ? error.message : 'Internal server error'
+          message: error instanceof UserError && error.code !== UserErrorCode.INTERNAL_ERROR
+            ? error.message
+            : 'Internal server error'
         }
       };
       res.status(500).json(errorResponse);

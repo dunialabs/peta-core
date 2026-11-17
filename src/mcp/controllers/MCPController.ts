@@ -87,7 +87,9 @@ export class MCPController {
           jsonrpc: '2.0',
           error: {
             code: ErrorCode.InternalError,
-            message: error.message
+            message: error.type === AuthErrorType.INVALID_SESSION
+              ? error.message
+              : 'Authentication failed'
           },
           id: req.body?.id ?? null,
         });
@@ -96,7 +98,7 @@ export class MCPController {
           jsonrpc: '2.0',
           error: {
             code: ErrorCode.InternalError,
-            message: String(error)
+            message: 'Internal server error'
           },
           id: req.body?.id ?? null,
         });
@@ -148,7 +150,7 @@ export class MCPController {
         jsonrpc: '2.0',
         error: {
           code: ErrorCode.InternalError,
-          message: String(error)
+          message: 'Internal server error'
         },
         id: req.body?.id ?? null,
       });
@@ -198,7 +200,7 @@ export class MCPController {
 
       res.status(500).json({
         jsonrpc: '2.0',
-        error: { code: ErrorCode.InternalError, message: String(error) },
+        error: { code: ErrorCode.InternalError, message: 'Internal server error' },
         id: null,
       });
     }

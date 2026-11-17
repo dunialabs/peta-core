@@ -311,7 +311,7 @@ export class OAuthClientService {
       where: { clientId },
     });
 
-    return this.toClientInformation(client, true);
+    return this.toClientInformation(client, false);
   }
 
   async getClientForIssuer(clientId: string, issuer: string): Promise<OAuthClientInformation | null> {
@@ -320,14 +320,14 @@ export class OAuthClientService {
     });
 
     if (client || issuer === 'default') {
-      return this.toClientInformation(client, true);
+      return this.toClientInformation(client, false);
     }
 
     const legacyClient = await this.clients.findFirst({
       where: { clientId, issuer: 'default' },
     });
 
-    return this.toClientInformation(legacyClient, true);
+    return this.toClientInformation(legacyClient, false);
   }
 
   private toClientInformation(client: OAuthClientRecord | null, includeSecret: boolean): OAuthClientInformation | null {
@@ -478,14 +478,16 @@ export class OAuthClientService {
     clientSecret: string,
     issuer?: string,
   ): Promise<boolean> {
-    const client = issuer ? await this.getClientForIssuer(clientId, issuer) : await this.getClient(clientId);
+    const client = issuer
+      ? await this.findClientRecordForIssuer(clientId, issuer)
+      : await this.clients.findUnique({ where: { clientId } });
 
     if (!client) {
       return false;
     }
 
     // Public clients don't need to verify secret
-    if (client.token_endpoint_auth_method === 'none') {
+    if (client.tokenEndpointAuthMethod === 'none') {
       return true;
     }
 
@@ -493,8 +495,14 @@ export class OAuthClientService {
     return await this.oauthService.verifyClientCredentials(
       clientId,
       clientSecret,
-      client.client_secret || null
+      client.clientSecret || null
     );
+  }
+
+  private async findClientRecordForIssuer(clientId: string, issuer: string): Promise<OAuthClientRecord | null> {
+    const client = await this.clients.findFirst({ where: { clientId, issuer } });
+    if (client || issuer === 'default') return client;
+    return this.clients.findFirst({ where: { clientId, issuer: 'default' } });
   }
 
   private validateApplicationType(applicationType: string | undefined): void {

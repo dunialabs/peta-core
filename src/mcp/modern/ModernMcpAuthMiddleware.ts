@@ -47,16 +47,21 @@ export class ModernMcpAuthMiddleware {
       }, 'Modern MCP authentication failed');
       if (error instanceof AuthError) {
         const authError = error.type === AuthErrorType.PERMISSION_DENIED ? 'insufficient_scope' : 'invalid_token';
-        return this.sendAuthError(req, res, authError, error.message);
+        return this.sendAuthError(
+          req,
+          res,
+          authError,
+          error.type === AuthErrorType.PERMISSION_DENIED ? error.message : 'Invalid token',
+        );
       }
-      return this.sendAuthError(req, res, 'invalid_token', error instanceof Error ? error.message : 'Token validation failed');
+      return this.sendAuthError(req, res, 'invalid_token', 'Token validation failed');
     }
   };
 
   private async validateBearerToken(token: string, resource: string): Promise<AuthContext> {
     const result = await this.oauthTokenValidator.validateToken(token, { expectedAudience: resource });
     if (!result.valid || !result.authContext) {
-      throw new AuthError(AuthErrorType.INVALID_TOKEN, result.error ?? 'OAuth token validation failed');
+      throw new AuthError(AuthErrorType.INVALID_TOKEN, 'OAuth token validation failed');
     }
     return result.authContext;
   }

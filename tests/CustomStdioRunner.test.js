@@ -5,6 +5,7 @@ import {
   CUSTOM_STDIO_RUNNER_IMAGE,
   isExplicitDockerCommand,
 } from '../dist/mcp/core/CustomStdioRunner.js';
+const { CustomStdioRunnerService } = await import('../dist/mcp/core/CustomStdioRunnerService.js');
 
 describe('CustomStdioRunner helpers', () => {
   test('normalizes docker command variants correctly', () => {
@@ -77,5 +78,18 @@ describe('CustomStdioRunner helpers', () => {
   test('decodes Uint8Array stderr chunks as utf8 text', () => {
     const chunk = new Uint8Array(Buffer.from('stderr text', 'utf8'));
     expect(appendStderrTail('', chunk, 100)).toBe('stderr text');
+  });
+
+  test('redacts runner diagnostics before exposing startup failures', () => {
+    const details = new CustomStdioRunnerService().buildFailureDetails(
+      'server-1',
+      { runnerImage: CUSTOM_STDIO_RUNNER_IMAGE, originalCommand: 'node --token secret-value' },
+      { stderrTail: 'Authorization: Bearer secret-value token=secret-value', exitCode: 1, signal: null },
+    );
+
+    expect(details).not.toBeNull();
+    expect(details.message).not.toContain('secret-value');
+    expect(details.message).not.toContain('originalCommand');
+    expect(details.stderrSummary).not.toContain('secret-value');
   });
 });

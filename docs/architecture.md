@@ -231,3 +231,8 @@ Result-cache request identity includes every business argument by default, inclu
    - Custom downstream `serverInfo.name` only fills an empty configured label; reconnects do not overwrite an operator-supplied name
 
 ---
+# Security admission and session boundaries
+
+Authenticated MCP sessions are bound to the bearer token used at initialization. Every subsequent request carrying a session ID must present the same bearer credential; OAuth credentials are revalidated against signature, expiry, revocation, audience, and user state. Sessions have inactivity and absolute lifetimes, plus global and per-user caps. Rate-limit admission occurs before session state and event stores are allocated. Legacy handlers apply OAuth scopes to tools, resources, prompts, subscriptions, and completions, and capability authorization is checked before lazy downstream startup.
+
+The HTTP and Socket.IO user surfaces share the IP whitelist. Forwarded IP headers are accepted only from peers listed in `TRUSTED_PROXY_IPS`; whitelist failures deny access. Socket.IO also limits per-user connections and throttles high-cost configuration events.

@@ -451,7 +451,7 @@ export class ModernMcpController {
       } catch (error) {
         if (error instanceof ApprovalRateLimitError) {
           return {
-            content: [{ type: 'text', text: `Approval request rate limited: ${error.message}` }],
+            content: [{ type: 'text', text: 'Approval request rate limited' }],
             isError: false,
             _meta: { approval: { kind: 'approval_rate_limited', status: 'rate_limited' }, retryAfterSeconds: 60 },
           };
@@ -646,7 +646,7 @@ export class ModernMcpController {
     } catch (error) {
       if (error instanceof ApprovalRateLimitError) {
         return {
-          content: [{ type: 'text', text: `Approval request rate limited: ${error.message}` }],
+          content: [{ type: 'text', text: 'Approval request rate limited' }],
           isError: false,
           _meta: { approval: { kind: 'approval_rate_limited', status: 'rate_limited' }, retryAfterSeconds: 60 },
         };
@@ -822,7 +822,8 @@ export class ModernMcpController {
     if (isAnonymous && !serverContext.serverEntity.anonymousAccess) {
       return false;
     }
-    const serverPermsEnabled = authContext.permissions[serverContext.serverID]?.enabled ?? (isAnonymous ? serverContext.serverEntity.anonymousAccess : serverContext.serverEntity.publicAccess);
+    const serverPermsEnabled = authContext.permissions[serverContext.serverID]?.enabled
+      ?? (isAnonymous ? serverContext.serverEntity.anonymousAccess : false);
     const userPreferencesEnabled = authContext.userPreferences[serverContext.serverID]?.enabled ?? true;
     return serverPermsEnabled && userPreferencesEnabled;
   }
@@ -831,30 +832,30 @@ export class ModernMcpController {
     if (!this.canAccessCapability(authContext, serverContext, 'tool', toolName)) {
       return false;
     }
-    if (!serverContext.serverEntity.allowUserInput && authContext.permissions[serverContext.serverID]?.tools[toolName]?.enabled === false) {
+    if (!serverContext.serverEntity.allowUserInput && authContext.permissions[serverContext.serverID]?.tools?.[toolName]?.enabled === false) {
       return false;
     }
-    return authContext.userPreferences[serverContext.serverID]?.tools[toolName]?.enabled ?? true;
+    return authContext.userPreferences[serverContext.serverID]?.tools?.[toolName]?.enabled ?? true;
   }
 
   private canAccessResource(authContext: AuthContext, serverContext: ServerContext, resourceName: string): boolean {
     if (!this.canAccessCapability(authContext, serverContext, 'resource', resourceName)) {
       return false;
     }
-    if (!serverContext.serverEntity.allowUserInput && authContext.permissions[serverContext.serverID]?.resources[resourceName]?.enabled === false) {
+    if (!serverContext.serverEntity.allowUserInput && authContext.permissions[serverContext.serverID]?.resources?.[resourceName]?.enabled === false) {
       return false;
     }
-    return authContext.userPreferences[serverContext.serverID]?.resources[resourceName]?.enabled ?? true;
+    return authContext.userPreferences[serverContext.serverID]?.resources?.[resourceName]?.enabled ?? true;
   }
 
   private canUsePrompt(authContext: AuthContext, serverContext: ServerContext, promptName: string): boolean {
     if (!this.canAccessCapability(authContext, serverContext, 'prompt', promptName)) {
       return false;
     }
-    if (!serverContext.serverEntity.allowUserInput && authContext.permissions[serverContext.serverID]?.prompts[promptName]?.enabled === false) {
+    if (!serverContext.serverEntity.allowUserInput && authContext.permissions[serverContext.serverID]?.prompts?.[promptName]?.enabled === false) {
       return false;
     }
-    return authContext.userPreferences[serverContext.serverID]?.prompts[promptName]?.enabled ?? true;
+    return authContext.userPreferences[serverContext.serverID]?.prompts?.[promptName]?.enabled ?? true;
   }
 
   private canAccessCapability(authContext: AuthContext, serverContext: ServerContext, type: 'tool' | 'resource' | 'prompt', name: string): boolean {
@@ -866,12 +867,12 @@ export class ModernMcpController {
     }
     const capabilitiesConfig = serverContext.capabilitiesConfig;
     if (type === 'tool') {
-      return capabilitiesConfig.tools[name]?.enabled ?? true;
+      return capabilitiesConfig.tools?.[name]?.enabled ?? true;
     }
     if (type === 'resource') {
-      return capabilitiesConfig.resources[name]?.enabled ?? true;
+      return capabilitiesConfig.resources?.[name]?.enabled ?? true;
     }
-    return capabilitiesConfig.prompts[name]?.enabled ?? true;
+    return capabilitiesConfig.prompts?.[name]?.enabled ?? true;
   }
 
   private canUseToolById(authContext: AuthContext, serverID: string, toolName: string): boolean {
@@ -1119,7 +1120,7 @@ export class ModernMcpController {
     if (error instanceof ModernMcpError) {
       return error;
     }
-    return new ModernMcpError(500, ModernErrorCodes.InternalError, error instanceof Error ? error.message : String(error));
+    return new ModernMcpError(500, ModernErrorCodes.InternalError, 'Internal server error');
   }
 
   private acceptsModernResponse(accept: string): boolean {
@@ -1763,7 +1764,7 @@ export class ModernMcpController {
   }
 
   private getUserToolDangerLevel(authContext: AuthContext, serverID: string, toolName: string): DangerLevel | undefined {
-    return authContext.userPreferences[serverID]?.tools[toolName]?.dangerLevel;
+    return authContext.userPreferences[serverID]?.tools?.[toolName]?.dangerLevel;
   }
 
   private cacheScopeContext(authContext: AuthContext): CacheScopeContext {

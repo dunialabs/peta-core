@@ -109,4 +109,31 @@ describe('MCPController POST handling', () => {
     expect(handleRequest).toHaveBeenCalledWith(req, res, initializeRequest);
     expect(res.status).not.toHaveBeenCalled();
   });
+
+  test('does not expose internal downstream error details to MCP clients', async () => {
+    const handleRequest = jest.fn(async () => {
+      throw new Error('connect ECONNREFUSED http://10.0.0.7:8080 /srv/private/config');
+    });
+    getProxySession.mockReturnValue({ handleRequest });
+
+    const controller = new MCPController();
+    const req = {
+      headers: { 'mcp-session-id': 'session-1' },
+      clientSession: { sessionId: 'session-1' },
+      body: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+    };
+    const res = {
+      status: jest.fn(function () { return this; }),
+      json: jest.fn(),
+    };
+
+    await controller.handlePost(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({
+      jsonrpc: '2.0',
+      error: { code: -32603, message: 'Internal server error' },
+      id: 1,
+    });
+  });
 });

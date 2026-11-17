@@ -129,6 +129,13 @@ export class ProxySession {
     return this.clientSession.authContext.tenantId;
   }
 
+  private requireOAuthScope(scope: string): void {
+    const scopes = this.clientSession.authContext?.oauthScopes;
+    if (scopes !== undefined && !scopes.includes(scope)) {
+      throw new McpError(ErrorCode.InvalidRequest, `OAuth scope ${scope} is required`);
+    }
+  }
+
   constructor(
     private sessionId: string,
     private userId: string,
@@ -381,7 +388,7 @@ export class ProxySession {
           jsonrpc: '2.0',
           error: {
             code: ErrorCode.InternalError,
-            message: String(error),
+            message: 'Internal server error',
           },
           id: null,
         });
@@ -456,6 +463,7 @@ export class ProxySession {
     request: ListToolsRequest,
     extra: RequestHandlerExtra<any, any>,
   ): Promise<ListToolsResult> {
+    this.requireOAuthScope('mcp:tools');
     this.logger.debug('Handling tools/list');
 
     const startTime = Date.now();
@@ -539,6 +547,7 @@ export class ProxySession {
     extra: RequestHandlerExtra<any, any>,
     retryCount: number = 0,
   ): Promise<CallToolResult> {
+    this.requireOAuthScope('mcp:tools');
     const startTime = Date.now();
     const toolName = request.params.name;
     this.logger.debug({ toolName }, 'Handling tool call');
@@ -1186,7 +1195,7 @@ export class ProxySession {
         content: [
           {
             type: 'text',
-            text: errorMsg,
+            text: 'Tool execution failed',
           },
         ],
         isError: true,
@@ -1626,6 +1635,7 @@ export class ProxySession {
     request: ListResourcesRequest,
     _extra: RequestHandlerExtra<any, any>,
   ): Promise<ListResourcesResult> {
+    this.requireOAuthScope('mcp:resources');
     this.logger.debug('Handling resources/list');
 
     const startTime = Date.now();
@@ -1650,6 +1660,7 @@ export class ProxySession {
     request: ListResourceTemplatesRequest,
     _extra: RequestHandlerExtra<any, any>,
   ): Promise<ListResourceTemplatesResult> {
+    this.requireOAuthScope('mcp:resources');
     this.logger.debug('Handling resources/templates/list');
 
     const startTime = Date.now();
@@ -1680,6 +1691,7 @@ export class ProxySession {
     extra: RequestHandlerExtra<any, any>,
     retryCount: number = 0,
   ): Promise<ReadResourceResult> {
+    this.requireOAuthScope('mcp:resources');
     const startTime = Date.now();
     const resourceUri = request.params.uri;
     this.logger.debug({ resourceUri }, 'Handling resource read');
@@ -1950,6 +1962,7 @@ export class ProxySession {
     request: SubscribeRequest,
     extra: RequestHandlerExtra<any, any>,
   ): Promise<EmptyResult> {
+    this.requireOAuthScope('mcp:resources');
     const startTime = Date.now();
     const resourceUri = request.params.uri;
     this.logger.debug({ resourceUri }, 'Handling resource subscribe');
@@ -2045,6 +2058,7 @@ export class ProxySession {
     request: UnsubscribeRequest,
     extra: RequestHandlerExtra<any, any>,
   ): Promise<EmptyResult> {
+    this.requireOAuthScope('mcp:resources');
     const startTime = Date.now();
     const resourceUri = request.params.uri;
     this.logger.debug({ resourceUri }, 'Handling resource unsubscribe');
@@ -2071,6 +2085,10 @@ export class ProxySession {
       });
 
       throw new McpError(ErrorCode.InvalidParams, errorMsg);
+    }
+
+    if (!this.clientSession.canAccessResource(result.serverID, result.originalName)) {
+      throw new McpError(ErrorCode.InvalidRequest, `Permission denied for resource: ${resourceUri}`);
     }
 
     try {
@@ -2121,6 +2139,7 @@ export class ProxySession {
     request: ListPromptsRequest,
     _extra: RequestHandlerExtra<any, any>,
   ): Promise<ListPromptsResult> {
+    this.requireOAuthScope('mcp:prompts');
     this.logger.debug('Handling prompts/list');
 
     const startTime = Date.now();
@@ -2147,6 +2166,7 @@ export class ProxySession {
     extra: RequestHandlerExtra<any, any>,
     retryCount: number = 0,
   ): Promise<GetPromptResult> {
+    this.requireOAuthScope('mcp:prompts');
     const promptName = request.params.name;
     this.logger.debug({ promptName }, 'Handling prompt get');
 
@@ -2397,6 +2417,7 @@ export class ProxySession {
     extra: RequestHandlerExtra<any, any>,
     retryCount: number = 0,
   ): Promise<CompleteResult> {
+    this.requireOAuthScope(request.params.ref.type === 'ref/resource' ? 'mcp:resources' : 'mcp:prompts');
     this.logger.debug('Handling completion');
     const startTime = Date.now();
     const uniformRequestId = LogService.getInstance().generateUniformRequestId(this.sessionId);
@@ -2442,6 +2463,13 @@ export class ProxySession {
         ErrorCode.InvalidParams,
         `Invalid completion reference: ${request.params.ref}`,
       );
+    }
+
+    const authorized = request.params.ref.type === 'ref/prompt'
+      ? this.clientSession.canUsePrompt(result.serverID, result.originalName)
+      : this.clientSession.canAccessResource(result.serverID, result.originalName);
+    if (!authorized) {
+      throw new McpError(ErrorCode.InvalidRequest, 'Permission denied for completion reference');
     }
 
     // Ensure server is available (lazy start)

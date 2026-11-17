@@ -20,6 +20,10 @@ process.env.MCP_2026_ENABLED = 'true';
 process.env.MCP_2026_SUPPORTED_VERSIONS = '2025-11-25,2026-07-28';
 const { ModernMcpController } = await import('../dist/mcp/modern/ModernMcpController.js');
 const { ModernErrorCodes } = await import('../dist/mcp/modern/ModernMcpErrors.js');
+
+const grantedPermissions = (serverId = 'server-1') => ({
+  [serverId]: { enabled: true, tools: {}, resources: {}, prompts: {} },
+});
 if (originalModernEnabled === undefined) {
   delete process.env.MCP_2026_ENABLED;
 } else {
@@ -229,6 +233,28 @@ describe('ModernHttpValidation', () => {
     });
   });
 
+  test('does not expose downstream exception details in modern MCP errors', async () => {
+    const controller = new ModernMcpController();
+    jest.spyOn(controller, 'dispatch').mockRejectedValue(new Error('fetch http://10.0.0.8:9000 failed: /srv/private/config'));
+    const req = modernRequest();
+    req.method = 'POST';
+    req.authContext = { userId: 'user-1', permissions: {}, userPreferences: {} };
+    const res = {
+      headersSent: false,
+      status: jest.fn(function () { return this; }),
+      json: jest.fn(),
+    };
+
+    await controller.handlePost(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({
+      jsonrpc: '2.0',
+      error: { code: ModernErrorCodes.InternalError, message: 'Internal server error' },
+      id: 1,
+    });
+  });
+
   test('preserves valid tools/call argument objects including an _meta business key', () => {
     const controller = new ModernMcpController();
     const argumentsValue = { value: 7, _meta: { tenant: 'acme' } };
@@ -304,7 +330,7 @@ describe('ModernHttpValidation', () => {
     const context = {
       uniformRequestId: 'request-1',
       protocolVersion: '2026-07-28',
-      authContext: { userId: 'user-1', oauthScopes: ['mcp:tools', 'mcp:resources', 'mcp:prompts'], permissions: {}, userPreferences: {} },
+      authContext: { userId: 'user-1', oauthScopes: ['mcp:tools', 'mcp:resources', 'mcp:prompts'], permissions: grantedPermissions(), userPreferences: {} },
       req: {},
       res: {
         status: jest.fn(),
@@ -347,7 +373,7 @@ describe('ModernHttpValidation', () => {
     const context = {
       uniformRequestId: 'request-1',
       protocolVersion: '2026-07-28',
-      authContext: { userId: 'user-1', oauthScopes: ['mcp:tools', 'mcp:resources', 'mcp:prompts'], permissions: {}, userPreferences: {} },
+      authContext: { userId: 'user-1', oauthScopes: ['mcp:tools', 'mcp:resources', 'mcp:prompts'], permissions: grantedPermissions(), userPreferences: {} },
       req: {},
       res: { status: jest.fn(), setHeader: jest.fn(), write: jest.fn((chunk) => { chunks.push(chunk); return true; }), end: jest.fn(), on: (_event, handler) => { closeHandler = handler; } },
     };

@@ -238,6 +238,15 @@ export class UserRequestHandler {
     if (!user) {
       throw new UserError(`User ${userId} not found`, UserErrorCode.INTERNAL_ERROR);
     }
+    const userPermissions = typeof user.permissions === 'string'
+      ? JSON.parse(user.permissions || '{}') as Record<string, any>
+      : (user.permissions ?? {}) as Record<string, any>;
+    if (user.permissions !== undefined && userPermissions[serverId]?.enabled !== true) {
+      throw new UserError(
+        `Server ${serverId} is not enabled for this user`,
+        UserErrorCode.SERVER_NOT_ALLOW_USER_INPUT,
+      );
+    }
 
     // 3. Assemble and encrypt launchConfig
     let launchConfig: any;
@@ -548,7 +557,10 @@ export class UserRequestHandler {
         // command, args, and cwd are immutable (set by admin)
         // env is merged: admin defaults + user overrides (user wins on key collision)
         const adminEnv = stdioTemplate.env ?? {};
-        const userEnvOverrides = stdioEnv ?? {};
+        const requestedEnvOverrides = stdioEnv ?? {};
+        const userEnvOverrides = Object.fromEntries(
+          Object.entries(requestedEnvOverrides).filter(([key]) => Object.prototype.hasOwnProperty.call(adminEnv, key)),
+        );
 
         launchConfig = {
           command: stdioTemplate.command,
@@ -764,7 +776,19 @@ export class UserRequestHandler {
     const mcpJsonConf = template.mcpJsonConf;
 
     // 4. Deep copy configuration object
-    let processedConfig = JSON.parse(JSON.stringify(mcpJsonConf));
+    let processedConfig = typeof mcpJsonConf === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(mcpJsonConf);
+          } catch {
+            throw new UserError('configTemplate.mcpJsonConf is invalid JSON', UserErrorCode.SERVER_CONFIG_INVALID);
+          }
+        })()
+      : JSON.parse(JSON.stringify(mcpJsonConf));
+    if (!this.isPlainRecord(processedConfig)) {
+      throw new UserError('configTemplate.mcpJsonConf must be an object', UserErrorCode.SERVER_CONFIG_INVALID);
+    }
+    const mutableConfig = processedConfig as Record<string, any>;
 
     // 5. Validate and apply authConf
     if (!authConf || authConf.length === 0) {
@@ -773,6 +797,10 @@ export class UserRequestHandler {
         UserErrorCode.SERVER_CONFIG_INVALID,
       );
     }
+
+    const credentialDefinitions = this.parseCredentialDefinitions(template.credentials);
+    const allowedKeys = new Set(credentialDefinitions.map((credential) => credential.key));
+    const seenKeys = new Set<string>();
 
     for (const auth of authConf) {
       // Validate input
@@ -787,44 +815,104 @@ export class UserRequestHandler {
         );
       }
 
-      if (auth.dataType === 1) {
-        // String replacement method
-        const configStr = JSON.stringify(processedConfig);
+      if (!allowedKeys.has(auth.key) || seenKeys.has(auth.key)) {
+        throw new UserError(
+          `Credential key is not declared by the administrator: ${auth.key}`,
+          UserErrorCode.SERVER_CONFIG_INVALID,
+        );
+      }
+      seenKeys.add(auth.key);
 
-        // Check if key exists in configuration
-        if (!configStr.includes(auth.key)) {
+      if (auth.dataType === 1) {
+        if (!this.containsCredentialPlaceholder(processedConfig, auth.key)) {
           this.logger.warn({ key: auth.key }, 'Placeholder not found in configuration');
         }
-
-        // Execute replacement (use split/join to avoid regex injection)
-        const updatedConfigStr = configStr.split(auth.key).join(auth.value);
-
-        // Validate JSON validity after replacement
-        try {
-          processedConfig = JSON.parse(updatedConfigStr);
-        } catch (error: any) {
-          throw new UserError(
-            `Configuration became invalid after credential replacement: ${error.message}`,
-            UserErrorCode.SERVER_CONFIG_INVALID,
-          );
-        }
+        this.replaceCredentialPlaceholder(processedConfig, auth.key, auth.value);
       }
       // TODO: Support other dataTypes (if needed in the future)
     }
 
     // Handle OAuth expiration dates dynamically
-    if (template.authType === ServerAuthType.NotionAuth && !processedConfig.oauth?.expiresAt) {
-      processedConfig.oauth = processedConfig.oauth || {};
-      processedConfig.oauth.expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
+    if (template.authType === ServerAuthType.NotionAuth && !mutableConfig.oauth?.expiresAt) {
+      mutableConfig.oauth = mutableConfig.oauth || {};
+      mutableConfig.oauth.expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
     } else if (
       template.authType === ServerAuthType.FigmaAuth &&
-      !processedConfig.oauth?.expiresAt
+      !mutableConfig.oauth?.expiresAt
     ) {
-      processedConfig.oauth = processedConfig.oauth || {};
-      processedConfig.oauth.expiresAt = Date.now() + 90 * 24 * 60 * 60 * 1000;
+      mutableConfig.oauth = mutableConfig.oauth || {};
+      mutableConfig.oauth.expiresAt = Date.now() + 90 * 24 * 60 * 60 * 1000;
     }
 
     return processedConfig;
+  }
+
+  private parseCredentialDefinitions(value: unknown): Array<{ key: string }> {
+    let definitions = value;
+    if (typeof definitions === 'string') {
+      try {
+        definitions = JSON.parse(definitions);
+      } catch {
+        throw new UserError('configTemplate.credentials is invalid JSON', UserErrorCode.SERVER_CONFIG_INVALID);
+      }
+    }
+    if (!Array.isArray(definitions)) {
+      throw new UserError('configTemplate.credentials must be an array', UserErrorCode.SERVER_CONFIG_INVALID);
+    }
+    return definitions.map((definition) => {
+      if (!this.isPlainRecord(definition) || typeof definition.key !== 'string' || definition.key.length === 0) {
+        throw new UserError('configTemplate.credentials contains an invalid key', UserErrorCode.SERVER_CONFIG_INVALID);
+      }
+      return { key: definition.key };
+    });
+  }
+
+  private containsCredentialPlaceholder(value: unknown, key: string, field?: string): boolean {
+    if (typeof value === 'string') {
+      return value.includes(key) && !this.isImmutableLaunchField(field);
+    }
+    if (Array.isArray(value)) {
+      return value.some((item) => this.containsCredentialPlaceholder(item, key, field));
+    }
+    if (this.isPlainRecord(value)) {
+      return Object.entries(value).some(([name, item]) =>
+        this.containsCredentialPlaceholder(item, key, name),
+      );
+    }
+    return false;
+  }
+
+  private replaceCredentialPlaceholder(value: unknown, key: string, replacement: string, field?: string): void {
+    if (this.isImmutableLaunchField(field)) {
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (let index = 0; index < value.length; index += 1) {
+        const item = value[index];
+        if (typeof item === 'string') {
+          value[index] = item.split(key).join(replacement);
+        } else {
+          this.replaceCredentialPlaceholder(item, key, replacement, field);
+        }
+      }
+      return;
+    }
+    if (this.isPlainRecord(value)) {
+      for (const [name, item] of Object.entries(value)) {
+        if (this.isImmutableLaunchField(name)) {
+          continue;
+        }
+        if (typeof item === 'string') {
+          value[name] = item.split(key).join(replacement);
+        } else {
+          this.replaceCredentialPlaceholder(item, key, replacement, name);
+        }
+      }
+    }
+  }
+
+  private isImmutableLaunchField(field?: string): boolean {
+    return field === 'command' || field === 'args' || field === 'cwd' || field === 'type' || field === 'url';
   }
 
   /**

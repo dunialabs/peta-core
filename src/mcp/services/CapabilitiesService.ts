@@ -88,18 +88,18 @@ export class CapabilitiesService {
     for (const [serverId, serverConfig] of Object.entries(userPreferences)) {
       if (capabilities[serverId]) {
         capabilities[serverId].enabled = serverConfig.enabled;
-        for (const [toolName, toolConfig] of Object.entries(serverConfig.tools)) {
+        for (const [toolName, toolConfig] of Object.entries(serverConfig.tools ?? {})) {
           if (capabilities[serverId].tools && capabilities[serverId].tools[toolName]) {
             capabilities[serverId].tools[toolName].enabled = toolConfig.enabled;
             capabilities[serverId].tools[toolName].dangerLevel = toolConfig.dangerLevel ?? DangerLevel.Silent;
           }
         }
-        for (const [resourceName, resourceConfig] of Object.entries(serverConfig.resources)) {
+        for (const [resourceName, resourceConfig] of Object.entries(serverConfig.resources ?? {})) {
           if (capabilities[serverId].resources && capabilities[serverId].resources[resourceName]) {
             capabilities[serverId].resources[resourceName].enabled = resourceConfig.enabled;
           }
         }
-        for (const [promptName, promptConfig] of Object.entries(serverConfig.prompts)) {
+        for (const [promptName, promptConfig] of Object.entries(serverConfig.prompts ?? {})) {
           if (capabilities[serverId].prompts && capabilities[serverId].prompts[promptName]) {
             capabilities[serverId].prompts[promptName].enabled = promptConfig.enabled;
           }
@@ -134,7 +134,7 @@ export class CapabilitiesService {
       const configTemplate = server.allowUserInput ? server.configTemplate ?? '{}' : '{}';
 
       const serverId = server.serverId;
-      const enabled = permissions[serverId]?.enabled ?? server.publicAccess;
+      const enabled = permissions[serverId]?.enabled ?? false;
 
       // Get server capability configuration
       let serverContext: ServerContext | undefined;

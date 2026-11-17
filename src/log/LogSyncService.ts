@@ -10,6 +10,8 @@ import { LogSyncConfig } from './LogSyncConfig.js';
 import { LogService } from './LogService.js';
 import { MCPEventLogType } from '../types/enums.js';
 import { createLogger } from '../logger/index.js';
+import { ClientMetadataNetwork } from '../oauth/services/ClientMetadataNetwork.js';
+import { sanitizeUrlForLog } from '../utils/urlUtils.js';
 
 export class LogSyncService {
   private static instance: LogSyncService = new LogSyncService();
@@ -19,6 +21,7 @@ export class LogSyncService {
   private webhookUrl: string | null = null;
   private isShuttingDown: boolean = false;
   private isSyncing: boolean = false;
+  private readonly network = new ClientMetadataNetwork(LogSyncConfig.HTTP_TIMEOUT, 1024 * 1024);
   
   // Logger for LogSyncService
   private logger = createLogger('LogSyncService');
@@ -178,21 +181,28 @@ export class LogSyncService {
     // Try to send, retry once on failure
     for (let attempt = 0; attempt <= LogSyncConfig.RETRY_COUNT; attempt++) {
       try {
-        const response = await fetch(this.webhookUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'PETA-MCP-Console-LogSync/1.0'
-          },
-          body: JSON.stringify({
-            logs: logs,
+        const networkValidation = await this.network.validatePublicNetworkTarget(this.webhookUrl, { allowFakeIp: false });
+        if (!networkValidation.valid) {
+          this.logger.error({ url: sanitizeUrlForLog(this.webhookUrl), reason: networkValidation.error }, 'Refusing unsafe log webhook URL');
+          return false;
+        }
+        const response = await this.network.postPinnedJson(
+          this.webhookUrl,
+          networkValidation.addresses ?? [],
+          JSON.stringify({
+            logs,
             count: logs.length,
-            timestamp: Date.now()
+            timestamp: Date.now(),
           }),
-          signal: AbortSignal.timeout(LogSyncConfig.HTTP_TIMEOUT)
-        });
+          {
+            'Content-Type': 'application/json',
+            'User-Agent': 'PETA-MCP-Console-LogSync/1.0',
+          },
+        );
 
-        if (response.ok) {
+        if (response.status >= 300 && response.status < 400) {
+          lastError = new Error('Webhook redirects are not allowed');
+        } else if (response.ok) {
           if (attempt > 0) {
             this.logger.info({ attempt }, 'Successfully sent logs on retry attempt');
           }

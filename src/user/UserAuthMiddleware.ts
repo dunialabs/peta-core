@@ -58,7 +58,7 @@ export class UserAuthMiddleware {
           success: false,
           error: {
             code: UserErrorCode.UNAUTHORIZED,
-            message: error instanceof Error ? error.message : 'Authentication failed'
+            message: 'Authentication failed'
           }
         });
       }

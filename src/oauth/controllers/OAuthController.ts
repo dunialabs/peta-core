@@ -16,6 +16,7 @@ import { fileURLToPath } from 'url';
 import { createLogger } from '../../logger/index.js';
 import { ProxyRepository } from '../../repositories/ProxyRepository.js';
 import { getAuthorizationServerUrl, getPublicUrl } from '../../utils/urlUtils.js';
+import crypto from 'node:crypto';
 import {
   DeskAuthorizationParams,
   deskAuthorizationFlowService,
@@ -300,6 +301,7 @@ export class OAuthController {
         .replace(/&/g, '\\u0026');
 
       html = html
+        .replace('{{CSP_NONCE}}', crypto.randomBytes(24).toString('base64'))
         .replace('__CLIENT_NAME__', this.escapeHtml(client.client_name || 'Unknown Application'))
         .replace('{{SCOPE_LIST}}', scopeListHtml)
         .replace('{{CLIENT_ID}}', jsEscape(client_id as string))
@@ -312,6 +314,9 @@ export class OAuthController {
         .replace('{{DESK_FLOW_ID}}', jsEscape(deskFlow.flowId))
         .replace('{{PROXY_KEY}}', jsEscape(proxyKey));
 
+      const nonce = html.match(/<script nonce="([^"]+)"/)?.[1];
+      res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'self'`);
+      res.setHeader('Referrer-Policy', 'no-referrer');
       res.setHeader('Content-Type', 'text/html');
       res.send(html);
     } catch (error) {

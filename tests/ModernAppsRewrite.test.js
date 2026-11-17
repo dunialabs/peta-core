@@ -34,6 +34,10 @@ const { ModernMcpController } = await import('../dist/mcp/modern/ModernMcpContro
 const { modernSubscriptionBus } = await import('../dist/mcp/modern/ModernSubscriptionBus.js');
 const { ResultCacheService } = await import('../dist/mcp/core/cache/ResultCacheService.js');
 
+const grantedPermissions = (serverId = 'server-1') => ({
+  [serverId]: { enabled: true, tools: {}, resources: {}, prompts: {} },
+});
+
 function createServerContext() {
   return {
     id: 'ctx-1',
@@ -70,7 +74,7 @@ describe('ModernAppsRewrite', () => {
   test('rewrites MCP app resource URIs in tool metadata', () => {
     const controller = new ModernMcpController();
     const result = controller.listTools({
-      authContext: { userId: 'user-1', permissions: {}, userPreferences: {} },
+      authContext: { userId: 'user-1', permissions: grantedPermissions(), userPreferences: {} },
       clientCapabilities: { extensions: { 'io.modelcontextprotocol/ui': { mimeTypes: ['text/html;profile=mcp-app'] } } },
     });
 
@@ -80,7 +84,7 @@ describe('ModernAppsRewrite', () => {
 
   test('preserves text-only tools while removing UI metadata for clients without MCP Apps', () => {
     const result = new ModernMcpController().listTools({
-      authContext: { userId: 'user-1', permissions: {}, userPreferences: {} },
+      authContext: { userId: 'user-1', permissions: grantedPermissions(), userPreferences: {} },
       clientCapabilities: {},
     });
 
@@ -89,13 +93,28 @@ describe('ModernAppsRewrite', () => {
     expect(result.tools[0]._meta).toBeUndefined();
   });
 
+  test('treats omitted permission maps as empty maps', () => {
+    serverManagerInstance.availableServers[0].capabilitiesConfig = { tools: {} };
+    const result = new ModernMcpController().listTools({
+      authContext: {
+        userId: 'user-1',
+        permissions: { 'server-1': { enabled: true } },
+        userPreferences: { 'server-1': { enabled: true } },
+      },
+      clientCapabilities: {},
+    });
+
+    expect(result.tools).toHaveLength(1);
+    expect(result.tools[0].name).toBe('openApp_-_ctx-1');
+  });
+
   test('filters tools with invalid x-mcp-header annotations from list results', () => {
     const serverContext = serverManagerInstance.availableServers[0];
     serverContext.tools.tools.push({ name: 'badHeader', inputSchema: { type: 'object', properties: { nested: { type: 'object', 'x-mcp-header': 'bad' } } } });
     serverContext.tools.tools.push({ name: 'badHeaderName', inputSchema: { type: 'object', properties: { tenant: { type: 'string', 'x-mcp-header': 'bad header' } } } });
     serverContext.tools.tools.push({ name: 'duplicateHeader', inputSchema: { type: 'object', properties: { left: { type: 'string', 'x-mcp-header': 'tenant' }, right: { type: 'string', 'x-mcp-header': 'Tenant' } } } });
     const controller = new ModernMcpController();
-    const result = controller.listTools({ authContext: { userId: 'user-1', permissions: {}, userPreferences: {} } });
+    const result = controller.listTools({ authContext: { userId: 'user-1', permissions: grantedPermissions(), userPreferences: {} } });
 
     expect(result.tools.map((tool) => tool.name)).toEqual(['openApp_-_ctx-1']);
   });
@@ -123,7 +142,7 @@ describe('ModernAppsRewrite', () => {
   test('subscribes and cleans up downstream resource subscriptions', async () => {
     const controller = new ModernMcpController();
     const filter = controller.buildSubscriptionFilter({ notifications: { resourceSubscriptions: ['ui://app_-_ctx-1'] } });
-    const context = { authContext: { userId: 'user-1', permissions: {}, userPreferences: {} } };
+    const context = { authContext: { userId: 'user-1', permissions: grantedPermissions(), userPreferences: {} } };
 
     const subscriptions = await controller.subscribeModernResources(context, filter, 'sub-1');
     await controller.cleanupModernResourceSubscriptions(context, 'sub-1', subscriptions);
@@ -143,7 +162,7 @@ describe('ModernAppsRewrite', () => {
     });
     const controller = new ModernMcpController();
     const filter = controller.buildSubscriptionFilter({ notifications: { resourceSubscriptions: ['ui://app_-_ctx-1', 'ui://second_-_ctx-1'] } });
-    const context = { authContext: { userId: 'user-1', permissions: {}, userPreferences: {} } };
+    const context = { authContext: { userId: 'user-1', permissions: grantedPermissions(), userPreferences: {} } };
 
     await expect(controller.subscribeModernResources(context, filter, 'sub-1')).rejects.toThrow('subscribe failed');
 
@@ -158,7 +177,7 @@ describe('ModernAppsRewrite', () => {
     const context = {
       uniformRequestId: 'request-1',
       protocolVersion: '2026-07-28',
-      authContext: { userId: 'user-1', permissions: {}, userPreferences: {} },
+      authContext: { userId: 'user-1', permissions: grantedPermissions(), userPreferences: {} },
       req: {},
       res: { status: jest.fn(), setHeader: jest.fn(), write: jest.fn((chunk) => { chunks.push(chunk); return true; }), end: jest.fn(), on: (_event, handler) => { closeHandler = handler; } },
     };
@@ -187,7 +206,7 @@ describe('ModernAppsRewrite', () => {
       authContext: {
         userId: 'user-1',
         oauthAccessTokenExpiresAt: (Date.now() + 1_000) / 1_000,
-        permissions: {},
+        permissions: grantedPermissions(),
         userPreferences: {},
       },
       req: {},
@@ -251,7 +270,7 @@ describe('ModernAppsRewrite', () => {
         context: {
           uniformRequestId,
           protocolVersion: '2026-07-28',
-          authContext: { userId: 'user-1', oauthScopes: ['mcp:resources'], permissions: {}, userPreferences: {} },
+          authContext: { userId: 'user-1', oauthScopes: ['mcp:resources'], permissions: grantedPermissions(), userPreferences: {} },
           req: { headers: {} },
           res: { status: jest.fn(), setHeader: jest.fn(), write: jest.fn(() => true), end: jest.fn(), on: (_event, handler) => { closeHandler = handler; } },
         },
@@ -279,7 +298,7 @@ describe('ModernAppsRewrite', () => {
     serverManagerInstance.contexts.set('server-2', secondContext);
     const controller = new ModernMcpController();
     const filter = controller.buildSubscriptionFilter({ serverIds: ['server-2'], notifications: { resourceSubscriptions: ['ui://app'] } });
-    const context = { authContext: { userId: 'user-1', permissions: {}, userPreferences: {} } };
+    const context = { authContext: { userId: 'user-1', permissions: grantedPermissions('server-2'), userPreferences: {} } };
 
     const subscriptions = await controller.subscribeModernResources(context, filter, 'sub-1');
 
@@ -289,7 +308,7 @@ describe('ModernAppsRewrite', () => {
 
   test('rejects forged gateway names for unadvertised capabilities', () => {
     const controller = new ModernMcpController();
-    const authContext = { userId: 'user-1', permissions: {}, userPreferences: {} };
+    const authContext = { userId: 'user-1', permissions: grantedPermissions(), userPreferences: {} };
 
     expect(controller.resolveToolName(authContext, 'missingTool_-_ctx-1')).toBeNull();
     expect(controller.resolveResourceUri(authContext, 'missing://resource_-_ctx-1')).toBeNull();
@@ -307,7 +326,7 @@ describe('ModernAppsRewrite', () => {
       contextId === temporaryContext.id && userId === temporaryContext.userId ? temporaryContext : undefined
     ));
     const controller = new ModernMcpController();
-    const context = { authContext: { userId: 'user-1', permissions: {}, userPreferences: {} } };
+    const context = { authContext: { userId: 'user-1', permissions: grantedPermissions(), userPreferences: {} } };
     const scopedEvent = {
       method: 'notifications/resources/updated',
       serverId: 'server-1',
@@ -339,7 +358,7 @@ describe('ModernAppsRewrite', () => {
     try {
       const controller = new ModernMcpController();
       const result = await controller.readResource(
-        { authContext: { userId: 'user-1', token: 'test-token-test-token', permissions: {}, userPreferences: {} }, req: { headers: {} } },
+        { authContext: { userId: 'user-1', token: 'test-token-test-token', permissions: grantedPermissions(), userPreferences: {} }, req: { headers: {} } },
         { jsonrpc: '2.0', id: 1, method: 'resources/read', params: { uri: 'ui://app_-_ctx-1' } },
         Date.now(),
       );

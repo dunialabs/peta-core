@@ -16,6 +16,10 @@ jest.unstable_mockModule('../dist/log/LogService.js', () => ({
 
 const { ModernMcpController } = await import('../dist/mcp/modern/ModernMcpController.js');
 
+const grantedPermissions = (serverId = 'server-1') => ({
+  [serverId]: { enabled: true, tools: {}, resources: {}, prompts: {} },
+});
+
 describe('ModernServerDiscover', () => {
   beforeEach(() => {
     availableServers = [];
@@ -47,7 +51,7 @@ describe('ModernServerDiscover', () => {
       connection: { protocolEra: 'legacy' },
       serverEntity: { enabled: true, allowUserInput: false, publicAccess: true },
     }];
-    const result = new ModernMcpController().serverDiscover({ authContext: { permissions: {}, userPreferences: {} }, clientCapabilities: {} });
+    const result = new ModernMcpController().serverDiscover({ authContext: { permissions: grantedPermissions(), userPreferences: {} }, clientCapabilities: {} });
 
     expect(result.capabilities.tools).toEqual({});
     expect(result.capabilities.resources).toEqual({});
@@ -66,7 +70,7 @@ describe('ModernServerDiscover', () => {
     }];
 
     const result = new ModernMcpController().serverDiscover({
-      authContext: { userId: 'user-1', permissions: {}, userPreferences: {} },
+      authContext: { userId: 'user-1', permissions: grantedPermissions(), userPreferences: {} },
     });
 
     expect(result.capabilities.tools).toEqual({});
@@ -86,7 +90,7 @@ describe('ModernServerDiscover', () => {
     }];
 
     const result = new ModernMcpController().serverDiscover({
-      authContext: { userId: 'user-1', permissions: {}, userPreferences: {} },
+      authContext: { userId: 'user-1', permissions: grantedPermissions(), userPreferences: {} },
     });
 
     expect(result.capabilities.tools).toEqual({});
@@ -106,9 +110,9 @@ describe('ModernServerDiscover', () => {
       serverEntity: { enabled: true, allowUserInput: false, publicAccess: true },
     }];
     const controller = new ModernMcpController();
-    const unsupported = controller.serverDiscover({ authContext: { permissions: {}, userPreferences: {} }, clientCapabilities: {} });
+    const unsupported = controller.serverDiscover({ authContext: { permissions: grantedPermissions(), userPreferences: {} }, clientCapabilities: {} });
     const supported = controller.serverDiscover({
-      authContext: { permissions: {}, userPreferences: {} },
+      authContext: { permissions: grantedPermissions(), userPreferences: {} },
       clientCapabilities: { extensions: { 'io.modelcontextprotocol/ui': { mimeTypes: ['text/html;profile=mcp-app'] } } },
     });
 
@@ -136,7 +140,7 @@ describe('ModernServerDiscover', () => {
       serverEntity: { enabled: true, allowUserInput: false, publicAccess: true },
     }];
     const controller = new ModernMcpController();
-    const result = controller.serverDiscover({ authContext: { userId: 'user-1', permissions: {}, userPreferences: {} } });
+    const result = controller.serverDiscover({ authContext: { userId: 'user-1', permissions: grantedPermissions(), userPreferences: {} } });
 
     expect(result.capabilities.tools).toEqual({ listChanged: true });
     expect(result.capabilities.resources).toEqual({ listChanged: true, subscribe: true });
@@ -154,7 +158,7 @@ describe('ModernServerDiscover', () => {
       serverEntity: { enabled: true, allowUserInput: false, publicAccess: true },
     }];
     const controller = new ModernMcpController();
-    const result = controller.serverDiscover({ authContext: { userId: 'user-1', permissions: {}, userPreferences: {} } });
+    const result = controller.serverDiscover({ authContext: { userId: 'user-1', permissions: grantedPermissions(), userPreferences: {} } });
 
     expect(result.capabilities.tools).toEqual({});
     expect(result.capabilities.resources).toEqual({});

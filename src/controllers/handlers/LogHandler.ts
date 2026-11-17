@@ -3,6 +3,8 @@ import { ProxyRepository } from '../../repositories/ProxyRepository.js';
 import { LogRepository } from '../../repositories/LogRepository.js';
 import { LogSyncService } from '../../log/LogSyncService.js';
 import { createLogger } from '../../logger/index.js';
+import { ClientMetadataNetwork } from '../../oauth/services/ClientMetadataNetwork.js';
+import { sanitizeUrlForLog } from '../../utils/urlUtils.js';
 
 /**
  * Log operation handler (7000-7099)
@@ -10,6 +12,7 @@ import { createLogger } from '../../logger/index.js';
 export class LogHandler {
   // Logger for LogHandler
   private logger = createLogger('LogHandler');
+  private readonly network = new ClientMetadataNetwork(5000, 1);
   
   constructor() {}
 
@@ -36,7 +39,15 @@ export class LogHandler {
         if (url.protocol !== 'http:' && url.protocol !== 'https:') {
           throw new AdminError('webhookUrl must use http or https protocol', AdminErrorCode.INVALID_REQUEST);
         }
+        if (url.username || url.password || (url.port && url.port !== '80' && url.port !== '443')) {
+          throw new AdminError('webhookUrl must not contain credentials or a non-default port', AdminErrorCode.INVALID_REQUEST);
+        }
+        const networkValidation = await this.network.validatePublicNetworkTarget(webhookUrl, { allowFakeIp: false });
+        if (!networkValidation.valid) {
+          throw new AdminError(networkValidation.error || 'webhookUrl must target a public host', AdminErrorCode.INVALID_REQUEST);
+        }
       } catch (error) {
+        if (error instanceof AdminError) throw error;
         throw new AdminError('Invalid webhookUrl format', AdminErrorCode.INVALID_REQUEST);
       }
     }
@@ -56,7 +67,7 @@ export class LogHandler {
     this.logger.info({
       proxyId: proxy.id,
       proxyName: proxy.name,
-      webhookUrl: webhookUrl || 'disabled'
+      webhookUrl: webhookUrl ? sanitizeUrlForLog(webhookUrl) : 'disabled'
     }, 'Webhook URL updated for proxy');
 
     return {

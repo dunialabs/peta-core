@@ -4,6 +4,7 @@ const getSession = jest.fn();
 const createSession = jest.fn();
 const consumeTerminatedSession = jest.fn();
 const getSessionLogger = jest.fn();
+const removeAllUserSessions = jest.fn();
 const validateTraditionalToken = jest.fn();
 const validateOAuthToken = jest.fn();
 const findAnonymousServers = jest.fn();
@@ -17,6 +18,7 @@ jest.unstable_mockModule('../dist/mcp/core/SessionStore.js', () => ({
       createSession,
       consumeTerminatedSession,
       getSessionLogger,
+      removeAllUserSessions,
     },
   },
 }));
@@ -117,6 +119,7 @@ describe('AuthMiddleware session reconnect grace', () => {
       logAuth: jest.fn(async () => {}),
       updateContext: jest.fn(),
     });
+    removeAllUserSessions.mockReset().mockResolvedValue(undefined);
     validateTraditionalToken.mockReset().mockImplementation(async () => authenticatedContext());
     validateOAuthToken.mockReset().mockResolvedValue({ valid: false, error: 'not oauth' });
     findAnonymousServers.mockReset().mockResolvedValue([]);
@@ -271,6 +274,73 @@ describe('AuthMiddleware session reconnect grace', () => {
     await middleware.refreshUserInfoIfNeeded(session);
 
     expect(updateAuthContext).toHaveBeenCalledWith(expect.objectContaining({ token: '[redacted]' }));
+  });
+
+  test('does not revoke every session when a foreign invalid JWT is presented', async () => {
+    const existingSession = {
+      authContext: authenticatedContext(),
+      userId: 'user-1',
+      token,
+      sessionId: 'live-session',
+      createdAt: new Date(),
+      isExpired: () => false,
+      getLastUserInfoRefresh: () => Date.now(),
+      touch: jest.fn(),
+    };
+    getSession.mockReturnValue(existingSession);
+    const middleware = new AuthMiddleware({ validateToken: validateTraditionalToken });
+    const req = {
+      method: 'POST',
+      body: initializeBody(),
+      headers: {
+        'mcp-session-id': 'live-session',
+        authorization: 'Bearer forged.header.signature',
+      },
+      originalUrl: '/mcp',
+      protocol: 'http',
+      get: jest.fn(() => 'localhost'),
+      query: {},
+    };
+    const res = mockResponse();
+
+    await middleware.authenticate(req, res, jest.fn());
+
+    expect(removeAllUserSessions).not.toHaveBeenCalled();
+    expect(validateOAuthToken).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
+  });
+
+  test('does not renew a session past its absolute lifetime', async () => {
+    const existingSession = {
+      authContext: authenticatedContext(),
+      userId: 'user-1',
+      token,
+      sessionId: 'expired-session',
+      createdAt: new Date(Date.now() - (24 * 60 * 60 * 1000 + 1)),
+      isExpired: () => true,
+      getLastUserInfoRefresh: () => Date.now(),
+      touch: jest.fn(),
+    };
+    getSession.mockReturnValue(existingSession);
+    const middleware = new AuthMiddleware({ validateToken: validateTraditionalToken });
+    const req = {
+      method: 'POST',
+      body: initializeBody(),
+      headers: {
+        'mcp-session-id': 'expired-session',
+        authorization: `Bearer ${token}`,
+      },
+      originalUrl: '/mcp',
+      protocol: 'http',
+      get: jest.fn(() => 'localhost'),
+      query: {},
+    };
+    const res = mockResponse();
+
+    await middleware.authenticate(req, res, jest.fn());
+
+    expect(removeAllUserSessions).toHaveBeenCalledWith('user-1', 'SESSION_TIMEOUT');
+    expect(res.status).toHaveBeenCalledWith(401);
   });
 
   test('anonymous public initialize can reuse a matching deleted session id', async () => {

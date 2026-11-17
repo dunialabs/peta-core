@@ -48,6 +48,16 @@ describe('ServerContext.recordTimeout', () => {
     getOwnerToken.mockReset().mockReturnValue('owner-token');
   });
 
+  test('normalizes partial capability maps after a configuration update', () => {
+    const context = new ServerContext(serverEntity());
+
+    context.updateCapabilitiesConfig(JSON.stringify({ tools: {} }));
+
+    expect(context.capabilitiesConfig).toEqual({ tools: {}, resources: {}, prompts: {} });
+    expect(context.getDangerLevel('missing-tool')).toBeUndefined();
+    expect(context.getToolDescription('missing-tool')).toBe('');
+  });
+
   test('awaits ping rejection and reconnects regular servers after repeated timeouts', async () => {
     const context = new ServerContext(serverEntity());
     context.timeoutCount = context.maxTimeoutCount - 1;
